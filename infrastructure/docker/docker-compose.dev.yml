@@ -1,0 +1,47 @@
+version: '3.9'
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CrimFig Local Dev Infrastructure
+#
+# Starts ONLY the infrastructure services (PostgreSQL + Redis).
+# NestJS/Next.js services run natively via `pnpm dev` for fast HMR.
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: crimfig_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: crimfig_auth
+      POSTGRES_USER: crimfig_user
+      POSTGRES_PASSWORD: crimfig_dev_password
+    ports:
+      - '5432:5432'
+    volumes:
+      - crimfig_postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U crimfig_user -d crimfig_auth']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: crimfig_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass crimfig_dev_redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - crimfig_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--no-auth-warning', '-a', 'crimfig_dev_redis', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  crimfig_postgres_data:
+  crimfig_redis_data:
