@@ -1,0 +1,8 @@
+packages:
+  # Core services
+  - "auth"
+  - "audit"
+  - "database"
+  - "shared"
+  # Feature APIs
+  - "api/*"
