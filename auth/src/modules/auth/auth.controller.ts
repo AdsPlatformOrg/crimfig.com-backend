@@ -1,8 +1,11 @@
-import { Controller, Post, Body, Req, Res, HttpCode, HttpStatus, UseGuards, Get } from '@nestjs/common';
+import {
+  Controller, Post, Get, Body, Query, Req, Res, HttpCode, HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
-import { AuthService } from './auth.service';
+import { AuthService, ForgotPasswordDto, ResetPasswordDto } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
@@ -14,6 +17,8 @@ import type { JwtPayload } from '../tokens/tokens.service';
 @Controller({ path: 'auth', version: '1' })
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  // ── Registration & Login ─────────────────────────────────────────────────
 
   @Post('signup')
   @ApiOperation({ summary: 'Create a new individual account' })
@@ -28,13 +33,12 @@ export class AuthController {
     const fingerprint = req.headers['x-device-fingerprint'] as string | undefined;
     const result = await this.authService.login(dto, fingerprint);
 
-    // Set refresh token as HttpOnly Secure cookie (not exposed to JS)
     if (!result.requiresMfa && 'refreshToken' in result) {
       res.cookie('crimfig_rt', result.refreshToken, {
         httpOnly: true,
-        secure: true,
+        secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        maxAge: 30 * 24 * 60 * 60 * 1000,
         path: '/api/v1/auth',
       });
     }
@@ -59,5 +63,39 @@ export class AuthController {
   @ApiOperation({ summary: 'Get current authenticated user' })
   getMe(@CurrentUser() user: JwtPayload) {
     return { userId: user.sub, email: user.email };
+  }
+
+  // ── Email Verification ───────────────────────────────────────────────────
+
+  @Get('verify-email')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verify email address from link in email' })
+  verifyEmail(@Query('token') token: string) {
+    return this.authService.verifyEmail(token);
+  }
+
+  @Post('resend-verification')
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Resend email verification link' })
+  resendVerification(@CurrentUser() user: JwtPayload) {
+    return this.authService.resendVerification(user.sub, user.email);
+  }
+
+  // ── Password Reset ───────────────────────────────────────────────────────
+
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Request a password reset email' })
+  forgotPassword(@Body() dto: ForgotPasswordDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset password using token from email' })
+  resetPassword(@Body() dto: ResetPasswordDto) {
+    return this.authService.resetPassword(dto);
   }
 }

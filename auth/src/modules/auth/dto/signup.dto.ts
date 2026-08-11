@@ -4,7 +4,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 export class SignupDto {
   @ApiProperty({ example: 'user@example.com' })
   @IsEmail({}, { message: 'Please provide a valid email address' })
-  email: string;
+  email!: string;
 
   @ApiProperty({ example: 'SecurePass123!' })
   @IsString()
@@ -13,7 +13,7 @@ export class SignupDto {
   @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[\W_]).+$/, {
     message: 'Password must contain uppercase, lowercase, number, and special character',
   })
-  password: string;
+  password!: string;
 
   @ApiPropertyOptional({ example: '+2348012345678' })
   @IsOptional()

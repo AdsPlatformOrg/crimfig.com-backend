@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, integer, boolean, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, integer, timestamp, pgEnum } from 'drizzle-orm/pg-core';
 
 export const orgStatusEnum = pgEnum('org_status', ['ACTIVE', 'SUSPENDED', 'PENDING', 'DELETED']);
 

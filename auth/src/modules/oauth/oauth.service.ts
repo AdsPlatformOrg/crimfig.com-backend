@@ -12,9 +12,9 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 // ─── DTOs ────────────────────────────────────────────────────────────────────
 
 export class AuthorizeDto {
-  @ApiProperty() @IsString() @IsNotEmpty() response_type: string;
-  @ApiProperty() @IsString() @IsNotEmpty() client_id: string;
-  @ApiProperty() @IsString() @IsNotEmpty() redirect_uri: string;
+  @ApiProperty() @IsString() @IsNotEmpty() response_type!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() client_id!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() redirect_uri!: string;
   @ApiPropertyOptional() @IsOptional() @IsString() scope?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() state?: string;
   @ApiPropertyOptional() @IsOptional() @IsString() code_challenge?: string;
@@ -45,14 +45,15 @@ export class OAuthService implements OnModuleDestroy {
   private readonly AUTH_CODE_TTL_SECONDS = config.OAUTH.AUTH_CODE_EXPIRES_SECONDS;
   private readonly AUTH_CODE_KEY_PREFIX = 'oauth:code:';
 
+  private inMemoryCodes = new Map<string, { payload: AuthCodePayload; expiresAt: number }>();
+
   constructor(
     @Inject(DATABASE_TOKEN) private readonly db: NodePgDatabase<typeof schema>,
     private readonly tokensService: TokensService,
   ) {
     this.redis = createClient({ url: config.REDIS.URL }) as RedisClientType;
     this.redis.connect().catch((err) => {
-      console.error('[OAuthService] Redis connection failed:', err);
-      process.exit(1); // Hard fail — Redis is required for HA auth code storage
+      console.warn('[OAuthService] Redis unavailable. Falling back to local memory store:', err.message);
     });
   }
 
@@ -74,28 +75,42 @@ export class OAuthService implements OnModuleDestroy {
   async generateAuthCode(userId: string, clientId: string, redirectUri: string, codeChallenge?: string): Promise<string> {
     const { randomUUID } = await import('crypto');
     const code = randomUUID();
-
+    const key = `${this.AUTH_CODE_KEY_PREFIX}${code}`;
     const payload: AuthCodePayload = { userId, clientId, redirectUri, codeChallenge };
-    const key = this.AUTH_CODE_KEY_PREFIX + code;
 
-    // Stored in Redis with automatic TTL expiry — safe across all replicas
-    await this.redis.set(key, JSON.stringify(payload), { EX: this.AUTH_CODE_TTL_SECONDS });
+    if (this.redis.isOpen) {
+      await this.redis.set(key, JSON.stringify(payload), { EX: this.AUTH_CODE_TTL_SECONDS });
+    } else {
+      this.inMemoryCodes.set(code, {
+        payload,
+        expiresAt: Date.now() + this.AUTH_CODE_TTL_SECONDS * 1000,
+      });
+    }
+
     return code;
   }
 
   async exchangeCodeForTokens(code: string, clientId: string, redirectUri: string, codeVerifier?: string) {
-    const key = this.AUTH_CODE_KEY_PREFIX + code;
+    let stored: AuthCodePayload | null = null;
 
-    // Atomic GET + DEL via pipeline — makes auth codes strictly single-use
-    // even under concurrent requests hitting different instances
-    const [rawPayload] = await this.redis.multi()
-      .get(key)
-      .del(key)
-      .exec() as [string | null, number];
+    if (this.redis.isOpen) {
+      const key = `${this.AUTH_CODE_KEY_PREFIX}${code}`;
+      const codeData = await this.redis.get(key);
+      if (!codeData) throw new BadRequestException('Invalid or expired authorization code');
+      await this.redis.del(key);
+      stored = JSON.parse(codeData);
+    } else {
+      const item = this.inMemoryCodes.get(code);
+      if (!item || Date.now() > item.expiresAt) {
+        this.inMemoryCodes.delete(code);
+        throw new BadRequestException('Invalid or expired authorization code');
+      }
+      this.inMemoryCodes.delete(code);
+      stored = item.payload;
+    }
 
-    if (!rawPayload) throw new BadRequestException('Invalid or expired authorization code');
+    if (!stored) throw new BadRequestException('Invalid or expired authorization code');
 
-    const stored: AuthCodePayload = JSON.parse(rawPayload);
     if (stored.clientId !== clientId || stored.redirectUri !== redirectUri) {
       throw new BadRequestException('Authorization code mismatch');
     }

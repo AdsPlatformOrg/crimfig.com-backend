@@ -5,7 +5,7 @@ dotenv.config();
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType, Logger, ShutdownSignal } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
-import * as cookieParser from 'cookie-parser';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { config } from './config/config';
@@ -26,7 +26,8 @@ async function bootstrap() {
 
   // ─── Security Middleware ───────────────────────────────────────────────────
   app.use(helmet());
-  app.use(cookieParser());
+  const cookieParserFn = (cookieParser as any).default || cookieParser;
+  app.use(cookieParserFn());
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
   app.enableCors({

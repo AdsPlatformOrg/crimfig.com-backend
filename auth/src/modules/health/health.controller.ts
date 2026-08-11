@@ -1,6 +1,5 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { Pool } from 'pg';
 import { DATABASE_TOKEN } from '../database/database.module';
 import { OAuthService } from '../oauth/oauth.service';
 

@@ -8,6 +8,7 @@ import { ConsentModule } from './modules/consent/consent.module';
 import { TokensModule } from './modules/tokens/tokens.module';
 import { DatabaseModule } from './modules/database/database.module';
 import { HealthModule } from './modules/health/health.module';
+import { EmailModule } from './modules/email/email.module';
 
 @Module({
   imports: [
@@ -18,16 +19,17 @@ import { HealthModule } from './modules/health/health.module';
     ]),
 
     // ─── Core Modules ─────────────────────────────────────────────────────
-    DatabaseModule,     // Drizzle ORM + PostgreSQL connection
+    DatabaseModule,     // Drizzle ORM + PostgreSQL connection (global)
+    EmailModule,        // Brevo transactional email (global)
     HealthModule,       // /api/health endpoint
 
     // ─── Feature Modules ─────────────────────────────────────────────────
-    AuthModule,         // Signup, Login, Email verification
+    AuthModule,         // Signup, Login, Email verification, Password reset
     OAuthModule,        // /oauth/authorize, /oauth/token, /oauth/userinfo
     TokensModule,       // JWT issuance, refresh, revocation
-    MfaModule,          // TOTP, FIDO2/WebAuthn setup
+    MfaModule,          // TOTP enrollment, verification, backup codes
     ConsentModule,      // App-specific Terms acceptance
-    OrganizationsModule, // Multi-owner org management
+    OrganizationsModule, // Multi-owner org management + email invites
   ],
 })
 export class AppModule {}

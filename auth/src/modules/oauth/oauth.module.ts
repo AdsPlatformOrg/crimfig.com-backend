@@ -7,5 +7,6 @@ import { TokensModule } from '../tokens/tokens.module';
   imports: [TokensModule],
   controllers: [OAuthController],
   providers: [OAuthService],
+  exports: [OAuthService],
 })
 export class OAuthModule {}

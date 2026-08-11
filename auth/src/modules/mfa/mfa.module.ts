@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
+import { MfaService } from './mfa.service';
+import { MfaController } from './mfa.controller';
 
-/**
- * MfaModule — Phase 1b
- * Handles TOTP setup/verify and FIDO2/WebAuthn passkey registration/authentication.
- * Placeholder — full implementation in Phase 1b sprint.
- */
-@Module({})
+@Module({
+  controllers: [MfaController],
+  providers: [MfaService],
+  exports: [MfaService],
+})
 export class MfaModule {}

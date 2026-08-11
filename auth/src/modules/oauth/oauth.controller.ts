@@ -9,10 +9,10 @@ import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 class TokenExchangeDto {
-  @ApiProperty() @IsString() @IsNotEmpty() grant_type: string;
-  @ApiProperty() @IsString() @IsNotEmpty() client_id: string;
-  @ApiProperty() @IsString() @IsNotEmpty() redirect_uri: string;
-  @ApiProperty() @IsString() @IsNotEmpty() code: string;
+  @ApiProperty() @IsString() @IsNotEmpty() grant_type!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() client_id!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() redirect_uri!: string;
+  @ApiProperty() @IsString() @IsNotEmpty() code!: string;
   @ApiProperty({ required: false }) @IsOptional() @IsString() code_verifier?: string;
 }
 

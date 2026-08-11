@@ -1,9 +1,10 @@
 import { Module } from '@nestjs/common';
+import { ConsentService } from './consent.service';
+import { ConsentController } from './consent.controller';
 
-/**
- * ConsentModule — Phase 1b
- * Handles per-app Terms of Service consent recording and version mismatch detection.
- * Placeholder — full implementation in Phase 1b sprint.
- */
-@Module({})
+@Module({
+  controllers: [ConsentController],
+  providers: [ConsentService],
+  exports: [ConsentService],
+})
 export class ConsentModule {}
