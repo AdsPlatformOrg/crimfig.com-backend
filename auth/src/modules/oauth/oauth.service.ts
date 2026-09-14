@@ -1,4 +1,4 @@
-import { Injectable, Inject, BadRequestException, NotFoundException, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Inject, BadRequestException, NotFoundException, ServiceUnavailableException, OnModuleDestroy } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { createClient, type RedisClientType } from 'redis';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -45,20 +45,20 @@ export class OAuthService implements OnModuleDestroy {
   private readonly AUTH_CODE_TTL_SECONDS = config.OAUTH.AUTH_CODE_EXPIRES_SECONDS;
   private readonly AUTH_CODE_KEY_PREFIX = 'oauth:code:';
 
-  private inMemoryCodes = new Map<string, { payload: AuthCodePayload; expiresAt: number }>();
-
   constructor(
     @Inject(DATABASE_TOKEN) private readonly db: NodePgDatabase<typeof schema>,
     private readonly tokensService: TokensService,
   ) {
     this.redis = createClient({ url: config.REDIS.URL }) as RedisClientType;
     this.redis.connect().catch((err) => {
-      console.warn('[OAuthService] Redis unavailable. Falling back to local memory store:', err.message);
+      console.error('[OAuthService] Redis connection error:', err.message);
     });
   }
 
   async onModuleDestroy() {
-    await this.redis.quit();
+    if (this.redis.isOpen) {
+      await this.redis.quit();
+    }
   }
 
   async validateClient(clientId: string, redirectUri: string) {
@@ -73,41 +73,29 @@ export class OAuthService implements OnModuleDestroy {
   }
 
   async generateAuthCode(userId: string, clientId: string, redirectUri: string, codeChallenge?: string): Promise<string> {
+    if (!this.redis.isOpen) {
+      throw new ServiceUnavailableException('Authentication service state store is temporarily unavailable');
+    }
+
     const { randomUUID } = await import('crypto');
     const code = randomUUID();
     const key = `${this.AUTH_CODE_KEY_PREFIX}${code}`;
     const payload: AuthCodePayload = { userId, clientId, redirectUri, codeChallenge };
 
-    if (this.redis.isOpen) {
-      await this.redis.set(key, JSON.stringify(payload), { EX: this.AUTH_CODE_TTL_SECONDS });
-    } else {
-      this.inMemoryCodes.set(code, {
-        payload,
-        expiresAt: Date.now() + this.AUTH_CODE_TTL_SECONDS * 1000,
-      });
-    }
-
+    await this.redis.set(key, JSON.stringify(payload), { EX: this.AUTH_CODE_TTL_SECONDS });
     return code;
   }
 
   async exchangeCodeForTokens(code: string, clientId: string, redirectUri: string, codeVerifier?: string) {
-    let stored: AuthCodePayload | null = null;
-
-    if (this.redis.isOpen) {
-      const key = `${this.AUTH_CODE_KEY_PREFIX}${code}`;
-      const codeData = await this.redis.get(key);
-      if (!codeData) throw new BadRequestException('Invalid or expired authorization code');
-      await this.redis.del(key);
-      stored = JSON.parse(codeData);
-    } else {
-      const item = this.inMemoryCodes.get(code);
-      if (!item || Date.now() > item.expiresAt) {
-        this.inMemoryCodes.delete(code);
-        throw new BadRequestException('Invalid or expired authorization code');
-      }
-      this.inMemoryCodes.delete(code);
-      stored = item.payload;
+    if (!this.redis.isOpen) {
+      throw new ServiceUnavailableException('Authentication service state store is temporarily unavailable');
     }
+
+    const key = `${this.AUTH_CODE_KEY_PREFIX}${code}`;
+    const codeData = await this.redis.get(key);
+    if (!codeData) throw new BadRequestException('Invalid or expired authorization code');
+    await this.redis.del(key);
+    const stored: AuthCodePayload = JSON.parse(codeData);
 
     if (!stored) throw new BadRequestException('Invalid or expired authorization code');
 

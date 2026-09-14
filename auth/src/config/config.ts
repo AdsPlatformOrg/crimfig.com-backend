@@ -29,11 +29,26 @@ export const config = {
     REFRESH_SECRET: required('JWT_REFRESH_SECRET'),
     ACCESS_EXPIRES_IN: process.env.JWT_ACCESS_EXPIRES_IN ?? '15m',
     REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN ?? '30d',
+    REFRESH_EXPIRES_DAYS: Number(process.env.JWT_REFRESH_EXPIRES_DAYS ?? 30),
+    MFA_CHALLENGE_EXPIRES_IN: process.env.JWT_MFA_CHALLENGE_EXPIRES_IN ?? '5m',
   },
 
   OAUTH: {
     ISSUER: process.env.OAUTH_ISSUER ?? 'https://auth.crimfig.com',
     AUTH_CODE_EXPIRES_SECONDS: Number(process.env.OAUTH_AUTH_CODE_EXPIRES_SECONDS ?? 300),
+  },
+
+  SECURITY: {
+    EMAIL_VERIFICATION_EXPIRES_IN: process.env.EMAIL_VERIFICATION_EXPIRES_IN ?? '5m',
+    PASSWORD_RESET_EXPIRES_IN: process.env.PASSWORD_RESET_EXPIRES_IN ?? '15m',
+    ORG_INVITE_EXPIRES_IN: process.env.ORG_INVITE_EXPIRES_IN ?? '7d',
+    COOKIE_DOMAIN: process.env.COOKIE_DOMAIN || undefined,
+  },
+
+  DEFAULTS: {
+    TIMEZONE: process.env.DEFAULT_TIMEZONE ?? 'Africa/Lagos',
+    COUNTRY: process.env.DEFAULT_COUNTRY ?? 'NG',
+    LOCALE: process.env.DEFAULT_LOCALE ?? 'en',
   },
 
   REDIS: {
@@ -52,7 +67,9 @@ export const config = {
 
   APP: {
     AUTH_WEB_URL: process.env.AUTH_WEB_URL ?? 'http://localhost:3000',
-    ALLOWED_ORIGINS: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(','),
+    ADS_WEB_URL: process.env.ADS_WEB_URL ?? 'http://localhost:3001',
+    CHAT_WEB_URL: process.env.CHAT_WEB_URL ?? 'http://localhost:3002',
+    ALLOWED_ORIGINS: (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000,http://localhost:3001,http://localhost:3002').split(','),
   },
 
   IS_PRODUCTION: process.env.NODE_ENV === 'production',

@@ -75,7 +75,7 @@ export class OrganizationsService {
         name: dto.name,
         slug: dto.slug,
         description: dto.description,
-        country: dto.country ?? 'NG',
+        country: dto.country ?? config.DEFAULTS.COUNTRY,
         ownerQuorumCount: 2,
         status: 'ACTIVE',
       })
@@ -149,10 +149,10 @@ export class OrganizationsService {
       columns: { email: true },
     });
 
-    // Generate invite token (JWT, 7 days expiry)
+    // Generate invite token (JWT, configurable expiry)
     const inviteToken = this.jwtService.sign(
       { orgId, email: dto.email, role: dto.role, purpose: 'org_invite' },
-      { secret: config.JWT.ACCESS_SECRET, expiresIn: '7d' },
+      { secret: config.JWT.ACCESS_SECRET, expiresIn: config.SECURITY.ORG_INVITE_EXPIRES_IN },
     );
 
     // Insert INVITED member record (userId may be null if not yet registered)

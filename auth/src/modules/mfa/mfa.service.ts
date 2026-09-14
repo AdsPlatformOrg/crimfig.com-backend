@@ -11,6 +11,8 @@ import { EmailService } from '../email/email.service';
 import { config } from '../../config/config';
 import { CrimfigLogger } from '@crimfig/shared';
 
+import { TokensService } from '../tokens/tokens.service';
+
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { authenticator } = require('otplib');
 
@@ -33,6 +35,7 @@ export class MfaService {
   constructor(
     @Inject(DATABASE_TOKEN) private readonly db: NodePgDatabase<typeof schema>,
     private readonly emailService: EmailService,
+    private readonly tokensService: TokensService,
   ) {
     this.encKey = Buffer.from(config.ENCRYPTION.KEY, 'hex');
     if (this.encKey.length !== 32) {
@@ -254,4 +257,23 @@ export class MfaService {
       backupCodesRemaining: backupDevices.length,
     };
   }
+
+  // ── Login Challenge Verification ─────────────────────────────────────────
+
+  async verifyLoginChallenge(
+    userId: string,
+    code: string,
+    clientId: string = 'crimfig_auth',
+    deviceFingerprint?: string,
+  ) {
+    const isValid = await this.verifyTotpCode(userId, code);
+    if (!isValid) {
+      throw new UnauthorizedException('Invalid or expired MFA code');
+    }
+
+    const tokens = await this.tokensService.issueTokenPair(userId, clientId, deviceFingerprint);
+    this.logger.audit('AUTH_LOGIN_MFA_SUCCESS', { userId });
+    return tokens;
+  }
 }
+

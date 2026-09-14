@@ -42,6 +42,19 @@ services:
       timeout: 3s
       retries: 5
 
+  nats:
+    image: nats:2-alpine
+    container_name: crimfig_nats
+    restart: unless-stopped
+    command: nats-server --jetstream --store_dir /data/nats
+    ports:
+      - '4222:4222'
+      - '8222:8222'
+    volumes:
+      - crimfig_nats_data:/data/nats
+
 volumes:
   crimfig_postgres_data:
   crimfig_redis_data:
+  crimfig_nats_data:
+

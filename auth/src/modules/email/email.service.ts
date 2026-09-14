@@ -65,19 +65,19 @@ export class EmailService {
       to,
       subject: 'Verify your CrimFig email address',
       htmlContent: `
-        <div style="font-family:sans-serif;max-width:560px;margin:0 auto;">
-          <h2 style="color:#1a1a2e;">Verify your email</h2>
+        <div style="font-family:'Poppins',Arial,sans-serif;max-width:560px;margin:0 auto;color:#171B2A;padding:24px;">
+          <h2 style="color:#171B2A;font-weight:700;">Verify your email</h2>
           <p>Hi${to.name ? ` ${to.name}` : ''},</p>
           <p>Click the button below to verify your email address. This link expires in <strong>5 minutes</strong>.</p>
           <p style="margin:32px 0;">
             <a href="${verifyUrl}"
-               style="background:#6c63ff;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;">
+               style="background:#D4143A;color:#ffffff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">
               Verify Email
             </a>
           </p>
-          <p style="color:#666;font-size:13px;">Or copy this URL: <code>${verifyUrl}</code></p>
-          <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
-          <p style="color:#999;font-size:12px;">If you did not create a CrimFig account, you can safely ignore this email.</p>
+          <p style="color:#6B7280;font-size:13px;">Or copy this URL: <code>${verifyUrl}</code></p>
+          <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0;">
+          <p style="color:#9CA3AF;font-size:12px;">If you did not create a CrimFig account, you can safely ignore this email.</p>
         </div>
       `,
     });
@@ -93,19 +93,19 @@ export class EmailService {
       to,
       subject: 'Reset your CrimFig password',
       htmlContent: `
-        <div style="font-family:sans-serif;max-width:560px;margin:0 auto;">
-          <h2 style="color:#1a1a2e;">Reset your password</h2>
+        <div style="font-family:'Poppins',Arial,sans-serif;max-width:560px;margin:0 auto;color:#171B2A;padding:24px;">
+          <h2 style="color:#171B2A;font-weight:700;">Reset your password</h2>
           <p>Hi${to.name ? ` ${to.name}` : ''},</p>
           <p>We received a request to reset the password for your CrimFig account. Click below — this link expires in <strong>15 minutes</strong>.</p>
           <p style="margin:32px 0;">
             <a href="${resetUrl}"
-               style="background:#e63946;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;">
+               style="background:#D4143A;color:#ffffff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">
               Reset Password
             </a>
           </p>
-          <p style="color:#666;font-size:13px;">Or copy this URL: <code>${resetUrl}</code></p>
-          <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
-          <p style="color:#999;font-size:12px;">If you did not request a password reset, your account is safe — no action is needed.</p>
+          <p style="color:#6B7280;font-size:13px;">Or copy this URL: <code>${resetUrl}</code></p>
+          <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0;">
+          <p style="color:#9CA3AF;font-size:12px;">If you did not request a password reset, your account is safe — no action is needed.</p>
         </div>
       `,
     });
@@ -127,19 +127,19 @@ export class EmailService {
       to: params.to,
       subject: `You've been invited to join ${params.orgName} on CrimFig`,
       htmlContent: `
-        <div style="font-family:sans-serif;max-width:560px;margin:0 auto;">
-          <h2 style="color:#1a1a2e;">Organisation Invitation</h2>
+        <div style="font-family:'Poppins',Arial,sans-serif;max-width:560px;margin:0 auto;color:#171B2A;padding:24px;">
+          <h2 style="color:#171B2A;font-weight:700;">Organisation Invitation</h2>
           <p>Hi${params.to.name ? ` ${params.to.name}` : ''},</p>
           <p><strong>${params.inviterName}</strong> has invited you to join <strong>${params.orgName}</strong> on CrimFig as a <strong>${params.role}</strong>.</p>
           <p style="margin:32px 0;">
             <a href="${acceptUrl}"
-               style="background:#06d6a0;color:#fff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;">
+               style="background:#D4143A;color:#ffffff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">
               Accept Invitation
             </a>
           </p>
-          <p style="color:#666;font-size:13px;">Or copy this URL: <code>${acceptUrl}</code></p>
-          <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
-          <p style="color:#999;font-size:12px;">If you did not expect this invitation, you can safely ignore this email.</p>
+          <p style="color:#6B7280;font-size:13px;">Or copy this URL: <code>${acceptUrl}</code></p>
+          <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0;">
+          <p style="color:#9CA3AF;font-size:12px;">If you did not expect this invitation, you can safely ignore this email.</p>
         </div>
       `,
     });
@@ -149,21 +149,22 @@ export class EmailService {
    * Send MFA backup codes to the user after TOTP enrollment.
    */
   async sendMfaBackupCodesEmail(to: { email: string; name?: string }, codes: string[]): Promise<void> {
-    const codeList = codes.map((c) => `<li style="font-family:monospace;font-size:15px;">${c}</li>`).join('');
+    const codeList = codes.map((c) => `<li style="font-family:monospace;font-size:15px;padding:4px 0;">${c}</li>`).join('');
     await this.send({
       to,
       subject: 'Your CrimFig MFA backup codes',
       htmlContent: `
-        <div style="font-family:sans-serif;max-width:560px;margin:0 auto;">
-          <h2 style="color:#1a1a2e;">Your MFA Backup Codes</h2>
+        <div style="font-family:'Poppins',Arial,sans-serif;max-width:560px;margin:0 auto;color:#171B2A;padding:24px;">
+          <h2 style="color:#171B2A;font-weight:700;">Your MFA Backup Codes</h2>
           <p>Hi${to.name ? ` ${to.name}` : ''},</p>
           <p>You have successfully enabled two-factor authentication. Store these backup codes in a safe place — each code can only be used <strong>once</strong> if you lose access to your authenticator app.</p>
-          <ul style="background:#f5f5f5;padding:20px 32px;border-radius:8px;">${codeList}</ul>
-          <p style="color:#e63946;font-weight:600;">⚠ Keep these codes private. Anyone with these codes can access your account.</p>
-          <hr style="border:none;border-top:1px solid #eee;margin:24px 0;">
-          <p style="color:#999;font-size:12px;">If you did not enable MFA on your account, contact support immediately.</p>
+          <ul style="background:#F5F6F8;padding:20px 32px;border-radius:8px;list-style-type:none;margin:16px 0;">${codeList}</ul>
+          <p style="color:#DC2626;font-weight:600;">⚠ Keep these codes private. Anyone with these codes can access your account.</p>
+          <hr style="border:none;border-top:1px solid #E5E7EB;margin:24px 0;">
+          <p style="color:#9CA3AF;font-size:12px;">If you did not enable MFA on your account, contact support immediately.</p>
         </div>
       `,
     });
   }
 }
+
