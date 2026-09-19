@@ -11,7 +11,9 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json turbo.js
 COPY shared/package.json ./shared/
 COPY database/package.json ./database/
 COPY auth/package.json ./auth/
+COPY audit/package.json ./audit/
 COPY api/ads-api/package.json ./api/ads-api/
+COPY api/billing-api/package.json ./api/billing-api/
 COPY api/chat-api/package.json ./api/chat-api/
 COPY api/notifications-api/package.json ./api/notifications-api/
 COPY api/reels-api/package.json ./api/reels-api/
