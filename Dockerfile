@@ -26,11 +26,15 @@ RUN pnpm install --no-frozen-lockfile
 COPY shared ./shared
 COPY database ./database
 COPY auth ./auth
+COPY api/ads-api ./api/ads-api
+COPY api/billing-api ./api/billing-api
 
 # Build packages in dependency order
 RUN pnpm --filter @crimfig/shared build
 RUN pnpm --filter @crimfig/database build
 RUN pnpm --filter @crimfig/auth-api build
+RUN pnpm --filter @crimfig/ads-api build
+RUN pnpm --filter @crimfig/billing-api build
 
 # Runner stage
 FROM node:22-alpine AS runner
