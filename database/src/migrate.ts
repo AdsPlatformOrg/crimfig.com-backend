@@ -25,7 +25,11 @@ export async function runMigrations() {
 
   const db = drizzle(pool);
 
-  const migrationsFolder = path.resolve(__dirname, '../migrations');
+  const fs = require('fs');
+  let migrationsFolder = path.resolve(__dirname, '../migrations');
+  if (!fs.existsSync(migrationsFolder)) {
+    migrationsFolder = path.resolve(__dirname, '../../migrations');
+  }
   console.log(`[Drizzle Migrate] Running migrations from: ${migrationsFolder}`);
 
   try {
