@@ -51,7 +51,7 @@ export class TokensService {
       columns: { id: true },
     });
 
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
+    const expiresAt = new Date(Date.now() + config.JWT.REFRESH_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
 
     await this.db.insert(schema.refreshTokens).values({
       userId,
@@ -119,7 +119,7 @@ export class TokensService {
     });
     return this.jwtService.sign(
       { sub: user!.id, email: user!.email, type: 'mfa_challenge' } as JwtPayload,
-      { secret: config.JWT.ACCESS_SECRET, expiresIn: '5m' },
+      { secret: config.JWT.ACCESS_SECRET, expiresIn: config.JWT.MFA_CHALLENGE_EXPIRES_IN },
     );
   }
 
@@ -127,3 +127,4 @@ export class TokensService {
     return this.jwtService.verify(token, { secret: config.JWT.ACCESS_SECRET });
   }
 }
+

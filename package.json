@@ -13,6 +13,8 @@
   "scripts": {
     "preinstall": "npx only-allow pnpm",
     "build": "turbo run build",
+    "db:generate": "pnpm --filter @crimfig/database db:generate",
+    "db:migrate": "pnpm --filter @crimfig/database db:migrate",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test",

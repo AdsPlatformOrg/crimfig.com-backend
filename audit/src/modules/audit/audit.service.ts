@@ -4,6 +4,7 @@ import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
 import { DATABASE_TOKEN } from '../database/database.module';
 import { connect, NatsConnection, StringCodec } from 'nats';
+import { config } from '../../config/config';
 
 export interface CreateAuditLogDto {
   userId?: string;
@@ -30,7 +31,7 @@ export class AuditService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   async onModuleInit() {
-    const natsUrl = process.env.NATS_URL || 'nats://localhost:4222';
+    const natsUrl = config.NATS.URL;
     try {
       this.nc = await connect({ servers: natsUrl });
       this.logger.log(`Connected to NATS server at ${natsUrl}`);

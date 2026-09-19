@@ -1,6 +1,6 @@
 import {
   Controller, Post, Get, Body, Query, Req, Res, HttpCode, HttpStatus,
-  UseGuards,
+  UseGuards, UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ThrottlerGuard } from '@nestjs/throttler';
@@ -8,8 +8,10 @@ import type { Request, Response } from 'express';
 import { AuthService, ForgotPasswordDto, ResetPasswordDto } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
 import { LoginDto } from './dto/login.dto';
+import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { CurrentUser } from '../../decorators/current-user.decorator';
+import { config } from '../../config/config';
 import type { JwtPayload } from '../tokens/tokens.service';
 
 @ApiTags('Auth')
@@ -36,14 +38,43 @@ export class AuthController {
     if (!result.requiresMfa && 'refreshToken' in result) {
       res.cookie('crimfig_rt', result.refreshToken, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: config.IS_PRODUCTION,
         sameSite: 'strict',
-        maxAge: 30 * 24 * 60 * 60 * 1000,
+        maxAge: config.JWT.REFRESH_EXPIRES_DAYS * 24 * 60 * 60 * 1000,
+        domain: config.SECURITY.COOKIE_DOMAIN,
         path: '/api/v1/auth',
       });
     }
 
     return result;
+  }
+
+  @Post('refresh')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Rotate and exchange refresh token for new token pair' })
+  async refresh(
+    @Body() dto: RefreshTokenDto,
+    @Req() req: Request,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const rt = dto.refreshToken || req.cookies?.crimfig_rt;
+    if (!rt) {
+      throw new UnauthorizedException('No refresh token provided');
+    }
+
+    const fingerprint = req.headers['x-device-fingerprint'] as string | undefined;
+    const tokens = await this.authService.refreshToken(rt, fingerprint);
+
+    res.cookie('crimfig_rt', tokens.refreshToken, {
+      httpOnly: true,
+      secure: config.IS_PRODUCTION,
+      sameSite: 'strict',
+      maxAge: config.JWT.REFRESH_EXPIRES_DAYS * 24 * 60 * 60 * 1000,
+      domain: config.SECURITY.COOKIE_DOMAIN,
+      path: '/api/v1/auth',
+    });
+
+    return tokens;
   }
 
   @Post('logout')
@@ -53,7 +84,10 @@ export class AuthController {
   @ApiOperation({ summary: 'Logout and revoke refresh token' })
   async logout(@CurrentUser() user: JwtPayload, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
     const rt = req.cookies?.crimfig_rt;
-    res.clearCookie('crimfig_rt', { path: '/api/v1/auth' });
+    res.clearCookie('crimfig_rt', {
+      domain: config.SECURITY.COOKIE_DOMAIN,
+      path: '/api/v1/auth',
+    });
     return this.authService.logout(user.sub, rt);
   }
 

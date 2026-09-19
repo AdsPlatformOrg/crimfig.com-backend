@@ -63,19 +63,24 @@ export class AuthService {
         email: dto.email.toLowerCase(),
         phone: dto.phone,
         passwordHash,
-        preferredLocale: dto.preferredLocale ?? 'en',
+        preferredLocale: dto.preferredLocale ?? config.DEFAULTS.LOCALE,
         status: 'PENDING_VERIFICATION',
       })
       .returning({ id: schema.users.id, email: schema.users.email });
 
     await this.db.insert(schema.individualProfiles).values({
       userId: user.id,
-      timezone: 'Africa/Lagos',
-      country: 'NG',
+      timezone: config.DEFAULTS.TIMEZONE,
+      country: config.DEFAULTS.COUNTRY,
     });
 
     // Send email verification (fire-and-forget — errors are logged internally)
-    const verificationToken = this.issueEmailToken(user.id, user.email, 'email_verify', '5m');
+    const verificationToken = this.issueEmailToken(
+      user.id,
+      user.email,
+      'email_verify',
+      config.SECURITY.EMAIL_VERIFICATION_EXPIRES_IN,
+    );
     await this.emailService.sendVerificationEmail({ email: user.email }, verificationToken);
 
     this.logger.audit('AUTH_SIGNUP', { userId: user.id });
@@ -129,6 +134,14 @@ export class AuthService {
     return { message: 'Logged out successfully' };
   }
 
+  // ── Refresh Token ─────────────────────────────────────────────────────────
+
+  async refreshToken(rawRefreshToken: string, deviceFingerprint?: string) {
+    const tokens = await this.tokensService.rotateRefreshToken(rawRefreshToken, deviceFingerprint);
+    return tokens;
+  }
+
+
   // ── Email Verification ────────────────────────────────────────────────────
 
   async verifyEmail(token: string) {
@@ -156,7 +169,12 @@ export class AuthService {
     if (!user) throw new BadRequestException('User not found');
     if (user.isEmailVerified) throw new BadRequestException('Email is already verified');
 
-    const token = this.issueEmailToken(userId, email, 'email_verify', '5m');
+    const token = this.issueEmailToken(
+      userId,
+      email,
+      'email_verify',
+      config.SECURITY.EMAIL_VERIFICATION_EXPIRES_IN,
+    );
     await this.emailService.sendVerificationEmail({ email }, token);
     return { message: 'Verification email resent' };
   }
@@ -171,7 +189,12 @@ export class AuthService {
     // Always return success — never reveal if email exists
     if (!user) return { message: 'If an account with this email exists, a reset link has been sent.' };
 
-    const token = this.issueEmailToken(user.id, user.email, 'password_reset', '15m');
+    const token = this.issueEmailToken(
+      user.id,
+      user.email,
+      'password_reset',
+      config.SECURITY.PASSWORD_RESET_EXPIRES_IN,
+    );
     await this.emailService.sendPasswordResetEmail({ email: user.email }, token);
 
     this.logger.audit('AUTH_PASSWORD_RESET_REQUESTED', { userId: user.id });

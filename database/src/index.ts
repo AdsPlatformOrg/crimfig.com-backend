@@ -3,21 +3,29 @@ import { Pool } from 'pg';
 import * as schema from '../schema';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
-// Database credentials are read from environment variables.
-// In application services, these are provided via each service's config.ts —
-// never read process.env directly in business logic outside of config files.
+// Supports both DATABASE_URL (standard in Railway/cloud) and discrete DB credentials.
 
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT ?? 5432),
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: true } : false,
-  max: 20,           // maximum pool connections
-  idleTimeoutMillis: 30_000,
-  connectionTimeoutMillis: 5_000,
-});
+const connectionString = process.env.DATABASE_URL;
+
+const pool = connectionString
+  ? new Pool({
+      connectionString,
+      ssl: process.env.DB_SSL === 'true' || connectionString.includes('railway') ? { rejectUnauthorized: false } : false,
+      max: Number(process.env.DB_POOL_MAX ?? 20),
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+    })
+  : new Pool({
+      host: process.env.DB_HOST || 'localhost',
+      port: Number(process.env.DB_PORT ?? 5432),
+      database: process.env.DB_NAME || 'crimfig_core',
+      user: process.env.DB_USER || 'postgres',
+      password: process.env.DB_PASSWORD || '',
+      ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+      max: Number(process.env.DB_POOL_MAX ?? 20),
+      idleTimeoutMillis: 30_000,
+      connectionTimeoutMillis: 5_000,
+    });
 
 // ─── Drizzle Instance ─────────────────────────────────────────────────────────
 export const db = drizzle(pool, { schema, logger: process.env.NODE_ENV !== 'production' });

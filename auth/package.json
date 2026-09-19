@@ -9,6 +9,7 @@
     "start": "node dist/auth/src/main",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "typecheck": "tsc --noEmit",
+    "swagger:export": "npx tsx scripts/export-swagger.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage"
