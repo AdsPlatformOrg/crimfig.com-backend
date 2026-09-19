@@ -176,22 +176,126 @@ background: linear-gradient(180deg, transparent 0%, rgba(23, 27, 42, 0.85) 100%)
 ## 7. Spacing & Layout System
 
 ### Base Unit: 4px
-All spacing values are multiples of `4px`.
+All spacing values are multiples of `4px` adhering to a strict geometric scale.
 
-| Token | Value | Use |
+| Token | Value (px / rem) | Use Case |
 |---|---|---|
-| `--space-1` | 4px | Micro spacing, icon gaps |
-| `--space-2` | 8px | Tight padding, small gaps |
-| `--space-3` | 12px | Input padding (vertical) |
-| `--space-4` | 16px | Standard card padding, list item padding |
-| `--space-5` | 20px | Section element spacing |
-| `--space-6` | 24px | Card padding, form field spacing |
-| `--space-8` | 32px | Section inner padding |
-| `--space-10` | 40px | Large section spacing |
-| `--space-12` | 48px | Page section gaps |
-| `--space-16` | 64px | Major section separators |
-| `--space-20` | 80px | Hero padding |
-| `--space-24` | 96px | Large hero / landing sections |
+| `--space-0` | 0px | Reset margins/padding |
+| `--space-1` | 4px / 0.25rem | Micro spacing, icon-to-text gap, badge padding (vertical) |
+| `--space-2` | 8px / 0.5rem | Tight padding, inline chip gaps, compact list item gaps |
+| `--space-3` | 12px / 0.75rem | Input vertical padding, table cell vertical padding, compact buttons |
+| `--space-4` | 16px / 1rem | **Default Base Spacing** — standard card padding, button horizontal padding, list item gaps |
+| `--space-5` | 20px / 1.25rem | Medium component padding, stack item gaps |
+| `--space-6` | 24px / 1.5rem | Card body padding, modal inner padding, form field vertical spacing |
+| `--space-8` | 32px / 2rem | Section inner padding, card grid gaps, dashboard widget gaps |
+| `--space-10` | 40px / 2.5rem | Large section spacing, container gutters on desktop |
+| `--space-12` | 48px / 3rem | Page section gaps, feature block separation |
+| `--space-16` | 64px / 4rem | Major section separators, landing page section blocks |
+| `--space-20` | 80px / 5rem | Hero block padding (vertical) |
+| `--space-24` | 96px / 6rem | Extended landing page hero / splash section padding |
+
+---
+
+### Padding Requirements (Component Level)
+
+Padding controls the internal breathing room within interactive elements and containers.
+
+#### 1. Buttons & Interactive Controls
+- **Compact / Small Button:** `--space-1` (4px) or `--space-2` (8px) vertical, `--space-3` (12px) horizontal.
+- **Standard Button (Default):** `--space-3` (12px) vertical, `--space-4` (16px) or `--space-5` (20px) horizontal. Minimum tap target height: **44px** (mobile accessibility).
+- **Large / CTA Button:** `--space-4` (16px) vertical, `--space-6` (24px) horizontal. Minimum height: **48px–52px**.
+- **Icon-Only Button:** Square aspect ratio. `--space-2` (8px) or `--space-3` (12px) uniform padding.
+
+#### 2. Form Inputs & Controls
+- **Text Inputs, Selects, Textareas:**
+  - Vertical padding: `--space-3` (12px).
+  - Horizontal padding: `--space-4` (16px).
+  - Prefix / Suffix icon inset: `--space-3` (12px) from edge.
+- **Checkboxes & Radios:** Hit target container padding of `--space-2` (8px) around the control.
+
+#### 3. Cards & Content Surfaces
+- **Compact Card (e.g. status widget, small metric):** `--space-3` (12px) or `--space-4` (16px) uniform padding.
+- **Standard Card (Default):** `--space-5` (20px) on mobile, `--space-6` (24px) on desktop.
+- **Feature / Hero Card:** `--space-6` (24px) on mobile, `--space-8` (32px) on desktop.
+- **Card Header / Footer Separation:** `--space-4` (16px) or `--space-5` (20px) vertical padding.
+
+#### 4. Modals, Dialogs & Drawers
+- **Modal Header:** `--space-5` (20px) horizontal, `--space-4` (16px) vertical.
+- **Modal Body:** `--space-6` (24px) uniform padding.
+- **Modal Footer (Action Bar):** `--space-4` (16px) vertical, `--space-6` (24px) horizontal.
+- **Bottom Sheet / Mobile Drawer:** Top padding `--space-4` (16px) with drag pill handle; side padding `--space-5` (20px).
+
+#### 5. Data Tables
+- **Header Cells (`<th>`):** `--space-3` (12px) vertical, `--space-4` (16px) horizontal.
+- **Body Cells (`<td>`):** `--space-3` (12px) vertical (dense) or `--space-4` (16px) vertical (comfortable), `--space-4` (16px) horizontal.
+
+---
+
+### Margin Requirements (External Spacing & Flow)
+
+Margins define separation between distinct siblings and structural page elements.
+
+#### 1. Typography Vertical Rhythms
+- **Headings (H1–H3):** Margin bottom `--space-2` (8px) or `--space-3` (12px). Top margin when preceded by content: `--space-6` (24px).
+- **Subheadings (H4–H6):** Margin bottom `--space-2` (8px). Top margin when preceded by content: `--space-4` (16px).
+- **Paragraphs / Body Copy:** Margin bottom `--space-4` (16px). Last child must have margin bottom `0`.
+- **Form Field Labels:** Margin bottom `--space-2` (8px) above the input.
+- **Form Field Error / Helper Text:** Margin top `--space-1` (4px) or `--space-2` (8px) below input.
+
+#### 2. Form Layout Margins
+- **Between adjacent form fields:** Vertical margin `--space-4` (16px) or `--space-5` (20px).
+- **Between form field groups / fieldsets:** Vertical margin `--space-6` (24px) or `--space-8` (32px).
+- **Form Submit Button:** Top margin `--space-6` (24px) above the action row.
+
+#### 3. Section Margins
+- **Page Header to Content:** Bottom margin `--space-6` (24px) on mobile, `--space-8` (32px) on desktop.
+- **Between major content sections:** Bottom margin `--space-10` (40px) to `--space-16` (64px).
+
+---
+
+### Gap Requirements (Flexbox & CSS Grid)
+
+Use native CSS `gap` for layout collections instead of margin hacks.
+
+#### 1. Inline & Row Layouts (Flexbox Row)
+- **Inline Badge / Tag Groups:** `gap: var(--space-2)` (8px).
+- **Icon + Text:** `gap: var(--space-2)` (8px). For compact badges: `gap: var(--space-1)` (4px).
+- **Button Groups (e.g., Cancel + Confirm):** `gap: var(--space-3)` (12px) on mobile, `gap: var(--space-4)` (16px) on desktop.
+- **Navigation Bar Items:** `gap: var(--space-6)` (24px) or `gap: var(--space-8)` (32px).
+- **Breadcrumb Items:** `gap: var(--space-2)` (8px).
+
+#### 2. Stack Layouts (Flexbox Column)
+- **Tight Stack (e.g. title + subtitle):** `gap: var(--space-1)` (4px).
+- **Standard Stack (e.g. list items, notifications):** `gap: var(--space-3)` (12px) or `gap: var(--space-4)` (16px).
+- **Form Vertical Stack:** `gap: var(--space-4)` (16px) or `gap: var(--space-5)` (20px).
+- **Settings / Preference Group Rows:** `gap: var(--space-4)` (16px).
+
+#### 3. Grid Layouts (CSS Grid)
+- **Card Grids (Dashboard / Marketplace / Ads):**
+  - Mobile (1 column): `gap: var(--space-4)` (16px).
+  - Tablet (2 columns): `gap: var(--space-5)` (20px).
+  - Desktop (3–4 columns): `gap: var(--space-6)` (24px) or `gap: var(--space-8)` (32px).
+- **Gallery / Media Thumbnails:** `gap: var(--space-2)` (8px) or `gap: var(--space-3)` (12px).
+- **Stats / Metric KPI Grid:** `gap: var(--space-4)` (16px) or `gap: var(--space-6)` (24px).
+
+---
+
+### Layout Containers & Viewport Gutters
+
+Every page must maintain consistent edge gutters to prevent content from touching viewport boundaries on mobile and wide displays.
+
+| Screen Size | Breakpoint | Container Max Width | Page Side Padding (Gutters) |
+|---|---|---|---|
+| Mobile (Compact) | `< 640px` | `100%` | `--space-4` (16px) |
+| Tablet (Medium) | `640px – 1024px` | `100%` | `--space-6` (24px) |
+| Desktop (Large) | `1024px – 1280px` | `1200px` | `--space-8` (32px) |
+| Wide / Ultra-wide | `> 1280px` | `1440px` | `--space-10` (40px) or centered |
+
+#### Dashboard Layout Structure
+- **Sidebar Width (Desktop):** `260px` fixed.
+- **Sidebar Padding:** `--space-4` (16px) horizontal, `--space-6` (24px) vertical.
+- **Top Header Bar Height:** `64px` fixed, with `--space-6` (24px) horizontal padding.
+- **Main Content Area:** Padding `--space-6` (24px) on tablet/mobile, `--space-8` (32px) on desktop.
 
 ---
 
@@ -220,19 +324,107 @@ All spacing values are multiples of `4px`.
 
 ---
 
-## 10. Dark Mode Considerations
+## 10. Theme & Mode Strategy: Light Theme by Default
 
-Crimfig apps should support a **dark mode** from the start. The base dark surface is `--color-fig-dark` (`#171B2A`) with layered dark gray surfaces above it.
+### ⚠️ Core Principle: White Background by Default
+> **CrimFig prioritizes a crisp, high-contrast white and soft-gray background across all web and mobile applications.**
+>
+> - **Default State:** All applications **must default to Light Theme** (`--color-white: #FFFFFF` and `--color-soft-gray: #F5F6F8`) on initial visit, regardless of operating system preference, unless the user has explicitly toggled and saved a preference.
+> - **Visual Hierarchy:** Light surfaces convey clarity, professionalism, and high readability in African ambient daylight conditions.
+> - **Dark Mode as an Opt-In Alternative:** Dark mode remains fully supported for night viewing and battery efficiency, but is never the default experience.
 
-| Role | Light Mode | Dark Mode |
-|---|---|---|
-| Page background | `#FFFFFF` | `#171B2A` |
-| Surface (cards) | `#F5F6F8` | `#1E2130` |
-| Surface elevated | `#FFFFFF` | `#2D3148` |
-| Primary text | `#171B2A` | `#F5F6F8` |
-| Secondary text | `#4A5068` | `#9CA3AF` |
-| Border | `#E5E7EB` | `#2D3148` |
-| Brand accent | `#D4143A` | `#E31B45` (slightly lighter for contrast) |
+---
+
+### Theme Surface & Semantic Roles
+
+| Role | Light Theme (**Default**) | Dark Theme (Opt-In) | Description |
+|---|---|---|---|
+| **Page Canvas / Body** | `#FFFFFF` (`--color-white`) | `#171B2A` (`--color-fig-dark`) | Main application backdrop |
+| **Card / Panel Surface** | `#F5F6F8` (`--color-soft-gray`) | `#1E2130` (`--color-gray-800`) | Standard card containers |
+| **Elevated Surface / Popovers** | `#FFFFFF` (`--color-white`) | `#2D3148` (`--color-gray-700`) | Modals, dropdowns, sticky headers |
+| **Primary Typography** | `#171B2A` (`--color-fig-dark`) | `#F5F6F8` (`--color-soft-gray`) | High-contrast readable text |
+| **Muted / Secondary Typography** | `#4A5068` (`--color-gray-600`) | `#9CA3AF` (`--color-gray-400`) | Subtitles, labels, timestamps |
+| **Dividers & Borders** | `#E5E7EB` (`--color-gray-200`) | `#2D3148` (`--color-gray-700`) | Subtle boundaries between items |
+| **Brand Accent / CTAs** | `#D4143A` (`--color-crimson`) | `#E31B45` (`--color-crimson-light`) | Action buttons, active badges |
+
+---
+
+### Footer Theme Switcher Requirement
+
+Every page with a footer **must provide an accessible, prominent Theme Switcher** allowing users to toggle between Light and Dark themes.
+
+#### 1. Placement & Layout
+- **Location:** Integrated directly into the page `<footer>` (typically in the bottom utility row alongside copyright, language selector, or status badges).
+- **Positioning:** Right-aligned on desktop, centered or stacked on mobile screens.
+- **Components Available:**
+  - **Pill Segmented Control:** Two segments labeled `Light` (with a Sun icon `☀️` / Lucide `Sun`) and `Dark` (with a Moon icon `🌙` / Lucide `Moon`).
+  - **Icon Toggle Button:** Single button displaying the alternate mode icon with accessible `aria-label="Switch to dark theme"` or `aria-label="Switch to light theme"`.
+
+#### 2. Functional Behavior & State Persistence
+1. **Initial Load:**
+   - Read saved preference from `localStorage.getItem('crimfig-theme')`.
+   - If not found, **default strictly to `'light'`**.
+   - Apply `data-theme="light"` (or `"dark"`) attribute on the root `<html>` or `<body>` element.
+2. **User Interaction:**
+   - On click, toggle between `'light'` and `'dark'`.
+   - Update `data-theme` attribute immediately without page reload.
+   - Persist selection to `localStorage.setItem('crimfig-theme', newTheme)` and/or cookie domain `.crimfig.com` for cross-subdomain synchronization.
+3. **Smooth Transition:**
+   - Apply `transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;` to root surfaces.
+
+#### 3. Standard Footer Theme Switcher Markup Pattern (React / Next.js)
+
+```tsx
+// Shared Footer Theme Switcher Component
+import { useEffect, useState } from 'react';
+import { Sun, Moon } from 'lucide-react';
+
+export function ThemeSwitcher() {
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  useEffect(() => {
+    const saved = (localStorage.getItem('crimfig-theme') as 'light' | 'dark') || 'light';
+    setTheme(saved);
+    document.documentElement.setAttribute('data-theme', saved);
+  }, []);
+
+  const toggleTheme = (newTheme: 'light' | 'dark') => {
+    setTheme(newTheme);
+    localStorage.setItem('crimfig-theme', newTheme);
+    document.documentElement.setAttribute('data-theme', newTheme);
+  };
+
+  return (
+    <div className="inline-flex items-center gap-1 p-1 bg-slate-100 dark:bg-slate-800 rounded-full border border-slate-200 dark:border-slate-700 text-xs font-medium">
+      <button
+        onClick={() => toggleTheme('light')}
+        className={`flex items-center gap-1.5 px-3 py-1 rounded-full transition-colors ${
+          theme === 'light'
+            ? 'bg-white text-slate-900 shadow-sm'
+            : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'
+        }`}
+        aria-label="Light mode"
+      >
+        <Sun className="w-3.5 h-3.5 text-amber-500" />
+        <span>Light</span>
+      </button>
+
+      <button
+        onClick={() => toggleTheme('dark')}
+        className={`flex items-center gap-1.5 px-3 py-1 rounded-full transition-colors ${
+          theme === 'dark'
+            ? 'bg-slate-900 text-white shadow-sm'
+            : 'text-slate-500 hover:text-slate-900 dark:text-slate-400'
+        }`}
+        aria-label="Dark mode"
+      >
+        <Moon className="w-3.5 h-3.5 text-indigo-400" />
+        <span>Dark</span>
+      </button>
+    </div>
+  );
+}
+```
 
 ---
 
