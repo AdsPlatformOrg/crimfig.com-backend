@@ -555,3 +555,133 @@ export const SPACING = {
   S12: 48, S16: 64, S20: 80, S24: 96,
 } as const;
 ```
+
+---
+
+## 14. Loading State & CSS Transition Rules
+
+When data is loading or asynchronous processes occur, interfaces must never freeze, flicker, or show raw dummy mockups. Instead, use standardized loading states.
+
+### 1. CSS Skeleton Shimmer Loading (Preferred Standard)
+For content blocks, cards, and data tables, use animated skeleton placeholders that mimic the geometry of incoming data.
+
+```css
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Light mode shimmer */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #F3F4F6 0%,
+    #E5E7EB 50%,
+    #F3F4F6 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite ease-in-out;
+  border-radius: var(--radius-md);
+}
+
+/* Dark mode shimmer */
+[data-theme="dark"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    #1E2130 0%,
+    #2D3148 50%,
+    #1E2130 100%
+  );
+  background-size: 200% 100%;
+}
+```
+
+### 2. Micro-Spinners & Button Loading
+- For action buttons undergoing submission, preserve the button size, disable clicks, and display a smooth spinning icon (`Loader2` from `lucide-react` with `animate-spin` or CSS equivalent).
+- Use crimson-tinted spinners on white surfaces (`border-t-crimson`) and white spinners on primary crimson buttons.
+
+```css
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(212, 20, 58, 0.2);
+  border-top-color: var(--color-crimson);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+```
+
+### 3. Transition Timing Standards
+- **Component Hover / Color Shift:** `150ms ease`
+- **Dropdowns / Popovers / Modals:** `200ms cubic-bezier(0.16, 1, 0.3, 1)`
+- **Theme Cross-Fade:** `200ms ease`
+- **Page / Tab Cross-Fade:** `250ms ease-out`
+
+---
+
+## 15. Empty State Design Patterns
+
+Empty states occur when a collection (campaigns, transactions, cards, websites) contains no items, either because a user is new or because a filter yielded no matches. **Never populate production landing screens with fake dummy cards.**
+
+### Anatomy of a Compliant Empty State
+1. **Contextual Icon Container:**
+   - Soft neutral circle (`w-14 h-14` or `w-16 h-16`), centered.
+   - Background: `--color-soft-gray` (`#F5F6F8`) in light mode; `--color-gray-800` (`#1E2130`) in dark mode.
+   - Icon: Single-tone muted icon (`--color-gray-500`) relevant to the resource (e.g. `CreditCard` for billing, `Layers` for campaigns, `Globe` for sites).
+2. **Clear Heading:**
+   - Font: Poppins 600 (SemiBold), `--text-h4` (18px) or `--text-body-lg` (16px).
+   - Text: Concise statement (e.g., *"No Active Campaigns Yet"*, *"No Transactions Recorded"*).
+3. **Helpful Explanatory Copy:**
+   - Font: Poppins 400 (Regular), `--text-body` (14px) or `--text-sm` (12px), muted color (`--color-gray-500`).
+   - Text: 1–2 sentences explaining what will appear here and how to start.
+4. **Primary Call-to-Action (CTA):**
+   - Direct button triggering creation or onboarding (e.g., *"+ Create First Campaign"*, *"+ Add Payment Card"*, *"+ Connect Website"*).
+   - Crimson brand styling (`--color-crimson`).
+
+### Empty State Reference Component (React / Tailwind)
+```tsx
+export function EmptyState({
+  icon: Icon,
+  title,
+  description,
+  actionLabel,
+  onAction,
+}: {
+  icon: any;
+  title: string;
+  description: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center p-8 md:p-12 text-center rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/30">
+      <div className="w-14 h-14 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 dark:text-slate-500 mb-4">
+        <Icon className="w-7 h-7" />
+      </div>
+      <h3 className="font-semibold text-slate-800 dark:text-slate-100 text-base mb-1">
+        {title}
+      </h3>
+      <p className="text-slate-500 dark:text-slate-400 text-sm max-w-sm mb-5">
+        {description}
+      </p>
+      {actionLabel && onAction && (
+        <button
+          onClick={onAction}
+          className="inline-flex items-center gap-2 px-4 py-2 bg-[#D4143A] hover:bg-[#A80F32] text-white text-sm font-medium rounded-lg shadow-sm transition-colors"
+        >
+          {actionLabel}
+        </button>
+      )}
+    </div>
+  );
+}
+```
