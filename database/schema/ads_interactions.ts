@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, integer, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, integer, boolean, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
 import { adsPlacements, adsPromoters } from './ads_promoters';
 
 /**
@@ -10,6 +10,8 @@ import { adsPlacements, adsPromoters } from './ads_promoters';
  * Events:
  *   impression    → ad was displayed (from embed.js or share link view)
  *   click         → user clicked the ad
+ *   hover         → user hovered over ad container (desktop engagement metric)
+ *   touch         → user touched/interacted with ad container (mobile gesture metric)
  *   share         → promoter shared the link on social media
  *   reels_view    → ad was viewed via Crimfig Reels (ref=reels)
  *   embed_ping    → embed.js fired on page load (verifies site is active)
@@ -21,6 +23,8 @@ import { adsPlacements, adsPromoters } from './ads_promoters';
 export const interactionTypeEnum = pgEnum('ads_interaction_type', [
   'impression',
   'click',
+  'hover',
+  'touch',
   'share',
   'reels_view',
   'embed_ping',
@@ -121,3 +125,40 @@ export type AdsPromoterEarning = typeof adsPromoterEarnings.$inferSelect;
 export type NewAdsPromoterEarning = typeof adsPromoterEarnings.$inferInsert;
 export type AdsReelsConsent = typeof adsReelsConsents.$inferSelect;
 export type NewAdsReelsConsent = typeof adsReelsConsents.$inferInsert;
+
+/**
+ * ads_embed_run_audits
+ *
+ * APPEND-ONLY immutable execution audit log.
+ * Logged each time embed.js or mobile SDK executes on a partner site/app.
+ * Used by the scheduled background cron job (every 30m - 1h) to verify
+ * partner domains/apps and detect fraudulent or spoofed traffic asynchronously.
+ */
+export const adsEmbedRunAudits = pgTable(
+  'ads_embed_run_audits',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    placementId: uuid('placement_id').references(() => adsPlacements.id, { onDelete: 'set null' }),
+    promoterId: uuid('promoter_id').references(() => adsPromoters.id, { onDelete: 'set null' }),
+    websiteId: uuid('website_id'),
+    appId: uuid('app_id'),
+    domain: varchar('domain', { length: 255 }),
+    bundleId: varchar('bundle_id', { length: 255 }),
+    ipAddress: varchar('ip_address', { length: 45 }),
+    userAgent: text('user_agent'),
+    referrer: text('referrer'),
+    runTimestamp: timestamp('run_timestamp', { withTimezone: true }).notNull().defaultNow(),
+    isProcessed: boolean('is_processed').notNull().default(false),
+    auditFlags: text('audit_flags'), // JSON flags e.g. domain_mismatch, rate_limit_flag
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ads_embed_run_audits_promoter_id_idx').on(t.promoterId),
+    index('ads_embed_run_audits_domain_idx').on(t.domain),
+    index('ads_embed_run_audits_is_processed_idx').on(t.isProcessed),
+    index('ads_embed_run_audits_created_at_idx').on(t.createdAt),
+  ],
+);
+
+export type AdsEmbedRunAudit = typeof adsEmbedRunAudits.$inferSelect;
+export type NewAdsEmbedRunAudit = typeof adsEmbedRunAudits.$inferInsert;

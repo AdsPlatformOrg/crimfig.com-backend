@@ -61,6 +61,7 @@ export class PromotersService {
     url: string;
     domain: string;
     verificationMethod: 'dns_txt' | 'html_file_and_meta_tag';
+    allowedCategories?: string[];
   }) {
     const verificationToken = `cf_verify_${crypto.randomBytes(16).toString('hex')}`;
 
@@ -73,6 +74,7 @@ export class PromotersService {
         verificationToken,
         verificationMethod: params.verificationMethod,
         verificationStatus: 'pending',
+        allowedCategories: params.allowedCategories ? JSON.stringify(params.allowedCategories) : null,
       })
       .returning();
 
@@ -91,6 +93,22 @@ export class PromotersService {
   }
 
   /**
+   * Update category filters for promoter profile
+   */
+  async updateCategories(promoterId: string, allowedCategories: string[]) {
+    const [updated] = await this.db
+      .update(adsPromoters)
+      .set({
+        allowedCategories: JSON.stringify(allowedCategories),
+        updatedAt: new Date(),
+      })
+      .where(eq(adsPromoters.id, promoterId))
+      .returning();
+
+    return updated;
+  }
+
+  /**
    * Register a mobile app for a promoter
    */
   async addMobileApp(promoterId: string, params: {
@@ -98,6 +116,7 @@ export class PromotersService {
     bundleId: string;
     platform: 'ios' | 'android' | 'both';
     storeUrl?: string;
+    allowedCategories?: string[];
   }) {
     const [app] = await this.db
       .insert(adsPromoterApps)
@@ -108,6 +127,7 @@ export class PromotersService {
         platform: params.platform,
         storeUrl: params.storeUrl,
         verificationStatus: 'pending',
+        allowedCategories: params.allowedCategories ? JSON.stringify(params.allowedCategories) : null,
       })
       .returning();
 

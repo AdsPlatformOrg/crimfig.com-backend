@@ -4,6 +4,15 @@ All significant changes, decisions, and agent actions are recorded here in rever
 
 ---
 
+## 2026-10-12
+- Completed and verified full execution of PLAN-0001 and PLAN-0002.
+- Implemented `BillingEcosystemClient`, `AdsEscrowService`, `AdsSettlementService`, and `AdsBillingController` in `ads-api`.
+- Established fixed 55/30/15 revenue split engine (55% publisher, 30% CrimFig platform base, 15% referral/marketing pool) in `billing.constants.ts`.
+- Implemented decoupled shared monetization architecture with 7 tables in `@crimfig/database` (`monetization_*`).
+- Integrated 30-min settlement cron worker and promoter privacy data shielding.
+- Generated Drizzle migrations `0001` through `0006`.
+- Verified typecheck and production build across all 10 backend packages.
+
 ## 2026-08-09
 
 - Repo split executed: `crimfig.com/backend/` promoted to standalone `crimfig/crimfig-backend` git repository.

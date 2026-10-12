@@ -36,6 +36,13 @@ export * from './billing_withdrawal_requests';
 // ─── Ads Platform ─────────────────────────────────────────────────────────────
 export * from './ads_campaigns';
 export * from './ads_creatives';
-export * from './ads_promoters';     // includes: adsPromoters, adsPromoterWebsites, adsPromoterApps, adsPlacements
-export * from './ads_interactions';  // includes: adsInteractions, adsPromoterEarnings, adsReelsConsents
+export * from './ads_promoters';                // includes: adsPromoters, adsPromoterWebsites, adsPromoterApps, adsPlacements
+export * from './ads_interactions';             // includes: adsInteractions, adsPromoterEarnings, adsReelsConsents, adsEmbedRunAudits
+export * from './ads_user_table_preferences';   // includes: adsUserTablePreferences
+export * from './ads_metrics_hourly';           // includes: adsMetricsHourly
+export * from './ads_campaign_escrows';          // includes: adsCampaignEscrows
+export * from './ads_settlement_batches';        // includes: adsSettlementBatches, adsPromoterSettlementItems
+
+// ─── Shared Ecosystem Monetization ───────────────────────────────────────────
+export * from './monetization';                 // includes: monetizationProducts, monetizationTiers, monetizationRevenuePolicies, monetizationAccountTiers, monetizationEarningEvents, monetizationSettlementEntries, monetizationCommissionRules
 

@@ -20,6 +20,18 @@ export const creativeStatusEnum = pgEnum('ads_creative_status', [
   'archived',
 ]);
 
+export const assetReviewStatusEnum = pgEnum('ads_asset_review_status', [
+  'pending',
+  'approved',
+  'rejected',
+]);
+
+export const creativeMediaFormatEnum = pgEnum('ads_creative_media_format', [
+  'image',
+  'gif',
+  'video',
+]);
+
 export const adsCreatives = pgTable(
   'ads_creatives',
   {
@@ -31,14 +43,19 @@ export const adsCreatives = pgTable(
     bodyText: text('body_text'),
     ctaText: varchar('cta_text', { length: 50 }).notNull().default('Learn More'),
 
-    // Asset URLs
+    // Asset URLs and format (Images, GIFs, Videos)
+    mediaFormat: creativeMediaFormatEnum('media_format').notNull().default('image'),
     imageUrl: text('image_url'),
     videoUrl: text('video_url'),
 
     // Where clicking the ad goes
     destinationUrl: text('destination_url').notNull(),
 
+    // Operational and Asset-Level Moderation Status
     status: creativeStatusEnum('status').notNull().default('active'),
+    reviewStatus: assetReviewStatusEnum('review_status').notNull().default('pending'),
+    rejectionReason: text('rejection_reason'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -46,6 +63,7 @@ export const adsCreatives = pgTable(
   (t) => [
     index('ads_creatives_campaign_id_idx').on(t.campaignId),
     index('ads_creatives_status_idx').on(t.status),
+    index('ads_creatives_review_status_idx').on(t.reviewStatus),
   ],
 );
 

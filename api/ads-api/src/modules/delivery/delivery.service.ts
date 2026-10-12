@@ -9,6 +9,7 @@ import {
   adsInteractions,
   adsPromoterEarnings,
   adsPromoterWebsites,
+  adsEmbedRunAudits,
 } from '@crimfig/database/schema';
 import { eq, sql } from 'drizzle-orm';
 
@@ -209,5 +210,91 @@ export class DeliveryService {
       .where(eq(adsCampaigns.id, placement.campaignId));
 
     return placement.destinationUrl;
+  }
+
+  /**
+   * Ultra-fast non-blocking execution audit logging for embed runs
+   */
+  async logAuditPing(params: {
+    placementToken?: string;
+    domain?: string;
+    bundleId?: string;
+    clientIp?: string;
+    userAgent?: string;
+    referrer?: string;
+  }) {
+    let placementId: string | undefined;
+    let promoterId: string | undefined;
+    let websiteId: string | undefined;
+    let appId: string | undefined;
+
+    if (params.placementToken) {
+      const [placement] = await this.db
+        .select({
+          id: adsPlacements.id,
+          promoterId: adsPlacements.promoterId,
+          websiteId: adsPlacements.websiteId,
+          appId: adsPlacements.appId,
+        })
+        .from(adsPlacements)
+        .where(eq(adsPlacements.placementToken, params.placementToken))
+        .limit(1);
+
+      if (placement) {
+        placementId = placement.id;
+        promoterId = placement.promoterId;
+        websiteId = placement.websiteId || undefined;
+        appId = placement.appId || undefined;
+      }
+    }
+
+    await this.db.insert(adsEmbedRunAudits).values({
+      placementId,
+      promoterId,
+      websiteId,
+      appId,
+      domain: params.domain ? params.domain.toLowerCase().trim() : null,
+      bundleId: params.bundleId ? params.bundleId.trim() : null,
+      ipAddress: params.clientIp,
+      userAgent: params.userAgent,
+      referrer: params.referrer,
+      runTimestamp: new Date(),
+      isProcessed: false,
+    });
+  }
+
+  /**
+   * Fast-path tracking for user engagement events (hover, touch, impression, click)
+   */
+  async logInteraction(params: {
+    placementToken: string;
+    type: 'hover' | 'touch' | 'impression' | 'click' | 'reels_view';
+    source?: string;
+    clientIp?: string;
+    userAgent?: string;
+    referrer?: string;
+  }) {
+    const [placement] = await this.db
+      .select({
+        id: adsPlacements.id,
+        promoterId: adsPlacements.promoterId,
+      })
+      .from(adsPlacements)
+      .where(eq(adsPlacements.placementToken, params.placementToken))
+      .limit(1);
+
+    if (!placement) {
+      return;
+    }
+
+    await this.db.insert(adsInteractions).values({
+      placementId: placement.id,
+      promoterId: placement.promoterId,
+      type: params.type,
+      source: params.source || 'embed',
+      actorIp: params.clientIp,
+      userAgent: params.userAgent,
+      referrer: params.referrer,
+    });
   }
 }

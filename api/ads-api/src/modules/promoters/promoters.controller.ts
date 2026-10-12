@@ -21,6 +21,9 @@ export class AddWebsiteDto {
 
   @IsIn(['dns_txt', 'html_file_and_meta_tag'])
   verificationMethod: 'dns_txt' | 'html_file_and_meta_tag';
+
+  @IsOptional()
+  allowedCategories?: string[];
 }
 
 export class AddMobileAppDto {
@@ -36,6 +39,9 @@ export class AddMobileAppDto {
   @IsOptional()
   @IsString()
   storeUrl?: string;
+
+  @IsOptional()
+  allowedCategories?: string[];
 }
 
 @ApiTags('Promoters')
@@ -93,6 +99,15 @@ export class PromotersController {
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'MOBILE_APP');
     const app = await this.promotersService.addMobileApp(promoter.id, dto);
     return { status: 'success', data: app };
+  }
+
+  @Put('categories')
+  @ApiOperation({ summary: 'Update allowed ad categories for promoter profile' })
+  async updateCategories(@Req() req: any, @Body('categories') categories: string[]) {
+    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const promoter = await this.promotersService.getOrCreatePromoter(userId);
+    const updated = await this.promotersService.updateCategories(promoter.id, categories || []);
+    return { status: 'success', data: updated };
   }
 
   @Get('reels-consent')

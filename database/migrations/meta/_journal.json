@@ -8,6 +8,48 @@
       "when": 1789820671836,
       "tag": "0000_modern_jocasta",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791661717910,
+      "tag": "0001_cultured_raza",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791672596217,
+      "tag": "0002_slippery_apocalypse",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1791673203248,
+      "tag": "0003_nappy_lilith",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1791673392833,
+      "tag": "0004_needy_genesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1791673809972,
+      "tag": "0005_bouncy_jane_foster",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791675886072,
+      "tag": "0006_far_tombstone",
+      "breakpoints": true
     }
   ]
 }

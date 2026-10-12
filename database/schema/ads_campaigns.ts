@@ -16,8 +16,12 @@ import { users } from './users';
  */
 export const campaignStatusEnum = pgEnum('ads_campaign_status', [
   'draft',
+  'under_review',
   'active',
   'paused',
+  'rejected',
+  'suspended',
+  'trash',
   'completed',
   'cancelled',
 ]);
@@ -40,6 +44,9 @@ export const adsCampaigns = pgTable(
 
     // Total budget allocated for this campaign (USD cents)
     budgetUsdCents: integer('budget_usd_cents').notNull(),
+
+    // Daily budget cap (USD cents, nullable if unconstrained)
+    dailyBudgetUsdCents: integer('daily_budget_usd_cents'),
 
     // Remaining budget (decremented as impressions/clicks are charged)
     remainingBudgetUsdCents: integer('remaining_budget_usd_cents').notNull(),

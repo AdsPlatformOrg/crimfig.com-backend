@@ -27,6 +27,8 @@ export const adsPromoters = pgTable(
     type: promoterTypeEnum('type').notNull(),
     displayName: varchar('display_name', { length: 100 }),
     bio: text('bio'),
+    // JSON array of category names allowed by this promoter
+    allowedCategories: text('allowed_categories'),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -77,6 +79,8 @@ export const adsPromoterWebsites = pgTable(
     lastVerificationAttemptAt: timestamp('last_verification_attempt_at', { withTimezone: true }),
     verificationErrorMessage: text('verification_error_message'),
     embedPingLastAt: timestamp('embed_ping_last_at', { withTimezone: true }),
+    // Category overrides specific to this website (JSON string, fallback to promoter default)
+    allowedCategories: text('allowed_categories'),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -106,6 +110,8 @@ export const adsPromoterApps = pgTable(
     storeUrl: text('store_url'),
     verificationStatus: verificationStatusEnum('verification_status').notNull().default('pending'),
     verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    // Category overrides specific to this mobile app
+    allowedCategories: text('allowed_categories'),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

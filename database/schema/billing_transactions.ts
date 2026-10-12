@@ -1,4 +1,4 @@
-import { pgTable, uuid, integer, text, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, integer, text, numeric, varchar, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { billingExchangeRates } from './billing_exchange_rates';
 
@@ -47,14 +47,22 @@ export const billingTransactions = pgTable(
     type: transactionTypeEnum('type').notNull(),
     status: transactionStatusEnum('status').notNull().default('pending'),
 
-    // All monetary amounts as integer cents (never floats)
+    // Monetary amounts as integer cents (never floats)
     amountUsdCents: integer('amount_usd_cents').notNull(),
+    grossAmountUsdCents: integer('gross_amount_usd_cents'),
+    feeAmountUsdCents: integer('fee_amount_usd_cents').default(0),
+    netAmountUsdCents: integer('net_amount_usd_cents'),
+
+    // Running balance audit snapshots
+    balanceBeforeUsdCents: integer('balance_before_usd_cents'),
+    balanceAfterUsdCents: integer('balance_after_usd_cents'),
 
     // NGN amount at the moment of the transaction (funding/withdrawal only, null for internal)
     amountNgnKobo: integer('amount_ngn_kobo'),
 
     // FK to the exact exchange rate snapshot used — permanently linked
     exchangeRateId: uuid('exchange_rate_id').references(() => billingExchangeRates.id),
+    exchangeRateNumeric: numeric('exchange_rate_numeric', { precision: 12, scale: 4 }),
 
     // PSP payment reference (Paystack reference, Stripe session ID, etc.)
     reference: text('reference').unique(),
@@ -64,7 +72,11 @@ export const billingTransactions = pgTable(
 
     provider: text('provider'),  // paystack | stripe | internal
 
-    // JSONB metadata: context-specific (subscription plan, campaign ID, etc.)
+    // Client execution provenance (security & fraud audit)
+    ipAddress: varchar('ip_address', { length: 45 }),
+    userAgent: text('user_agent'),
+
+    // JSONB metadata: context-specific (subscription plan, campaign ID, ratios snapshot, etc.)
     metadata: text('metadata'),  // JSON string for portability
 
     // Set on failure for display in transaction history
