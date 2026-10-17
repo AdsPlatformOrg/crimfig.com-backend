@@ -43,3 +43,4 @@ export async function checkDatabaseConnection(): Promise<boolean> {
 }
 
 export { schema };
+export { runMigrations } from './migrate';

@@ -10,7 +10,7 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { config } from './config/config';
 
-import { runMigrations } from '@crimfig/database/dist/src/migrate';
+import { runMigrations } from '@crimfig/database';
 
 const logger = new Logger('Bootstrap');
 
