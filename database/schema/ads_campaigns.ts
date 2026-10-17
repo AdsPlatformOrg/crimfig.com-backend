@@ -64,9 +64,13 @@ export const adsCampaigns = pgTable(
     remainingBudgetUsdCents: bigint('remaining_budget_usd_cents', { mode: 'number' }).notNull(),
 
     // Pricing model per event type
-    pricingModel: varchar('pricing_model', { length: 20 }).notNull().default('cpm'), // 'cpm' | 'cpc'
+    pricingModel: varchar('pricing_model', { length: 20 }).notNull().default('cpm'), // 'cpm' | 'cpc' | 'cpa' | 'cpcv'
     costPerImpressionUsdCents: bigint('cost_per_impression_usd_cents', { mode: 'number' }).notNull().default(1), // $0.01
     costPerClickUsdCents: bigint('cost_per_click_usd_cents', { mode: 'number' }).notNull().default(10),          // $0.10
+    targetCpaUsdCents: bigint('target_cpa_usd_cents', { mode: 'number' }),
+    targetCpcvUsdCents: bigint('target_cpcv_usd_cents', { mode: 'number' }),
+    attributionClickDays: smallint('attribution_click_days').notNull().default(7),
+    attributionViewDays: smallint('attribution_view_days').notNull().default(0),
 
     format: adFormatEnum('format').notNull().default('card'),
 

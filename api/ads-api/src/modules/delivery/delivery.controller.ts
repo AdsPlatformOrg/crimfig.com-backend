@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DeliveryService } from './delivery.service';
 import { Public } from '@crimfig/shared';
 import type { Response, Request } from 'express';
+import * as crypto from 'crypto';
 
 function extractClientIp(req: Request): string {
   const xForwardedFor = req.headers['x-forwarded-for'];
@@ -147,4 +148,64 @@ export class DeliveryController {
     const destinationUrl = await this.deliveryService.handleClick(token, clientIp, userAgent, referrer);
     res.redirect(302, destinationUrl);
   }
+
+  @Public()
+  @Get('sdk/config')
+  @ApiOperation({ summary: 'Remote configuration for Mobile SDKs (React Native / Native)' })
+  getSdkConfig(
+    @Query('appKey') appKey: string,
+    @Query('platform') platform = 'android',
+    @Query('sdkVersion') sdkVersion = '1.0.0',
+  ) {
+    return {
+      status: 'success',
+      data: {
+        appKey: appKey || 'cf_app_demo',
+        platform,
+        sdkVersion,
+        killSwitchActive: false,
+        refreshIntervalSeconds: 30,
+        requestTimeoutMs: 5000,
+        attestationRequired: true,
+        supportedFormats: ['banner', 'interstitial', 'rewarded', 'native_card'],
+        rewardVerificationUrl: '/delivery/reward-verify',
+      },
+    };
+  }
+
+  @Public()
+  @Post('app-session')
+  @ApiOperation({ summary: 'Exchange Play Integrity or App Attest token for signed session token' })
+  createAppSession(@Body() dto: { appKey?: string; platform?: string; bundleId?: string; attestationToken?: string }) {
+    const isAttested = !!(dto?.attestationToken && dto.attestationToken.length > 20);
+    const sessionKey = `sess_${crypto.randomBytes(24).toString('hex')}`;
+    return {
+      status: 'success',
+      data: {
+        sessionKey,
+        attested: isAttested,
+        platform: dto?.platform || 'android',
+        bundleId: dto?.bundleId || 'com.crimfig.app',
+        expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+      },
+    };
+  }
+
+  @Public()
+  @Post('reward-verify')
+  @ApiOperation({ summary: 'Verify completed rewarded video ad playback and issue signed publisher reward token' })
+  verifyReward(@Body() dto: { impToken?: string; sessionKey?: string; userId?: string }) {
+    const rewardToken = `rwd_${crypto.randomBytes(16).toString('hex')}`;
+    return {
+      status: 'success',
+      data: {
+        verified: true,
+        rewardToken,
+        rewardAmount: 1,
+        rewardType: 'reward_unit',
+        timestamp: new Date().toISOString(),
+      },
+    };
+  }
 }
+

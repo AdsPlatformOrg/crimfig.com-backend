@@ -44,6 +44,7 @@ export * from './ads_campaign_escrows';          // includes: adsCampaignEscrows
 export * from './ads_settlement_batches';        // includes: adsSettlementBatches, adsPromoterSettlementItems
 export * from './ads_serves_and_assets';         // includes: adsMediaAssets, adsServes, adsModerationDecisions
 export * from './ads_conversions';               // includes: adsClicks, adsConversions, adsAdvertiserApiKeys
+export * from './ads_disputes';                  // includes: adsDisputes, disputeRoleEnum, disputeStatusEnum
 
 // ─── Shared Ecosystem Monetization ───────────────────────────────────────────
 export * from './monetization';                 // includes: monetizationProducts, monetizationTiers, monetizationRevenuePolicies, monetizationAccountTiers, monetizationEarningEvents, monetizationSettlementEntries, monetizationCommissionRules

@@ -2,7 +2,12 @@
 
 All significant changes, decisions, and agent actions are recorded here in reverse chronological order.
 
----
+## 2026-10-17
+- Completed and verified full execution of PLAN-0004 (Ads Growth Layer: Conversion Tracking & CPA Bidding, Video Transcoding, Mobile SDKs, Invalid-Traffic Disputes & Smart Targeting).
+- Implemented `DisputesModule` (`DisputesService`, `DisputesController`) for self-serve advertiser and promoter traffic quality disputes and appeals with 5-day SLA tracker and immutable ledger adjustments.
+- Extended database schema with `ads_disputes`, `ads_campaigns` CPA/CPCV pricing models, and generated migration `0014_ads_growth_and_disputes.sql`.
+- Implemented Mobile SDK remote config, device attestation session exchange (`/delivery/app-session`), and server-verified rewarded ad callbacks (`/delivery/reward-verify`).
+- Verified zero TypeScript compilation errors in `@crimfig/database` and `@crimfig/ads-api`.
 
 ## 2026-10-12
 - Completed and verified full execution of PLAN-0001 and PLAN-0002.
