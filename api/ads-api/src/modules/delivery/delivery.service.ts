@@ -59,7 +59,7 @@ export class DeliveryService {
       var ad = data.data;
 
       var card = document.createElement('div');
-      card.style.cssText = 'border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:\"Poppins\",Arial,Helvetica,sans-serif;max-width:400px;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;';
+      card.style.cssText = "border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:'Poppins',Arial,Helvetica,sans-serif;max-width:400px;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;";
 
       var badge = document.createElement('div');
       badge.style.cssText = 'font-size:10px;text-transform:uppercase;color:#94a3b8;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;letter-spacing:0.05em;';

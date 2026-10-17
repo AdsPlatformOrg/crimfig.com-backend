@@ -289,7 +289,7 @@ export class ConversionsService {
   async getConversions(advertiserId: string, options?: { campaignId?: string; limit?: number }) {
     const limit = options?.limit || 50;
 
-    let query = this.db
+    const query = this.db
       .select()
       .from(adsConversions)
       .where(eq(adsConversions.advertiserId, advertiserId))

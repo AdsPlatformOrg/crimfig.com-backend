@@ -225,7 +225,7 @@ export class DeferredAuditService {
       }
 
       let totalRebatesCents = 0;
-      let totalPenaltiesCents = 0;
+      const totalPenaltiesCents = 0;
 
       // Invalidate flagged clicks in DB
       if (invalidatedIds.length > 0) {
@@ -337,7 +337,7 @@ export class DeferredAuditService {
       // Find promoter with excessive repeat invalid rate across 15/30 days
       const promoters = await this.db.select().from(adsPromoters).limit(5);
       let totalPenaltiesIssued = 0;
-      let totalRebatesIssued = 0;
+      const totalRebatesIssued = 0;
 
       for (const promoter of promoters) {
         // Mock audit evaluation: check for bounce patterns
