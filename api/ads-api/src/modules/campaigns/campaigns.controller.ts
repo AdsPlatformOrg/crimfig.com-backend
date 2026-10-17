@@ -32,6 +32,26 @@ export class CreateCampaignDto {
   @IsOptional()
   @IsIn(['banner', 'card', 'video', 'interstitial'])
   format?: 'banner' | 'card' | 'video' | 'interstitial';
+
+  @IsOptional()
+  @IsIn(['cpm', 'cpc'])
+  pricingModel?: 'cpm' | 'cpc';
+
+  @IsOptional()
+  targetCountries?: string[];
+
+  @IsOptional()
+  targetStates?: string[];
+
+  @IsOptional()
+  targetDevices?: string[];
+
+  @IsOptional()
+  targetHours?: number[];
+
+  @IsOptional()
+  @IsNumber()
+  frequencyCapPerDay?: number;
 }
 
 export class AddCreativeDto {
@@ -56,6 +76,10 @@ export class AddCreativeDto {
   @IsOptional()
   @IsString()
   videoUrl?: string;
+
+  @IsOptional()
+  @IsIn(['banner', 'card', 'video', 'interstitial'])
+  adFormat?: 'banner' | 'card' | 'video' | 'interstitial';
 
   @IsOptional()
   @IsIn(['image', 'gif', 'video'])
@@ -86,6 +110,10 @@ export class ReplaceCreativeDto {
   @IsOptional()
   @IsString()
   videoUrl?: string;
+
+  @IsOptional()
+  @IsIn(['banner', 'card', 'video', 'interstitial'])
+  adFormat?: 'banner' | 'card' | 'video' | 'interstitial';
 
   @IsOptional()
   @IsIn(['image', 'gif', 'video'])
@@ -124,9 +152,16 @@ export class CampaignsController {
       title: dto.title,
       description: dto.description,
       budgetUsd: dto.budgetUsd,
+      dailyBudgetUsd: dto.dailyBudgetUsd,
       costPerImpressionCents: dto.costPerImpressionCents,
       costPerClickCents: dto.costPerClickCents,
+      pricingModel: dto.pricingModel,
       format: dto.format,
+      targetCountries: dto.targetCountries,
+      targetStates: dto.targetStates,
+      targetDevices: dto.targetDevices,
+      targetHours: dto.targetHours,
+      frequencyCapPerDay: dto.frequencyCapPerDay,
     });
     return { status: 'success', data: campaign };
   }

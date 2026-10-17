@@ -1,0 +1,1 @@
+ALTER TABLE "ads_creatives" ADD COLUMN "ad_format" "ads_format" DEFAULT 'card' NOT NULL;

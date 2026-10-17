@@ -2,6 +2,7 @@ import { Controller, Get, Post, Body, Param, Query, Req, UseGuards } from '@nest
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AdsEscrowService } from './ads-escrow.service';
 import { AdsSettlementService } from './ads-settlement.service';
+import { DeferredAuditService } from './deferred-audit.service';
 import { IsString, IsNumber, Min, IsOptional } from 'class-validator';
 
 export class LockCampaignEscrowDto {
@@ -32,6 +33,7 @@ export class AdsBillingController {
   constructor(
     private readonly escrowService: AdsEscrowService,
     private readonly settlementService: AdsSettlementService,
+    private readonly auditService: DeferredAuditService,
   ) {}
 
   @Get('overview')
@@ -93,5 +95,47 @@ export class AdsBillingController {
   async triggerSettlement() {
     const batch = await this.settlementService.processPendingSettlement();
     return { status: 'success', message: 'Batch reconciliation completed', data: batch };
+  }
+
+  @Get('audits')
+  @ApiOperation({ summary: 'List multi-tier deep audit runs (Tier 2 6h, Tier 3 15d/30d)' })
+  async getAuditRuns(@Query('limit') limit = '20') {
+    const data = await this.auditService.getAuditRuns(Number(limit));
+    return { status: 'success', data };
+  }
+
+  @Get('rebates')
+  @ApiOperation({ summary: 'List advertiser rebates issued by deep fraud audits' })
+  async getRebates(@Query('campaignId') campaignId?: string) {
+    const data = await this.auditService.getRebates(campaignId);
+    return { status: 'success', data };
+  }
+
+  @Get('penalties')
+  @ApiOperation({ summary: 'List promoter retrospective fraud penalties' })
+  async getPenalties(@Query('promoterId') promoterId?: string) {
+    const data = await this.auditService.getPromoterPenalties(promoterId);
+    return { status: 'success', data };
+  }
+
+  @Post('audits/trigger-6h')
+  @ApiOperation({ summary: 'Trigger Tier-2 6-hour deep macro audit (72h rolling lookback)' })
+  async trigger6HourAudit() {
+    const run = await this.auditService.runTier2DeepMacroAudit({ lookbackHours: 72 });
+    return { status: 'success', message: 'Tier-2 72h Deep Audit Completed', data: run };
+  }
+
+  @Post('audits/trigger-clearance')
+  @ApiOperation({ summary: 'Trigger 72-hour clearance graduation for pending promoter earnings' })
+  async triggerClearanceGraduation() {
+    const result = await this.auditService.graduateClearedEarnings();
+    return { status: 'success', message: '72-Hour Clearance Graduation Completed', data: result };
+  }
+
+  @Post('audits/trigger-extended')
+  @ApiOperation({ summary: 'Trigger Tier-3 extended audit (15d or 30d)' })
+  async triggerExtendedAudit(@Query('level') level: 'tier3_15d' | 'tier3_30d' = 'tier3_15d') {
+    const run = await this.auditService.runTier3ExtendedAudit(level);
+    return { status: 'success', message: `Tier-3 ${level} Audit Completed`, data: run };
   }
 }

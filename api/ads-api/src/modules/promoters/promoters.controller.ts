@@ -127,4 +127,13 @@ export class PromotersController {
     const updated = await this.promotersService.setReelsConsent(promoter.id, consent);
     return { status: 'success', data: updated };
   }
+
+  @Get('quality')
+  @ApiOperation({ summary: 'Get promoter trust score and invalid traffic breakdown' })
+  async getQuality(@Req() req: any) {
+    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const promoter = await this.promotersService.getOrCreatePromoter(userId);
+    const quality = await this.promotersService.getQualityMetrics(promoter.id);
+    return { status: 'success', data: quality };
+  }
 }

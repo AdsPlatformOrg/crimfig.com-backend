@@ -176,7 +176,7 @@ export class DeferredAuditService {
     // Process interactions from the last 2 hours to catch recent activity
     const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
 
-    // Group recent interactions by placement and hourly bucket
+    // Group recent interactions by placement and hourly bucket - ONLY valid events
     const recentInteractions = await this.db
       .select({
         placementId: adsInteractions.placementId,
@@ -186,7 +186,12 @@ export class DeferredAuditService {
         hourBucket: sql<string>`date_trunc('hour', ${adsInteractions.createdAt})`,
       })
       .from(adsInteractions)
-      .where(gte(adsInteractions.createdAt, cutoff))
+      .where(
+        and(
+          gte(adsInteractions.createdAt, cutoff),
+          eq(adsInteractions.isValid, true),
+        ),
+      )
       .groupBy(
         adsInteractions.placementId,
         adsInteractions.promoterId,
@@ -218,7 +223,7 @@ export class DeferredAuditService {
 
       if (!placement) continue;
 
-      const isImpression = record.type === 'impression';
+      const isImpression = record.type === 'impression' || record.type === 'viewable_impression';
       const isClick = record.type === 'click';
       const isHover = record.type === 'hover';
       const isTouch = record.type === 'touch';
@@ -228,8 +233,12 @@ export class DeferredAuditService {
       const hoverCount = isHover ? record.count : 0;
       const touchCount = isTouch ? record.count : 0;
 
-      const spend = impressionCount * placement.costPerImpression + clickCount * placement.costPerClick;
-      const earnings = Math.round(spend * 0.7);
+      const spend = Math.round(
+        (impressionCount * Number(placement.costPerImpression) / 1000) +
+        (clickCount * Number(placement.costPerClick))
+      );
+      // Apply strict 55/30/15 publisher split
+      const earnings = Math.round(spend * 0.55);
 
       // Upsert into adsMetricsHourly
       await this.db

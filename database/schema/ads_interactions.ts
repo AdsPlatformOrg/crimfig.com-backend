@@ -22,11 +22,16 @@ import { adsPlacements, adsPromoters } from './ads_promoters';
  */
 export const interactionTypeEnum = pgEnum('ads_interaction_type', [
   'impression',
+  'viewable_impression',
   'click',
   'hover',
   'touch',
   'share',
   'reels_view',
+  'video_q25',
+  'video_q50',
+  'video_q75',
+  'video_complete',
   'embed_ping',
   'conversion',
 ]);
@@ -38,7 +43,14 @@ export const adsInteractions = pgTable(
     placementId: uuid('placement_id').notNull().references(() => adsPlacements.id, { onDelete: 'restrict' }),
     promoterId: uuid('promoter_id').notNull().references(() => adsPromoters.id, { onDelete: 'restrict' }),
 
+    // Optional link to initial auction resolution serve record
+    serveId: uuid('serve_id'),
+
     type: interactionTypeEnum('type').notNull(),
+
+    // Anti-Fraud & Quality Verification Flags
+    isValid: boolean('is_valid').notNull().default(true),
+    invalidReason: varchar('invalid_reason', { length: 50 }),
 
     // Source of the interaction (embed | share_link | reels | direct)
     source: varchar('source', { length: 30 }),
@@ -55,6 +67,8 @@ export const adsInteractions = pgTable(
   (t) => [
     index('ads_interactions_placement_id_idx').on(t.placementId),
     index('ads_interactions_promoter_id_idx').on(t.promoterId),
+    index('ads_interactions_serve_id_idx').on(t.serveId),
+    index('ads_interactions_is_valid_idx').on(t.isValid),
     index('ads_interactions_type_idx').on(t.type),
     index('ads_interactions_created_at_idx').on(t.createdAt),
   ],

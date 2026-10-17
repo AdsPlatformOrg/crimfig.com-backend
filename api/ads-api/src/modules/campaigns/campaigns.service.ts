@@ -24,9 +24,16 @@ export class CampaignsService {
     title: string;
     description?: string;
     budgetUsd: number;
+    dailyBudgetUsd?: number;
     costPerImpressionCents?: number;
     costPerClickCents?: number;
+    pricingModel?: 'cpm' | 'cpc';
     format?: 'banner' | 'card' | 'video' | 'interstitial';
+    targetCountries?: string[];
+    targetStates?: string[];
+    targetDevices?: string[];
+    targetHours?: number[];
+    frequencyCapPerDay?: number;
     targeting?: any;
     startsAt?: Date;
     endsAt?: Date;
@@ -36,6 +43,8 @@ export class CampaignsService {
     }
 
     const budgetCents = Math.round(params.budgetUsd * 100);
+    const dailyBudgetCents = params.dailyBudgetUsd ? Math.round(params.dailyBudgetUsd * 100) : null;
+    const hourlyPacingCents = dailyBudgetCents ? Math.ceil(dailyBudgetCents / 24) : null;
 
     const [campaign] = await this.db
       .insert(adsCampaigns)
@@ -44,18 +53,27 @@ export class CampaignsService {
         title: params.title,
         description: params.description,
         budgetUsdCents: budgetCents,
+        dailyBudgetUsdCents: dailyBudgetCents,
+        hourlyPacingUsdCents: hourlyPacingCents,
         remainingBudgetUsdCents: budgetCents,
+        pricingModel: params.pricingModel || 'cpm',
         costPerImpressionUsdCents: params.costPerImpressionCents || 1, // $0.01
         costPerClickUsdCents: params.costPerClickCents || 10,         // $0.10
         format: params.format || 'card',
-        status: 'active',
+        status: 'paused',
+        moderationStatus: 'pending_primary_review',
+        targetCountries: params.targetCountries ? JSON.stringify(params.targetCountries) : null,
+        targetStates: params.targetStates ? JSON.stringify(params.targetStates) : null,
+        targetDevices: params.targetDevices ? JSON.stringify(params.targetDevices) : null,
+        targetHours: params.targetHours ? JSON.stringify(params.targetHours) : null,
+        frequencyCapPerDay: params.frequencyCapPerDay || 5,
         targeting: params.targeting ? JSON.stringify(params.targeting) : null,
         startsAt: params.startsAt || new Date(),
         endsAt: params.endsAt,
       })
       .returning();
 
-    // Lock campaign budget into escrow
+    // Attempt to lock budget in escrow immediately
     try {
       await this.escrowService.lockCampaignBudget({
         campaignId: campaign.id,
@@ -64,7 +82,7 @@ export class CampaignsService {
         campaignTitle: params.title,
       });
     } catch (err: any) {
-      this.logger.warn(`Could not lock escrow budget immediately for campaign ${campaign.id}: ${err.message}`);
+      this.logger.warn(`Campaign ${campaign.id} created as draft; escrow lock deferred: ${err.message}`);
     }
 
     return campaign;
@@ -82,6 +100,7 @@ export class CampaignsService {
     destinationUrl: string;
     imageUrl?: string;
     videoUrl?: string;
+    adFormat?: 'banner' | 'card' | 'video' | 'interstitial';
     mediaFormat?: 'image' | 'gif' | 'video';
   }) {
     // Verify campaign ownership
@@ -105,6 +124,7 @@ export class CampaignsService {
         destinationUrl: params.destinationUrl,
         imageUrl: params.imageUrl,
         videoUrl: params.videoUrl,
+        adFormat: params.adFormat || campaign.format || 'card',
         mediaFormat: params.mediaFormat || 'image',
         reviewStatus: 'pending',
         status: 'active',
@@ -126,6 +146,7 @@ export class CampaignsService {
     destinationUrl?: string;
     imageUrl?: string;
     videoUrl?: string;
+    adFormat?: 'banner' | 'card' | 'video' | 'interstitial';
     mediaFormat?: 'image' | 'gif' | 'video';
   }) {
     // Verify ownership through joined campaign
@@ -161,6 +182,7 @@ export class CampaignsService {
     if (params.destinationUrl) updateFields.destinationUrl = params.destinationUrl;
     if (params.imageUrl !== undefined) updateFields.imageUrl = params.imageUrl;
     if (params.videoUrl !== undefined) updateFields.videoUrl = params.videoUrl;
+    if (params.adFormat) updateFields.adFormat = params.adFormat;
     if (params.mediaFormat) updateFields.mediaFormat = params.mediaFormat;
 
     const [updated] = await this.db
@@ -186,10 +208,23 @@ export class CampaignsService {
       throw new NotFoundException('Campaign not found or unauthorized');
     }
 
+    // Enforce that campaign has budget escrow locked before submitting for review
+    const escrow = await this.escrowService.getCampaignEscrow(campaignId);
+    if (!escrow || escrow.status !== 'active') {
+      // Attempt lock now if not yet locked
+      await this.escrowService.lockCampaignBudget({
+        campaignId: campaign.id,
+        userId: advertiserId,
+        amountUsdCents: campaign.budgetUsdCents,
+        campaignTitle: campaign.title,
+      });
+    }
+
     const [updated] = await this.db
       .update(adsCampaigns)
       .set({
-        status: 'under_review',
+        status: 'paused',
+        moderationStatus: 'pending_primary_review',
         updatedAt: new Date(),
       })
       .where(eq(adsCampaigns.id, campaignId))

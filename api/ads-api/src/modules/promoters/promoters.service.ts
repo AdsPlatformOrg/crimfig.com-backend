@@ -7,8 +7,9 @@ import {
   adsPromoterWebsites,
   adsPromoterApps,
   adsReelsConsents,
+  adsInteractions,
 } from '@crimfig/database/schema';
-import { and, eq, desc } from 'drizzle-orm';
+import { and, eq, desc, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
 
 @Injectable()
@@ -194,4 +195,53 @@ export class PromotersService {
 
     return created;
   }
+
+  /**
+   * Get promoter quality metrics and trust score
+   */
+  async getQualityMetrics(promoterId: string) {
+    const [promoter] = await this.db
+      .select({
+        id: adsPromoters.id,
+        trustScore: adsPromoters.trustScore,
+        isSuspended: adsPromoters.isSuspended,
+        suspensionReason: adsPromoters.suspensionReason,
+        updatedAt: adsPromoters.updatedAt,
+      })
+      .from(adsPromoters)
+      .where(eq(adsPromoters.id, promoterId))
+      .limit(1);
+
+    if (!promoter) {
+      throw new NotFoundException('Promoter not found');
+    }
+
+    // Aggregate total vs invalid interactions
+    const [stats] = await this.db
+      .select({
+        total: sql<number>`count(*)::int`,
+        valid: sql<number>`count(*) filter (where ${adsInteractions.isValid} = true)::int`,
+        invalid: sql<number>`count(*) filter (where ${adsInteractions.isValid} = false)::int`,
+      })
+      .from(adsInteractions)
+      .where(eq(adsInteractions.promoterId, promoterId));
+
+    const total = stats?.total || 0;
+    const invalid = stats?.invalid || 0;
+    const valid = stats?.valid || 0;
+    const invalidRatePct = total > 0 ? Math.round((invalid / total) * 10000) / 100 : 0;
+
+    return {
+      promoterId: promoter.id,
+      trustScore: promoter.trustScore ?? 70,
+      isSuspended: Boolean(promoter.isSuspended),
+      suspensionReason: promoter.suspensionReason,
+      totalInteractions: total,
+      validInteractions: valid,
+      invalidInteractions: invalid,
+      invalidRatePct,
+      status: promoter.isSuspended ? 'suspended' : (promoter.trustScore ?? 70) >= 60 ? 'good' : 'warning',
+    };
+  }
 }
+

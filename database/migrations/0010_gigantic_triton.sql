@@ -1,0 +1,2 @@
+CREATE TYPE "public"."ads_moderation_status" AS ENUM('draft', 'pending_primary_review', 'pending_manager_approval', 'approved', 'rejected');--> statement-breakpoint
+ALTER TABLE "ads_campaigns" ADD COLUMN "moderation_status" "ads_moderation_status" DEFAULT 'draft' NOT NULL;

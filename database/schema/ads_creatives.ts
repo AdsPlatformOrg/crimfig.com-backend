@@ -1,5 +1,5 @@
-import { pgTable, uuid, varchar, text, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
-import { adsCampaigns } from './ads_campaigns';
+import { pgTable, uuid, varchar, text, integer, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { adsCampaigns, adFormatEnum } from './ads_campaigns';
 
 /**
  * ads_creatives
@@ -45,8 +45,13 @@ export const adsCreatives = pgTable(
 
     // Asset URLs and format (Images, GIFs, Videos)
     mediaFormat: creativeMediaFormatEnum('media_format').notNull().default('image'),
+    adFormat: adFormatEnum('ad_format').notNull().default('card'),
+    mediaAssetId: uuid('media_asset_id'),
     imageUrl: text('image_url'),
     videoUrl: text('video_url'),
+
+    width: integer('width'),
+    height: integer('height'),
 
     // Where clicking the ad goes
     destinationUrl: text('destination_url').notNull(),

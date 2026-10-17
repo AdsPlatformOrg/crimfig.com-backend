@@ -50,6 +50,55 @@
       "when": 1791675886072,
       "tag": "0006_far_tombstone",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1792233873295,
+      "tag": "0007_secret_johnny_blaze",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792239312439,
+      "tag": "0008_furry_black_tom",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792239472448,
+      "tag": "0009_fine_rafael_vega",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792240479407,
+      "tag": "0010_gigantic_triton",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1792240513943,
+      "tag": "0011_reflective_zemo",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1792242840673,
+      "tag": "0012_unknown_proteus",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1792245511082,
+      "tag": "0013_warm_wendell_rand",
+      "breakpoints": true
     }
   ]
 }

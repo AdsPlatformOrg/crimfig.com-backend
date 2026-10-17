@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, boolean, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, boolean, smallint, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { adsCampaigns } from './ads_campaigns';
 import { adsCreatives } from './ads_creatives';
@@ -29,6 +29,9 @@ export const adsPromoters = pgTable(
     bio: text('bio'),
     // JSON array of category names allowed by this promoter
     allowedCategories: text('allowed_categories'),
+    trustScore: smallint('trust_score').notNull().default(70),
+    isSuspended: boolean('is_suspended').notNull().default(false),
+    suspensionReason: text('suspension_reason'),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -36,6 +39,7 @@ export const adsPromoters = pgTable(
   (t) => [
     index('ads_promoters_user_id_idx').on(t.userId),
     index('ads_promoters_type_idx').on(t.type),
+    index('ads_promoters_trust_score_idx').on(t.trustScore),
   ],
 );
 
@@ -81,6 +85,10 @@ export const adsPromoterWebsites = pgTable(
     embedPingLastAt: timestamp('embed_ping_last_at', { withTimezone: true }),
     // Category overrides specific to this website (JSON string, fallback to promoter default)
     allowedCategories: text('allowed_categories'),
+    trustScore: smallint('trust_score').notNull().default(70),
+    isSuspended: boolean('is_suspended').notNull().default(false),
+    suspensionReason: text('suspension_reason'),
+    verificationFailures: smallint('verification_failures').notNull().default(0),
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -89,6 +97,7 @@ export const adsPromoterWebsites = pgTable(
     index('ads_promoter_websites_promoter_id_idx').on(t.promoterId),
     index('ads_promoter_websites_domain_idx').on(t.domain),
     index('ads_promoter_websites_status_idx').on(t.verificationStatus),
+    index('ads_promoter_websites_trust_score_idx').on(t.trustScore),
   ],
 );
 

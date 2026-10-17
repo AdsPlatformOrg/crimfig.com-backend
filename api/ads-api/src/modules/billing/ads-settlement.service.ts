@@ -8,6 +8,7 @@ import {
   adsCampaignEscrows,
   adsCampaigns,
   adsPromoters,
+  adsPlacements,
   adsInteractions,
   monetizationProducts,
   monetizationRevenuePolicies,
@@ -116,29 +117,57 @@ export class AdsSettlementService {
       const remainingCents = escrow.allocatedUsdCents - escrow.consumedUsdCents;
       if (remainingCents <= 0) continue;
 
-      // Simulate or aggregate verified billable interactions during period
-      // (Defaulting to a modest sample spend increment of $1.00 - $5.00 if active)
-      const sampleSpendCents = Math.min(remainingCents, 200); // $2.00 per batch
-      if (sampleSpendCents <= 0) continue;
+      // Query real verified interaction aggregations during period (is_valid = true)
+      const validEvents = await this.db
+        .select({
+          type: adsInteractions.type,
+          count: sql<number>`count(*)::int`,
+          promoterId: adsInteractions.promoterId,
+        })
+        .from(adsInteractions)
+        .innerJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+        .where(
+          and(
+            eq(adsPlacements.campaignId, escrow.campaignId),
+            eq(adsInteractions.isValid, true),
+            gte(adsInteractions.createdAt, periodStart),
+          ),
+        )
+        .groupBy(adsInteractions.type, adsInteractions.promoterId);
 
-      const split = calculateRevenueDistribution(sampleSpendCents);
-      const campaignImpressions = Math.floor(sampleSpendCents * 8); // 8 impressions per cent
-      const campaignClicks = Math.floor(sampleSpendCents * 0.4);
-      const campaignHovers = Math.floor(sampleSpendCents * 2);
-      const campaignTouches = Math.floor(sampleSpendCents * 1.5);
+      let campaignImpressions = 0;
+      let campaignClicks = 0;
+      let campaignHovers = 0;
+      let campaignTouches = 0;
+
+      for (const ev of validEvents) {
+        if (ev.type === 'impression' || ev.type === 'viewable_impression') campaignImpressions += Number(ev.count);
+        else if (ev.type === 'click') campaignClicks += Number(ev.count);
+        else if (ev.type === 'hover') campaignHovers += Number(ev.count);
+        else if (ev.type === 'touch') campaignTouches += Number(ev.count);
+      }
+
+      // Calculate billable spend based on verified clicks ($0.10) and impressions ($0.01)
+      const calculatedSpendCents = (campaignClicks * 10) + (campaignImpressions * 1);
+      const actualSpendCents = Math.min(remainingCents, calculatedSpendCents);
+
+      // If no activity during this interval, continue
+      if (actualSpendCents <= 0) continue;
+
+      const split = calculateRevenueDistribution(actualSpendCents);
 
       totalImpressions += campaignImpressions;
       totalClicks += campaignClicks;
       totalHovers += campaignHovers;
       totalTouches += campaignTouches;
-      totalDebitedUsdCents += sampleSpendCents;
+      totalDebitedUsdCents += actualSpendCents;
       totalCreditedUsdCents += split.publisherEarningsCents;
-      totalCommissionPaidUsdCents += Math.round(sampleSpendCents * DEFAULT_EXTERNAL_REFERRAL_COMMISSION_RATIO);
+      totalCommissionPaidUsdCents += Math.round(actualSpendCents * DEFAULT_EXTERNAL_REFERRAL_COMMISSION_RATIO);
 
       // Debit advertiser escrow via billing-api
       await this.billingClient.deductSpend(
         escrow.advertiserId,
-        sampleSpendCents,
+        actualSpendCents,
         escrow.campaignId,
         `Batch settlement ${batchNumber}`,
       );
@@ -147,7 +176,7 @@ export class AdsSettlementService {
       await this.db
         .update(adsCampaignEscrows)
         .set({
-          consumedUsdCents: escrow.consumedUsdCents + sampleSpendCents,
+          consumedUsdCents: escrow.consumedUsdCents + actualSpendCents,
           lastSettledAt: new Date(),
           updatedAt: new Date(),
         })
@@ -164,8 +193,9 @@ export class AdsSettlementService {
         );
 
         const itemKey = `item_${batch.id}_${assignedPromoter.id}_${escrow.campaignId}`;
+        const holdExpiresAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72-Hour Clearance Hold
 
-        // Record granular promoter settlement item
+        // Record granular promoter settlement item with 72h hold
         await this.db.insert(adsPromoterSettlementItems).values({
           batchId: batch.id,
           promoterId: assignedPromoter.id,
@@ -175,13 +205,15 @@ export class AdsSettlementService {
           hoversCount: campaignHovers,
           touchesCount: campaignTouches,
           earnedUsdCents: split.publisherEarningsCents,
-          billedUsdCents: sampleSpendCents,
+          billedUsdCents: actualSpendCents,
           publisherPoolRatio: PUBLISHER_REVENUE_SHARE_RATIO.toFixed(4),
           crimfigBaseRevenueRatio: CRIMFIG_BASE_REVENUE_RATIO.toFixed(4),
           commissionPoolRatio: MARKETING_COMMISSION_POOL_RATIO.toFixed(4),
           exchangeRateSnapshot: DEFAULT_USD_NGN_EXCHANGE_RATE.toFixed(4),
           tierSnapshot: 'standard',
           idempotencyKey: itemKey,
+          clearanceStatus: 'pending',
+          holdExpiresAt,
           status: 'credited',
         });
 

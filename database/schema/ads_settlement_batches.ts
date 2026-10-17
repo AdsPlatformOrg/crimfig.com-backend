@@ -1,4 +1,5 @@
-import { pgTable, uuid, text, integer, bigint, numeric, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, varchar, integer, bigint, numeric, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { users } from './users';
 import { adsCampaigns } from './ads_campaigns';
 import { adsPromoters, adsPlacements } from './ads_promoters';
 import { billingTransactions } from './billing_transactions';
@@ -132,6 +133,11 @@ export const adsPromoterSettlementItems = pgTable(
 
     idempotencyKey: text('idempotency_key'),
 
+    // 72-Hour Clearance Hold Policy
+    clearanceStatus: text('clearance_status').notNull().default('pending'), // pending | cleared | penalized | clawed_back
+    holdExpiresAt: timestamp('hold_expires_at', { withTimezone: true }),
+    clearedAt: timestamp('cleared_at', { withTimezone: true }),
+
     status: text('status').notNull().default('credited'), // credited | pending | failed
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -147,3 +153,100 @@ export type AdsSettlementBatch = typeof adsSettlementBatches.$inferSelect;
 export type NewAdsSettlementBatch = typeof adsSettlementBatches.$inferInsert;
 export type AdsPromoterSettlementItem = typeof adsPromoterSettlementItems.$inferSelect;
 export type NewAdsPromoterSettlementItem = typeof adsPromoterSettlementItems.$inferInsert;
+
+/**
+ * ads_deep_audit_runs
+ *
+ * Immutable log of multi-tier background fraud inspection cycles (Tier 2 6-Hour Deep, Tier 3 15-Day, Tier 3 30-Day).
+ */
+export const adsDeepAuditRuns = pgTable(
+  'ads_deep_audit_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    runNumber: varchar('run_number', { length: 50 }).notNull().unique(), // e.g. DA-72H-20261017-0600
+    auditLevel: varchar('audit_level', { length: 20 }).notNull(), // 'tier2_6h' | 'tier3_15d' | 'tier3_30d' | 'manual'
+    lookbackHours: integer('lookback_hours').notNull().default(72),
+
+    totalInteractionsAnalyzed: integer('total_interactions_analyzed').notNull().default(0),
+    totalInvalidatedClicks: integer('total_invalidated_clicks').notNull().default(0),
+    totalRebatesIssuedUsdCents: bigint('total_rebates_issued_usd_cents', { mode: 'number' }).notNull().default(0),
+    totalPenaltiesIssuedUsdCents: bigint('total_penalties_issued_usd_cents', { mode: 'number' }).notNull().default(0),
+
+    status: varchar('status', { length: 20 }).notNull().default('completed'), // 'running' | 'completed' | 'failed'
+    notes: text('notes'),
+
+    startedAt: timestamp('started_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => [
+    index('ads_deep_audit_runs_level_idx').on(t.auditLevel),
+    index('ads_deep_audit_runs_started_at_idx').on(t.startedAt),
+  ],
+);
+
+export type AdsDeepAuditRun = typeof adsDeepAuditRuns.$inferSelect;
+export type NewAdsDeepAuditRun = typeof adsDeepAuditRuns.$inferInsert;
+
+/**
+ * ads_settlement_rebates
+ *
+ * First-class financial transaction rebates issued to advertisers for clicks retrospectively invalidated by deep fraud audits.
+ */
+export const adsSettlementRebates = pgTable(
+  'ads_settlement_rebates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    auditRunId: uuid('audit_run_id').references(() => adsDeepAuditRuns.id, { onDelete: 'set null' }),
+    billingTransactionId: uuid('billing_transaction_id').references(() => billingTransactions.id, { onDelete: 'set null' }),
+
+    sourceProcessType: varchar('source_process_type', { length: 50 }).notNull(), // 'cron_6h_deep_audit' | 'cron_15d_audit' | 'cron_30d_audit' | 'manual'
+    campaignId: uuid('campaign_id').notNull().references(() => adsCampaigns.id, { onDelete: 'restrict' }),
+    advertiserId: uuid('advertiser_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
+    promoterId: uuid('promoter_id').references(() => adsPromoters.id, { onDelete: 'set null' }),
+
+    rebateAmountUsdCents: bigint('rebate_amount_usd_cents', { mode: 'number' }).notNull(),
+    rebateReasonCode: varchar('rebate_reason_code', { length: 50 }).notNull(),
+    status: varchar('status', { length: 30 }).notNull().default('completed'), // 'completed' | 'pending_admin_signoff' | 'rejected_by_admin'
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ads_settlement_rebates_campaign_idx').on(t.campaignId),
+    index('ads_settlement_rebates_advertiser_idx').on(t.advertiserId),
+    index('ads_settlement_rebates_run_idx').on(t.auditRunId),
+  ],
+);
+
+export type AdsSettlementRebate = typeof adsSettlementRebates.$inferSelect;
+export type NewAdsSettlementRebate = typeof adsSettlementRebates.$inferInsert;
+
+/**
+ * ads_promoter_penalties
+ *
+ * Penalties charged to promoters for fraudulent clicks uncovered during extended (15d/30d) audits, offset against future earnings.
+ */
+export const adsPromoterPenalties = pgTable(
+  'ads_promoter_penalties',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    promoterId: uuid('promoter_id').notNull().references(() => adsPromoters.id, { onDelete: 'restrict' }),
+    auditRunId: uuid('audit_run_id').references(() => adsDeepAuditRuns.id, { onDelete: 'set null' }),
+    auditLevel: varchar('audit_level', { length: 20 }).notNull(), // 'day_15' | 'day_30' | 'manual'
+
+    penaltyAmountUsdCents: bigint('penalty_amount_usd_cents', { mode: 'number' }).notNull(),
+    recoveredAmountUsdCents: bigint('recovered_amount_usd_cents', { mode: 'number' }).notNull().default(0),
+
+    status: varchar('status', { length: 30 }).notNull().default('outstanding'), // 'outstanding' | 'partially_recovered' | 'fully_recovered' | 'waived'
+    reasonCode: varchar('reason_code', { length: 50 }).notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('ads_promoter_penalties_promoter_idx').on(t.promoterId),
+    index('ads_promoter_penalties_status_idx').on(t.status),
+  ],
+);
+
+export type AdsPromoterPenalty = typeof adsPromoterPenalties.$inferSelect;
+export type NewAdsPromoterPenalty = typeof adsPromoterPenalties.$inferInsert;

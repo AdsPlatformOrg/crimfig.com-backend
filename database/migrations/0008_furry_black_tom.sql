@@ -1,0 +1,1 @@
+ALTER TYPE "public"."ads_campaign_status" ADD VALUE 'pending_manager_approval' BEFORE 'active';

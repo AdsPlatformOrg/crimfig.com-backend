@@ -1,0 +1,2 @@
+ALTER TABLE "ads_moderation_decisions" ADD COLUMN "is_emergency_override" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "ads_moderation_decisions" ADD COLUMN "override_reason" text;

@@ -10,6 +10,9 @@ import { DeliveryModule } from './modules/delivery/delivery.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { HealthModule } from './modules/health/health.module';
 import { BillingModule } from './modules/billing/billing.module';
+import { ModerationModule } from './modules/moderation/moderation.module';
+import { UploadsModule } from './modules/uploads/uploads.module';
+import { ConversionsModule } from './modules/conversions/conversions.module';
 
 @Module({
   imports: [
@@ -24,6 +27,9 @@ import { BillingModule } from './modules/billing/billing.module';
     AnalyticsModule,
     HealthModule,
     BillingModule,
+    ModerationModule,
+    UploadsModule,
+    ConversionsModule,
   ],
 })
 export class AppModule {}
