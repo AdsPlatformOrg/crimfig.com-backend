@@ -38,16 +38,65 @@ async function bootstrap() {
   app.enableShutdownHooks([ShutdownSignal.SIGINT, ShutdownSignal.SIGTERM]);
 
   // ─── Security Middleware ───────────────────────────────────────────────────
-  app.use(helmet());
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      crossOriginOpenerPolicy: { policy: 'unsafe-none' },
+    }),
+  );
   const cookieParserFn = (cookieParser as any).default || cookieParser;
   app.use(cookieParserFn());
 
   // ─── CORS ─────────────────────────────────────────────────────────────────
+  const staticAllowedOrigins = new Set(
+    config.APP.ALLOWED_ORIGINS.map((o) => o.toLowerCase().replace(/\/$/, '')),
+  );
+
   app.enableCors({
-    origin: config.APP.ALLOWED_ORIGINS,
+    origin: (requestOrigin, callback) => {
+      // Allow requests with no origin (e.g. mobile apps, curl, server-to-server)
+      if (!requestOrigin) {
+        return callback(null, true);
+      }
+
+      const normalized = requestOrigin.toLowerCase().replace(/\/$/, '');
+
+      // Check configured static list
+      if (staticAllowedOrigins.has(normalized)) {
+        return callback(null, true);
+      }
+
+      // Allow any *.crimfig.com subdomain (auth, ads, billing, etc.)
+      if (/^https?:\/\/(?:[a-z0-9-]+\.)*crimfig\.com(?::\d+)?$/.test(normalized)) {
+        return callback(null, true);
+      }
+
+      // Allow any *.railway.app domain (Railway deployment / preview URLs)
+      if (/^https?:\/\/(?:[a-z0-9-]+\.)*railway\.app(?::\d+)?$/.test(normalized)) {
+        return callback(null, true);
+      }
+
+      // Allow local development (localhost / 127.0.0.1 on any port)
+      if (/^https?:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/.test(normalized)) {
+        return callback(null, true);
+      }
+
+      logger.warn(`Blocked CORS request from origin: ${requestOrigin}`);
+      callback(new Error(`Origin ${requestOrigin} not allowed by CORS`));
+    },
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
+    allowedHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Requested-With',
+      'Accept',
+      'Origin',
+      'sec-ch-ua',
+      'sec-ch-ua-mobile',
+      'sec-ch-ua-platform',
+    ],
+    exposedHeaders: ['Set-Cookie'],
   });
 
   // ─── Global Validation Pipe ───────────────────────────────────────────────

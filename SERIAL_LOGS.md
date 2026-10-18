@@ -2,6 +2,13 @@
 
 All significant changes, decisions, and agent actions are recorded here in reverse chronological order.
 
+## 2026-10-18
+- Fixed CORS error on `https://auth.crimfig.com/signup` and cross-origin authentication requests.
+- Updated `backend/auth/src/main.ts` with dynamic origin validation supporting all `*.crimfig.com` subdomains, `*.railway.app` deployment domains, and localhost ports.
+- Configured Helmet with `crossOriginResourcePolicy: { policy: 'cross-origin' }` and `crossOriginOpenerPolicy: { policy: 'unsafe-none' }` to prevent cross-origin resource blocking.
+- Expanded allowed preflight headers to include `X-Requested-With`, `Accept`, `Origin`, and client hint headers.
+- Updated default `ALLOWED_ORIGINS` in `config.ts` to include all production web portals.
+
 ## 2026-10-17
 - Completed and verified full execution of PLAN-0004 (Ads Growth Layer: Conversion Tracking & CPA Bidding, Video Transcoding, Mobile SDKs, Invalid-Traffic Disputes & Smart Targeting).
 - Implemented `DisputesModule` (`DisputesService`, `DisputesController`) for self-serve advertiser and promoter traffic quality disputes and appeals with 5-day SLA tracker and immutable ledger adjustments.
