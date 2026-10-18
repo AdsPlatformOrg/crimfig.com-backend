@@ -3,6 +3,8 @@
 All significant changes, decisions, and agent actions are recorded here in reverse chronological order.
 
 ## 2026-10-18
+- Normalized `AUTH_WEB_URL` and `ADS_WEB_URL` in `backend/auth/src/config/config.ts` so production environments automatically enforce `https://auth.crimfig.com` (and `https://ads.crimfig.com`), ignoring any legacy raw `*.railway.app` environment variables.
+- Updated `backend/auth/src/modules/oauth/oauth.controller.ts` to use `config.APP.AUTH_WEB_URL` instead of reading `process.env.AUTH_WEB_URL` directly.
 - Fixed CORS error on `https://auth.crimfig.com/signup` and cross-origin authentication requests.
 - Updated `backend/auth/src/main.ts` with dynamic origin validation supporting all `*.crimfig.com` subdomains, `*.railway.app` deployment domains, and localhost ports.
 - Configured Helmet with `crossOriginResourcePolicy: { policy: 'cross-origin' }` and `crossOriginOpenerPolicy: { policy: 'unsafe-none' }` to prevent cross-origin resource blocking.
