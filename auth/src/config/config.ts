@@ -66,8 +66,20 @@ export const config = {
   },
 
   APP: {
-    AUTH_WEB_URL: process.env.AUTH_WEB_URL ?? 'http://localhost:3000',
-    ADS_WEB_URL: process.env.ADS_WEB_URL ?? 'http://localhost:3001',
+    AUTH_WEB_URL: (() => {
+      const url = process.env.AUTH_WEB_URL;
+      if (!url || url.includes('.railway.app')) {
+        return process.env.NODE_ENV === 'production' ? 'https://auth.crimfig.com' : 'http://localhost:3000';
+      }
+      return url.replace(/\/+$/, '');
+    })(),
+    ADS_WEB_URL: (() => {
+      const url = process.env.ADS_WEB_URL;
+      if (!url || url.includes('.railway.app')) {
+        return process.env.NODE_ENV === 'production' ? 'https://ads.crimfig.com' : 'http://localhost:3001';
+      }
+      return url.replace(/\/+$/, '');
+    })(),
     ALLOWED_ORIGINS: (
       process.env.ALLOWED_ORIGINS ??
       'http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005,http://localhost:3006,https://auth.crimfig.com,https://billing.crimfig.com,https://ads.crimfig.com,https://chat.crimfig.com,https://stream.crimfig.com,https://reels.crimfig.com,https://tetris.crimfig.com,https://crimfig.com,https://www.crimfig.com'

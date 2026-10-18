@@ -7,6 +7,7 @@ import { CurrentUser } from '../../decorators/current-user.decorator';
 import type { JwtPayload } from '../tokens/tokens.service';
 import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import { config } from '../../config/config';
 
 class TokenExchangeDto {
   @ApiProperty() @IsString() @IsNotEmpty() grant_type!: string;
@@ -39,7 +40,7 @@ export class OAuthController {
       ...(dto.code_challenge && { code_challenge: dto.code_challenge }),
       ...(dto.code_challenge_method && { code_challenge_method: dto.code_challenge_method }),
     });
-    return res.redirect(`${process.env.AUTH_WEB_URL}/login?${params.toString()}`);
+    return res.redirect(`${config.APP.AUTH_WEB_URL}/login?${params.toString()}`);
   }
 
   /**
