@@ -46,16 +46,42 @@ export class TokensService {
     const familyId = randomUUID();
 
     // Look up the app ID from clientId
-    const app = await this.db.query.apps.findFirst({
+    let app = await this.db.query.apps.findFirst({
       where: eq(schema.apps.clientId, appClientId),
       columns: { id: true },
     });
+
+    if (!app) {
+      // Auto-provision standard first-party app if not yet present in database
+      const [inserted] = await this.db
+        .insert(schema.apps)
+        .values({
+          clientId: appClientId,
+          name: appClientId === 'crimfig_auth' ? 'CrimFig Central Identity' : appClientId,
+          subdomain: appClientId === 'crimfig_auth' ? 'auth.crimfig.com' : `${appClientId.replace('crimfig_', '')}.crimfig.com`,
+          description: 'First-party CrimFig ecosystem application',
+          currentTermsVersion: '1.0.0',
+          isFirstParty: true,
+          isActive: true,
+        })
+        .onConflictDoNothing()
+        .returning({ id: schema.apps.id });
+
+      app = inserted || (await this.db.query.apps.findFirst({
+        where: eq(schema.apps.clientId, appClientId),
+        columns: { id: true },
+      }));
+    }
+
+    if (!app) {
+      throw new UnauthorizedException(`Application client '${appClientId}' not recognized.`);
+    }
 
     const expiresAt = new Date(Date.now() + config.JWT.REFRESH_EXPIRES_DAYS * 24 * 60 * 60 * 1000);
 
     await this.db.insert(schema.refreshTokens).values({
       userId,
-      appId: app!.id,
+      appId: app.id,
       tokenHash,
       familyId,
       deviceFingerprint: deviceFingerprint ?? null,
@@ -117,8 +143,9 @@ export class TokensService {
       where: eq(schema.users.id, userId),
       columns: { id: true, email: true },
     });
+    if (!user) throw new UnauthorizedException('User not found');
     return this.jwtService.sign(
-      { sub: user!.id, email: user!.email, type: 'mfa_challenge' } as JwtPayload,
+      { sub: user.id, email: user.email, type: 'mfa_challenge' } as JwtPayload,
       { secret: config.JWT.ACCESS_SECRET, expiresIn: config.JWT.MFA_CHALLENGE_EXPIRES_IN },
     );
   }

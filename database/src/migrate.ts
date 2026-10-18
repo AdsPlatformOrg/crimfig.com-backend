@@ -35,6 +35,21 @@ export async function runMigrations() {
   try {
     await migrate(db, { migrationsFolder });
     console.log('[Drizzle Migrate] All migrations applied successfully to crimfig_core!');
+
+    // Ensure core first-party ecosystem apps are seeded
+    await pool.query(`
+      INSERT INTO "apps" ("id", "client_id", "name", "subdomain", "description", "current_terms_version", "is_first_party", "is_active")
+      VALUES
+        (gen_random_uuid(), 'crimfig_auth', 'CrimFig Central Identity', 'auth.crimfig.com', 'Single Sign-On & Account Management', '1.0.0', true, true),
+        (gen_random_uuid(), 'crimfig_ads', 'CrimFig Ads', 'ads.crimfig.com', 'Advertising & Marketing Platform', '1.0.0', true, true),
+        (gen_random_uuid(), 'crimfig_billing', 'CrimFig Billing', 'billing.crimfig.com', 'Monetization, Wallets & Financial Ledger', '1.0.0', true, true),
+        (gen_random_uuid(), 'crimfig_chat', 'CrimFig Chat', 'chat.crimfig.com', 'Instant Messaging & Community Chat', '1.0.0', true, true),
+        (gen_random_uuid(), 'crimfig_reels', 'CrimFig Reels', 'reels.crimfig.com', 'Short-Form Video Entertainment', '1.0.0', true, true),
+        (gen_random_uuid(), 'crimfig_stream', 'CrimFig Stream', 'stream.crimfig.com', 'Live Streaming & Broadcasts', '1.0.0', true, true),
+        (gen_random_uuid(), 'crimfig_tetris', 'CrimFig Tetris', 'tetrisgame.crimfig.com', 'Arcade Gaming Platform', '1.0.0', true, true)
+      ON CONFLICT ("client_id") DO NOTHING;
+    `);
+    console.log('[Drizzle Migrate] Core ecosystem apps verified & seeded successfully!');
   } catch (error) {
     console.error('[Drizzle Migrate] Migration failed:', error);
     throw error;

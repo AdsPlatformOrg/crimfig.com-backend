@@ -3,6 +3,10 @@
 All significant changes, decisions, and agent actions are recorded here in reverse chronological order.
 
 ## 2026-10-18
+- Fixed 500 Internal Server Error on `POST /api/v1/auth/login`. Added auto-provisioning for `crimfig_auth` (and ecosystem apps) in `TokensService.issueTokenPair`, preventing `TypeError: Cannot read properties of undefined (reading 'id')` when apps are unseeded.
+- Safely guarded `app` and `user` against null in `TokensService.issueTokenPair` and `TokensService.issueMfaChallengeToken`.
+- Auto-seeded core first-party ecosystem apps (`crimfig_auth`, `crimfig_ads`, `crimfig_billing`, `crimfig_chat`, `crimfig_reels`, `crimfig_stream`, `crimfig_tetris`) in `backend/database/src/migrate.ts` upon migration execution.
+- Added comprehensive unit test suites in `auth.service.spec.ts` and `tokens.service.spec.ts` covering login flows, token issuance, MFA challenges, missing app auto-provisioning, and credential checks.
 - Normalized `AUTH_WEB_URL` and `ADS_WEB_URL` in `backend/auth/src/config/config.ts` so production environments automatically enforce `https://auth.crimfig.com` (and `https://ads.crimfig.com`), ignoring any legacy raw `*.railway.app` environment variables.
 - Updated `backend/auth/src/modules/oauth/oauth.controller.ts` to use `config.APP.AUTH_WEB_URL` instead of reading `process.env.AUTH_WEB_URL` directly.
 - Fixed CORS error on `https://auth.crimfig.com/signup` and cross-origin authentication requests.
