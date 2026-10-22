@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import * as crypto from 'crypto';
 
 export interface PaystackInitResponse {
@@ -63,20 +63,28 @@ export interface PaystackTransferResponse {
 @Injectable()
 export class PaystackService {
   private readonly logger = new Logger(PaystackService.name);
-  private readonly secretKey = process.env.PAYSTACK_SECRET_KEY || 'sk_test_mock_paystack_key';
+  private readonly secretKey = process.env.PAYSTACK_SECRET_KEY || '';
   private readonly baseUrl = 'https://api.paystack.co';
+
+  paymentDomain(): 'test' | 'live' {
+    const mode = this.secretKey.startsWith('sk_live_') ? 'live' : this.secretKey.startsWith('sk_test_') ? 'test' : null;
+    if (!mode || (process.env.NODE_ENV === 'production' && mode !== 'live')) {
+      throw new ServiceUnavailableException('Payment provider key/mode is not configured for funding');
+    }
+    return mode;
+  }
 
   /**
    * Verify HMAC-SHA512 webhook signature from Paystack
    */
   verifyWebhookSignature(signature: string, rawBody: string | Buffer): boolean {
-    if (!signature) return false;
+    if (!this.secretKey || typeof signature !== 'string' || !/^[0-9a-f]{128}$/i.test(signature)) return false;
     const bodyStr = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
     const hash = crypto
       .createHmac('sha512', this.secretKey)
       .update(bodyStr)
       .digest('hex');
-    return hash === signature;
+    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(signature, 'hex'));
   }
 
   /**
@@ -85,10 +93,12 @@ export class PaystackService {
   async initializeTransaction(params: {
     email: string;
     amountKobo: number;
+    reference?: string;
     callbackUrl?: string;
     metadata?: Record<string, any>;
     channels?: string[];
   }): Promise<PaystackInitResponse> {
+    this.paymentDomain();
     try {
       const res = await fetch(`${this.baseUrl}/transaction/initialize`, {
         method: 'POST',
@@ -96,9 +106,13 @@ export class PaystackService {
           Authorization: `Bearer ${this.secretKey}`,
           'Content-Type': 'application/json',
         },
+        redirect: 'error',
+        signal: AbortSignal.timeout(10000),
         body: JSON.stringify({
           email: params.email,
           amount: params.amountKobo,
+          currency: 'NGN',
+          reference: params.reference,
           callback_url: params.callbackUrl,
           metadata: params.metadata,
           channels: params.channels || ['card', 'bank', 'ussd', 'bank_transfer'],
@@ -106,7 +120,7 @@ export class PaystackService {
       });
 
       const json: any = await res.json();
-      if (!json.status) {
+      if (!res.ok || json.status !== true) {
         throw new Error(json.message || 'Paystack initialization failed');
       }
       return json.data;
@@ -120,16 +134,17 @@ export class PaystackService {
    * Verify a transaction by reference
    */
   async verifyTransaction(reference: string): Promise<PaystackVerifyResponse['data']> {
+    this.paymentDomain();
     try {
       const res = await fetch(`${this.baseUrl}/transaction/verify/${encodeURIComponent(reference)}`, {
-        method: 'GET',
+        method: 'GET', redirect: 'error', signal: AbortSignal.timeout(10000),
         headers: {
           Authorization: `Bearer ${this.secretKey}`,
         },
       });
 
       const json: any = await res.json();
-      if (!json.status) {
+      if (!res.ok || json.status !== true) {
         throw new Error(json.message || 'Paystack transaction verification failed');
       }
       return json.data;
@@ -259,29 +274,35 @@ export class PaystackService {
     reason?: string;
     reference: string;
   }): Promise<PaystackTransferResponse> {
-    try {
-      const res = await fetch(`${this.baseUrl}/transfer`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${this.secretKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          source: 'balance',
-          amount: params.amountKobo,
-          recipient: params.recipientCode,
-          reason: params.reason || 'CrimFig Withdrawal',
-          reference: params.reference,
-        }),
-      });
-      const json: any = await res.json();
-      if (!json.status) {
-        throw new Error(json.message || 'Failed to initiate transfer');
-      }
-      return json.data;
-    } catch (err: any) {
-      this.logger.error(`initiateTransfer error: ${err.message}`);
-      throw err;
+    this.paymentDomain();
+    if (!Number.isSafeInteger(params.amountKobo) || params.amountKobo <= 0 ||
+        !/^[a-z0-9_-]{16,50}$/.test(params.reference) || !/^RCP_[A-Za-z0-9]+$/.test(params.recipientCode)) {
+      throw new Error('Invalid transfer binding');
     }
+    const res = await fetch(`${this.baseUrl}/transfer`, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
+      headers: { Authorization: `Bearer ${this.secretKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ source: 'balance', currency: 'NGN', amount: params.amountKobo,
+        recipient: params.recipientCode, reason: params.reason || 'CrimFig Withdrawal', reference: params.reference }),
+    });
+    const json: any = await res.json();
+    if (!res.ok || json?.status !== true || !json.data || json.data.reference !== params.reference) {
+      throw new Error('Transfer initialization could not be confirmed');
+    }
+    return json.data;
+  }
+
+  /** Read-only recovery. Not-found/timeout does not prove a transfer was never dispatched. */
+  async verifyTransfer(reference: string): Promise<unknown> {
+    this.paymentDomain();
+    if (!/^[a-z0-9_-]{16,50}$/.test(reference)) throw new Error('Invalid transfer reference');
+    const res = await fetch(`${this.baseUrl}/transfer/verify/${encodeURIComponent(reference)}`, {
+      redirect: 'error', signal: AbortSignal.timeout(10000), headers: { Authorization: `Bearer ${this.secretKey}` },
+    });
+    const json: any = await res.json();
+    if (!res.ok || json?.status !== true || !json.data || json.data.reference !== reference) {
+      throw new Error('Transfer recovery unavailable');
+    }
+    return json.data;
   }
 }

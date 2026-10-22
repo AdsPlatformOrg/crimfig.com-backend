@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -28,6 +28,32 @@ export class DisputesService {
     reason: string;
     details: string;
   }): Promise<AdsDispute> {
+    if ((payload.scope === 'campaign' && !payload.campaignId) ||
+        (payload.scope === 'placement' && !payload.placementId) ||
+        (payload.scope === 'general' && (payload.campaignId || payload.placementId))) {
+      throw new BadRequestException('Dispute scope and resource references must match');
+    }
+    const from = new Date(payload.periodFrom), to = new Date(payload.periodTo);
+    if (!Number.isFinite(from.getTime()) || !Number.isFinite(to.getTime()) || from > to) {
+      throw new BadRequestException('Dispute period is invalid');
+    }
+    if (payload.campaignId) {
+      if (payload.role !== 'advertiser') throw new BadRequestException('Promoter disputes must reference an owned placement');
+      const [campaign] = await this.db.select().from(schema.adsCampaigns).where(and(
+        eq(schema.adsCampaigns.id, payload.campaignId), eq(schema.adsCampaigns.advertiserId, payload.openedBy),
+      )).limit(1);
+      if (!campaign) throw new NotFoundException('Campaign not found');
+    }
+    if (payload.placementId) {
+      const [placement] = await this.db.select({ id: schema.adsPlacements.id }).from(schema.adsPlacements)
+        .innerJoin(schema.adsPromoters, eq(schema.adsPlacements.promoterId, schema.adsPromoters.id))
+        .innerJoin(schema.adsCampaigns, eq(schema.adsPlacements.campaignId, schema.adsCampaigns.id))
+        .where(and(eq(schema.adsPlacements.id, payload.placementId),
+          payload.role === 'promoter' ? eq(schema.adsPromoters.userId, payload.openedBy) : eq(schema.adsCampaigns.advertiserId, payload.openedBy),
+          ...(payload.campaignId ? [eq(schema.adsPlacements.campaignId, payload.campaignId)] : []),
+        )).limit(1);
+      if (!placement) throw new NotFoundException('Placement not found');
+    }
     const newRecord: NewAdsDispute = {
       openedBy: payload.openedBy,
       role: payload.role,
@@ -54,11 +80,12 @@ export class DisputesService {
    * List disputes for a user or admin
    */
   async getDisputes(filters: {
-    openedBy?: string;
+    openedBy: string;
     role?: 'advertiser' | 'promoter';
     status?: string;
     limit?: number;
   }): Promise<AdsDispute[]> {
+    if (!filters.openedBy) throw new NotFoundException('Dispute owner is required');
     const conditions: any[] = [];
 
     if (filters.openedBy) {
@@ -84,11 +111,12 @@ export class DisputesService {
   /**
    * Get single dispute dossier
    */
-  async getDisputeById(id: string): Promise<AdsDispute> {
+  async getDisputeById(id: string, openedBy: string): Promise<AdsDispute> {
+    if (!openedBy) throw new NotFoundException('Dispute not found');
     const [dispute] = await this.db
       .select()
       .from(adsDisputes)
-      .where(eq(adsDisputes.id, id));
+      .where(and(eq(adsDisputes.id, id), eq(adsDisputes.openedBy, openedBy)));
 
     if (!dispute) {
       throw new NotFoundException(`Dispute not found: ${id}`);

@@ -16,6 +16,14 @@ export class AdsEscrowService {
     private readonly billingClient: BillingEcosystemClient,
   ) {}
 
+  private async requireCampaignOwner(campaignId: string, userId: string) {
+    if (!userId) throw new NotFoundException('Campaign not found');
+    const [campaign] = await this.db.select().from(adsCampaigns)
+      .where(and(eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, userId))).limit(1);
+    if (!campaign) throw new NotFoundException('Campaign not found');
+    return campaign;
+  }
+
   /**
    * Lock campaign budget into escrow upon campaign activation
    */
@@ -27,115 +35,36 @@ export class AdsEscrowService {
   }) {
     const { campaignId, userId, amountUsdCents, campaignTitle } = params;
 
-    // 1. Verify user wallet balance has enough available funds
-    const wallet = await this.billingClient.getWalletBalance(userId);
-    if (wallet.availableUsdCents < amountUsdCents) {
-      throw new BadRequestException(
-        `Insufficient available wallet balance. Required: $${(amountUsdCents / 100).toFixed(2)}, Available: $${(
-          wallet.availableUsdCents / 100
-        ).toFixed(2)}`,
-      );
+    await this.requireCampaignOwner(campaignId, userId);
+    if (!Number.isSafeInteger(amountUsdCents) || amountUsdCents < 500) {
+      throw new BadRequestException('Escrow requires at least 500 integer USD cents');
     }
 
-    // 2. Lock the funds in the unified billing wallet
-    const reason = `Escrow lock for campaign "${campaignTitle || campaignId}"`;
-    await this.billingClient.lockFunds(userId, amountUsdCents, reason);
-
-    // 3. Upsert escrow ledger record
-    const existing = await this.db
-      .select()
-      .from(adsCampaignEscrows)
-      .where(and(eq(adsCampaignEscrows.campaignId, campaignId), eq(adsCampaignEscrows.userId, userId)))
-      .limit(1);
-
-    if (existing.length > 0) {
-      const [updated] = await this.db
-        .update(adsCampaignEscrows)
-        .set({
-          allocatedUsdCents: amountUsdCents,
-          status: 'active',
-          updatedAt: new Date(),
-        })
-        .where(eq(adsCampaignEscrows.id, existing[0].id))
-        .returning();
-
-      return updated;
-    }
-
-    const [escrow] = await this.db
-      .insert(adsCampaignEscrows)
-      .values({
-        campaignId,
-        userId,
-        allocatedUsdCents: amountUsdCents,
-        consumedUsdCents: 0,
-        refundedUsdCents: 0,
-        status: 'active',
-      })
-      .returning();
-
-    this.logger.log(`Escrow locked: $${(amountUsdCents / 100).toFixed(2)} for campaign ${campaignId}`);
-    return escrow;
+    // Billing commits wallet, reservation and durable receipt atomically. Ads never writes money.
+    return this.billingClient.reserveCampaignEscrow(userId, campaignId, amountUsdCents);
   }
 
-  /**
-   * Release unconsumed escrow funds back to available wallet balance
-   * (e.g., when advertiser pauses, archives, or deletes a campaign)
-   */
-  async releaseCampaignBudget(params: {
-    campaignId: string;
-    userId: string;
-    reason?: string;
-  }) {
-    const { campaignId, userId, reason } = params;
+  /** Release only through Billing after serving has stopped. Repeated calls return the receipt. */
+  async releaseCampaignBudget(params: { campaignId: string; userId: string; reason?: string }) {
+    await this.requireCampaignOwner(params.campaignId, params.userId);
+    const escrow = await this.billingClient.releaseCampaignEscrow(params.userId, params.campaignId);
+    return { message: 'Escrow release confirmed', escrow };
+  }
 
-    const [escrow] = await this.db
-      .select()
-      .from(adsCampaignEscrows)
-      .where(and(eq(adsCampaignEscrows.campaignId, campaignId), eq(adsCampaignEscrows.userId, userId)))
-      .limit(1);
-
-    if (!escrow) {
-      throw new NotFoundException(`No escrow record found for campaign ${campaignId}`);
-    }
-
-    if (escrow.status === 'released') {
-      return { message: 'Escrow already released', escrow };
-    }
-
-    const unconsumedCents = escrow.allocatedUsdCents - escrow.consumedUsdCents - escrow.refundedUsdCents;
-
-    if (unconsumedCents > 0) {
-      const unlockReason = reason || `Escrow release for campaign ${campaignId}`;
-      await this.billingClient.unlockFunds(userId, unconsumedCents, unlockReason);
-    }
-
-    const [updated] = await this.db
-      .update(adsCampaignEscrows)
-      .set({
-        refundedUsdCents: escrow.refundedUsdCents + (unconsumedCents > 0 ? unconsumedCents : 0),
-        status: 'released',
-        updatedAt: new Date(),
-      })
-      .where(eq(adsCampaignEscrows.id, escrow.id))
-      .returning();
-
-    this.logger.log(`Escrow released: $${(unconsumedCents / 100).toFixed(2)} refunded for campaign ${campaignId}`);
-    return {
-      message: 'Escrow released successfully',
-      refundedUsdCents: unconsumedCents,
-      escrow: updated,
-    };
+  async changeCampaignStatus(campaignId: string, userId: string, status: 'active' | 'paused' | 'trash') {
+    await this.requireCampaignOwner(campaignId, userId);
+    return this.billingClient.changeCampaignStatus(userId, campaignId, status);
   }
 
   /**
    * Get escrow details for a campaign
    */
-  async getCampaignEscrow(campaignId: string) {
+  async getCampaignEscrow(campaignId: string, userId: string) {
+    await this.requireCampaignOwner(campaignId, userId);
     const [escrow] = await this.db
       .select()
       .from(adsCampaignEscrows)
-      .where(eq(adsCampaignEscrows.campaignId, campaignId))
+      .where(and(eq(adsCampaignEscrows.campaignId, campaignId), eq(adsCampaignEscrows.userId, userId)))
       .limit(1);
 
     if (!escrow) {
@@ -193,6 +122,9 @@ export class AdsEscrowService {
         totalBurnedUsdCents: totalConsumedCents,
         totalBurnedUsd: totalConsumedCents / 100,
         items: escrows.map((e) => ({
+          id: e.id,
+          refundedUsd: e.refundedUsdCents / 100,
+          burnPercent: e.allocatedUsdCents > 0 ? e.consumedUsdCents / e.allocatedUsdCents * 100 : 0,
           campaignId: e.campaignId,
           allocatedUsd: e.allocatedUsdCents / 100,
           consumedUsd: e.consumedUsdCents / 100,

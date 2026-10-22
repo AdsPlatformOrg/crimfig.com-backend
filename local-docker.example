@@ -1,0 +1,11 @@
+# Local Docker financial-engine acceptance configuration (TEST credentials only).
+# Private file: ignored by Git. Never put sk_live_ / pk_live_ values here.
+# Populate from your Paystack test dashboard; blank values intentionally disable provider access.
+# Creating this file does not create a Paystack account or provision credentials.
+PAYSTACK_SECRET_KEY=
+PAYSTACK_PUBLIC_KEY=
+
+# Docker database/Redis credentials are generated per run by
+# scripts/plan0009-docker-test.cjs, not stored in this file.
+# That runner does not load this file or call Paystack.
+# Provider acceptance tooling must explicitly load this file and reject non-test keys.

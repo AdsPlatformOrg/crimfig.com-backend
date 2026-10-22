@@ -209,7 +209,7 @@ export class CampaignsService {
     }
 
     // Enforce that campaign has budget escrow locked before submitting for review
-    const escrow = await this.escrowService.getCampaignEscrow(campaignId);
+    const escrow = await this.escrowService.getCampaignEscrow(campaignId, advertiserId);
     if (!escrow || escrow.status !== 'active') {
       // Attempt lock now if not yet locked
       await this.escrowService.lockCampaignBudget({
@@ -260,11 +260,9 @@ export class CampaignsService {
   /**
    * Get single campaign details including creatives
    */
-  async getCampaignDetails(campaignId: string, advertiserId?: string) {
-    const conditions = [eq(adsCampaigns.id, campaignId)];
-    if (advertiserId) {
-      conditions.push(eq(adsCampaigns.advertiserId, advertiserId));
-    }
+  async getCampaignDetails(campaignId: string, advertiserId: string) {
+    if (!advertiserId) throw new NotFoundException('Campaign not found');
+    const conditions = [eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, advertiserId)];
 
     const [campaign] = await this.db
       .select()
@@ -337,38 +335,16 @@ export class CampaignsService {
       throw new NotFoundException('Campaign not found');
     }
 
-    const previousStatus = campaign.status;
-
-    const [updated] = await this.db
-      .update(adsCampaigns)
-      .set({ status, updatedAt: new Date() })
-      .where(eq(adsCampaigns.id, campaignId))
-      .returning();
-
-    // Handle escrow transitions
-    if (status === 'active' && previousStatus !== 'active') {
-      try {
-        await this.escrowService.lockCampaignBudget({
-          campaignId,
-          userId: advertiserId,
-          amountUsdCents: campaign.remainingBudgetUsdCents,
-          campaignTitle: campaign.title,
-        });
-      } catch (err: any) {
-        this.logger.warn(`Could not re-lock escrow budget for active campaign ${campaignId}: ${err.message}`);
-      }
-    } else if (['paused', 'trash', 'suspended'].includes(status) && previousStatus === 'active') {
-      try {
-        await this.escrowService.releaseCampaignBudget({
-          campaignId,
-          userId: advertiserId,
-          reason: `Campaign status changed to ${status}`,
-        });
-      } catch (err: any) {
-        this.logger.warn(`Could not release escrow budget for ${status} campaign ${campaignId}: ${err.message}`);
-      }
+    if (!['active', 'paused', 'trash'].includes(status)) {
+      throw new BadRequestException('Use the review workflow for moderation states');
     }
-
-    return updated;
+    if (campaign.status === 'suspended') {
+      throw new BadRequestException('A suspended campaign requires staff review');
+    }
+    if (status === 'active' && campaign.moderationStatus !== 'approved') {
+      throw new BadRequestException('Campaign must have completed moderation before activation');
+    }
+    // Billing owns the status + wallet + escrow + receipt transaction, including retries.
+    return this.escrowService.changeCampaignStatus(campaignId, advertiserId, status as 'active' | 'paused' | 'trash');
   }
 }

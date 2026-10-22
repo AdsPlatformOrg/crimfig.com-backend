@@ -5,8 +5,12 @@ import { TokensService } from '../tokens/tokens.service';
 import { EmailService } from '../email/email.service';
 import { DATABASE_TOKEN } from '../database/database.module';
 import * as argon2 from 'argon2';
+import { JwtService } from '@nestjs/jwt';
 
 jest.mock('argon2');
+jest.mock('../../config/config', () => ({ config: {
+  JWT: { ACCESS_SECRET: 'auth-service-test-secret' },
+} }));
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -57,6 +61,7 @@ describe('AuthService', () => {
         { provide: DATABASE_TOKEN, useValue: mockDb },
         { provide: TokensService, useValue: mockTokensService },
         { provide: EmailService, useValue: mockEmailService },
+        { provide: JwtService, useValue: { sign: jest.fn(), verify: jest.fn() } },
       ],
     }).compile();
 
@@ -65,6 +70,11 @@ describe('AuthService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  it('binds logout revocation to the authenticated owner', async () => {
+    await service.logout('signed-in-user', 'cookie-token');
+    expect(mockTokensService.revokeRefreshToken).toHaveBeenCalledWith('cookie-token', 'signed-in-user');
   });
 
   describe('login', () => {

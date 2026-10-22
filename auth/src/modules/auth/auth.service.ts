@@ -128,7 +128,7 @@ export class AuthService {
 
   async logout(userId: string, rawRefreshToken?: string) {
     if (rawRefreshToken) {
-      await this.tokensService.revokeRefreshToken(rawRefreshToken);
+      await this.tokensService.revokeRefreshToken(rawRefreshToken, userId);
     }
     this.logger.audit('AUTH_LOGOUT', { userId });
     return { message: 'Logged out successfully' };

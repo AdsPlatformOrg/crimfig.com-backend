@@ -138,7 +138,7 @@ export class CampaignsController {
   @ApiOperation({ summary: 'List advertiser campaigns with optional status filter' })
   @ApiQuery({ name: 'status', required: false })
   async getAdvertiserCampaigns(@Req() req: any, @Query('status') status?: string) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const campaigns = await this.campaignsService.getAdvertiserCampaigns(userId, status);
     return { status: 'success', data: campaigns };
   }
@@ -146,7 +146,7 @@ export class CampaignsController {
   @Post()
   @ApiOperation({ summary: 'Create new ad campaign' })
   async createCampaign(@Req() req: any, @Body() dto: CreateCampaignDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const campaign = await this.campaignsService.createCampaign({
       advertiserId: userId,
       title: dto.title,
@@ -169,7 +169,7 @@ export class CampaignsController {
   @Get(':id')
   @ApiOperation({ summary: 'Get campaign details with creatives' })
   async getCampaignDetails(@Param('id') id: string, @Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'];
+    const userId = req.user.sub;
     const details = await this.campaignsService.getCampaignDetails(id, userId);
     return { status: 'success', data: details };
   }
@@ -177,7 +177,7 @@ export class CampaignsController {
   @Post(':id/creatives')
   @ApiOperation({ summary: 'Add creative asset to campaign' })
   async addCreative(@Param('id') campaignId: string, @Req() req: any, @Body() dto: AddCreativeDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const creative = await this.campaignsService.addCreative({
       campaignId,
       advertiserId: userId,
@@ -195,7 +195,7 @@ export class CampaignsController {
   @Put('creatives/:id/replace')
   @ApiOperation({ summary: 'Replace/update rejected creative asset and re-submit for review' })
   async replaceCreative(@Param('id') creativeId: string, @Req() req: any, @Body() dto: ReplaceCreativeDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const creative = await this.campaignsService.replaceCreative({
       creativeId,
       advertiserId: userId,
@@ -213,7 +213,7 @@ export class CampaignsController {
   @Post(':id/submit-review')
   @ApiOperation({ summary: 'Submit draft campaign for moderation review' })
   async submitForReview(@Param('id') id: string, @Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const updated = await this.campaignsService.submitForReview(id, userId);
     return { status: 'success', data: updated };
   }
@@ -225,7 +225,7 @@ export class CampaignsController {
     @Req() req: any,
     @Body('status') status: 'active' | 'paused' | 'under_review' | 'draft' | 'rejected' | 'suspended' | 'trash',
   ) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const updated = await this.campaignsService.updateStatus(id, userId, status);
     return { status: 'success', data: updated };
   }

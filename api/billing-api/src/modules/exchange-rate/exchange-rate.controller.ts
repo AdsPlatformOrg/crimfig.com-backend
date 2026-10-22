@@ -1,14 +1,12 @@
-import { Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Query, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { ExchangeRateService } from './exchange-rate.service';
-import { Public } from '@crimfig/shared';
 
 @ApiTags('Exchange Rates')
 @Controller('exchange-rates')
 export class ExchangeRateController {
   constructor(private readonly fxService: ExchangeRateService) {}
 
-  @Public()
   @Get('current')
   @ApiOperation({ summary: 'Get current USD/NGN exchange rate' })
   async getCurrentRate() {
@@ -22,52 +20,38 @@ export class ExchangeRateController {
         rateId: fx.rateId,
         source: fx.source,
         fetchedAt: fx.fetchedAt,
+        providerUpdatedAt: fx.providerUpdatedAt,
       },
     };
   }
 
-  @Public()
   @Post('refresh')
   @ApiOperation({ summary: 'Force refresh USD/NGN exchange rate from live providers' })
   async forceRefresh() {
-    const fx = await this.fxService.getUsdToNgnRate(true);
-    return {
-      status: 'success',
-      data: {
-        baseCurrency: 'USD',
-        targetCurrency: 'NGN',
-        rate: fx.rate,
-        rateId: fx.rateId,
-        source: fx.source,
-        fetchedAt: fx.fetchedAt,
-      },
-    };
+    throw new ServiceUnavailableException('Manual provider refresh is unavailable pending operator rate-limit controls');
   }
 
-  @Public()
   @Get('convert')
   @ApiOperation({ summary: 'Convert USD cents to NGN or NGN kobo to USD' })
   async convert(
     @Query('usdCents') usdCents?: string,
     @Query('ngnKobo') ngnKobo?: string,
   ) {
-    if (usdCents) {
-      const result = await this.fxService.convertUsdCentsToNgn(parseInt(usdCents, 10));
-      return { status: 'success', data: result };
-    }
-    if (ngnKobo) {
-      const result = await this.fxService.convertNgnKoboToUsdCents(parseInt(ngnKobo, 10));
-      return { status: 'success', data: result };
-    }
-    return { status: 'error', message: 'Provide either usdCents or ngnKobo query parameter' };
+    if ((usdCents === undefined) === (ngnKobo === undefined)) throw new BadRequestException('Provide exactly one conversion amount');
+    const raw = usdCents ?? ngnKobo!;
+    if (!/^\d{1,16}$/.test(raw) || !Number.isSafeInteger(Number(raw))) throw new BadRequestException('Use non-negative integer minor units');
+    const result = usdCents !== undefined
+      ? await this.fxService.convertUsdCentsToNgn(Number(raw))
+      : await this.fxService.convertNgnKoboToUsdCents(Number(raw));
+    return { status: 'success', data: result };
   }
 
-  @Public()
   @Get('history')
   @ApiOperation({ summary: 'Get historical exchange rate snapshots' })
   async getHistory(@Query('limit') limit?: string) {
-    const count = limit ? parseInt(limit, 10) : 30;
+    if (limit !== undefined && (!/^\d{1,3}$/.test(limit) || Number(limit) < 1 || Number(limit) > 100)) throw new BadRequestException('History limit must be between 1 and 100');
+    const count = limit === undefined ? 30 : Number(limit);
     const history = await this.fxService.getHistory(count);
-    return { status: 'success', data: history };
+    return { status: 'success', data: history.map(row => ({ id: row.id, rate: row.usdToNgn, source: row.source, fetchedAt: row.fetchedAt })) };
   }
 }

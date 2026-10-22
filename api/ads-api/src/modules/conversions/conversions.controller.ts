@@ -1,3 +1,4 @@
+import { Public } from '@crimfig/shared';
 import {
   Controller,
   Get,
@@ -56,7 +57,7 @@ export class ReverseConversionDto {
 }
 
 @ApiTags('Ads Conversions & Attribution')
-@Controller('api/v1')
+@Controller()
 export class ConversionsController {
   constructor(private readonly conversionsService: ConversionsService) {}
 
@@ -64,6 +65,7 @@ export class ConversionsController {
    * Public script serving endpoint for browser conversion pixel
    * GET /api/v1/px.js
    */
+  @Public()
   @Get('px.js')
   @ApiOperation({ summary: 'Serve lightweight browser conversion tracking pixel' })
   getPixelScript(@Res() res: Response) {
@@ -77,6 +79,7 @@ export class ConversionsController {
    * Beacon collector endpoint called by px.js
    * POST /api/v1/px/collect
    */
+  @Public()
   @Post('px/collect')
   @HttpCode(204)
   @ApiOperation({ summary: 'Browser pixel beacon collection' })
@@ -101,6 +104,7 @@ export class ConversionsController {
    * Server-to-server (S2S) postback conversion ingestion
    * POST /api/v1/conversions
    */
+  @Public()
   @Post('conversions')
   @ApiOperation({ summary: 'Record S2S conversion postback' })
   async reportS2SConversion(
@@ -134,7 +138,7 @@ export class ConversionsController {
     @Query('campaignId') campaignId?: string,
     @Query('limit') limit = '50',
   ) {
-    const advertiserId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const advertiserId = req.user.sub;
     const data = await this.conversionsService.getConversions(advertiserId, {
       campaignId,
       limit: Number(limit),
@@ -153,7 +157,7 @@ export class ConversionsController {
     @Req() req: any,
     @Body() dto: ReverseConversionDto,
   ) {
-    const advertiserId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const advertiserId = req.user.sub;
     const result = await this.conversionsService.reverseConversion(id, advertiserId, dto.reason);
     return { status: 'success', data: result };
   }
@@ -165,7 +169,7 @@ export class ConversionsController {
   @Get('advertisers/api-keys')
   @ApiOperation({ summary: 'List advertiser API keys' })
   async listApiKeys(@Req() req: any) {
-    const advertiserId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const advertiserId = req.user.sub;
     const keys = await this.conversionsService.listApiKeys(advertiserId);
     return { status: 'success', data: keys };
   }
@@ -177,7 +181,7 @@ export class ConversionsController {
   @Post('advertisers/api-keys')
   @ApiOperation({ summary: 'Create new advertiser API key' })
   async createApiKey(@Req() req: any, @Body() dto: CreateApiKeyDto) {
-    const advertiserId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const advertiserId = req.user.sub;
     const key = await this.conversionsService.createApiKey({
       advertiserId,
       name: dto.name,
@@ -193,7 +197,7 @@ export class ConversionsController {
   @Delete('advertisers/api-keys/:id')
   @ApiOperation({ summary: 'Revoke advertiser API key' })
   async revokeApiKey(@Param('id') id: string, @Req() req: any) {
-    const advertiserId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const advertiserId = req.user.sub;
     const result = await this.conversionsService.revokeApiKey(id, advertiserId);
     return { status: 'success', data: result };
   }

@@ -5,6 +5,7 @@ import * as schema from '@crimfig/database/schema';
 import { adsPromoterWebsites, adsPromoterApps } from '@crimfig/database/schema';
 import { and, eq } from 'drizzle-orm';
 import * as dns from 'dns/promises';
+import { deadline, fetchWebsiteProof, hasVerificationMeta, websiteTarget } from './website-proof';
 
 @Injectable()
 export class VerificationService {
@@ -33,52 +34,37 @@ export class VerificationService {
     let isVerified = false;
     let errorMessage: string | null = null;
 
-    if (website.verificationMethod === 'dns_txt') {
-      try {
-        const records = await dns.resolveTxt(website.domain);
-        const flattened = records.flat();
+    try {
+      const target = websiteTarget(website.domain, website.url);
+      if (!token || !/^[a-zA-Z0-9_-]{16,256}$/.test(token)) {
+        throw new Error('Invalid verification token; re-register this website');
+      }
+      if (website.verificationMethod === 'dns_txt') {
+        const records = await deadline(dns.resolveTxt(target.hostname), 2000);
         const expected = `crimfig-site-verification=${token}`;
-        isVerified = flattened.some((rec) => rec.includes(expected) || rec.includes(token));
-        if (!isVerified) {
-          errorMessage = `DNS TXT record matching '${expected}' was not found on ${website.domain}.`;
-        }
-      } catch (err: any) {
-        errorMessage = `DNS lookup failed for ${website.domain}: ${err.message}`;
+        isVerified = records.some(record => record.join('') === expected);
+        if (!isVerified) errorMessage = 'Exact DNS TXT verification record was not found.';
+      } else if (website.verificationMethod === 'html_file_and_meta_tag') {
+        isVerified = hasVerificationMeta(await fetchWebsiteProof(target), token);
+        if (!isVerified) errorMessage = 'Exact crimfig-site-verification meta tag was not found.';
+      } else {
+        throw new Error('Unsupported website verification method');
       }
-    } else {
-      // html_file_and_meta_tag
-      try {
-        const targetUrl = website.url.startsWith('http') ? website.url : `https://${website.domain}`;
-        const res = await fetch(targetUrl, {
-          headers: { 'User-Agent': 'Crimfig-Verification-Bot/1.0' },
-          signal: AbortSignal.timeout(7000),
-        });
-
-        if (res.ok) {
-          const html = await res.text();
-          if (html.includes(token) || html.includes(`content="${token}"`)) {
-            isVerified = true;
-          } else {
-            errorMessage = `Meta tag <meta name="crimfig-site-verification" content="${token}"> was not found on ${targetUrl}.`;
-          }
-        } else {
-          errorMessage = `HTTP request to ${targetUrl} returned status ${res.status}`;
-        }
-      } catch (err: any) {
-        errorMessage = `Failed to fetch ${website.url}: ${err.message}`;
-      }
+    } catch {
+      // Do not expose resolver/network internals to dashboard clients.
+      errorMessage = 'Website verification failed. Check the HTTPS domain, public DNS and verification record.';
     }
 
     const [updated] = await this.db
       .update(adsPromoterWebsites)
       .set({
         verificationStatus: isVerified ? 'verified' : 'failed',
-        verifiedAt: isVerified ? new Date() : website.verifiedAt,
+        verifiedAt: isVerified ? new Date() : null,
         lastVerificationAttemptAt: new Date(),
         verificationErrorMessage: errorMessage,
         updatedAt: new Date(),
       })
-      .where(eq(adsPromoterWebsites.id, websiteId))
+      .where(and(eq(adsPromoterWebsites.id, websiteId), eq(adsPromoterWebsites.promoterId, promoterId)))
       .returning();
 
     return {

@@ -2,7 +2,7 @@
   "name": "@crimfig/billing-api",
   "version": "0.0.1",
   "private": true,
-  "description": "CrimFig Billing & Payments Microservice — Multi-provider, Wallets, Subscriptions & FX API",
+  "description": "CrimFig Billing & Payments Microservice \u2014 Multi-provider, Wallets, Subscriptions & FX API",
   "scripts": {
     "build": "nest build",
     "dev": "nest start --watch",
@@ -26,7 +26,8 @@
     "pg": "^8.13.1",
     "redis": "^4.7.0",
     "reflect-metadata": "^0.2.2",
-    "rxjs": "^7.8.1"
+    "rxjs": "^7.8.1",
+    "@nestjs/jwt": "^10.2.0"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.5",

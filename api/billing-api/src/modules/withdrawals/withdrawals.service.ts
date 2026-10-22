@@ -1,4 +1,6 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { WithdrawalLedgerService } from './withdrawal-ledger.service';
+import { WithdrawalDispatchService } from './withdrawal-dispatch.service';
+import { Injectable, Inject, NotFoundException, BadRequestException, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -18,6 +20,8 @@ export class WithdrawalsService {
     private readonly walletService: WalletService,
     private readonly fxService: ExchangeRateService,
     private readonly paystackService: PaystackService,
+    @Optional() private readonly ledger?: WithdrawalLedgerService,
+    @Optional() private readonly dispatch?: WithdrawalDispatchService,
   ) {}
 
   /**
@@ -27,116 +31,52 @@ export class WithdrawalsService {
     userId: string;
     bankAccountId: string;
     amountUsd: number;
+    requestId?: string;
+    quoteId?: string;
   }) {
-    if (params.amountUsd < 5) {
-      throw new BadRequestException('Minimum withdrawal amount is $5.00 USD');
+    this.requireAuthority();
+    const cents = Math.round(params.amountUsd * 100);
+    if (!params.requestId || !params.quoteId || !Number.isFinite(params.amountUsd) || !Number.isSafeInteger(cents) ||
+        cents < 500 || cents > 2147483647 || Math.abs(params.amountUsd * 100 - cents) > 0.0000001) {
+      throw new BadRequestException('Provide a UUID requestId and an amount with at most two decimal places');
     }
-
-    const usdCents = Math.round(params.amountUsd * 100);
-
-    // 1. Verify bank account belongs to user
-    const [bankAccount] = await this.db
-      .select()
-      .from(billingBankAccounts)
-      .where(
-        and(
-          eq(billingBankAccounts.id, params.bankAccountId),
-          eq(billingBankAccounts.userId, params.userId),
-        ),
-      )
-      .limit(1);
-
-    if (!bankAccount) {
-      throw new NotFoundException('Selected bank account not found');
+    // Reservation uses an existing validated quote; repeats never require a new provider/FX request.
+    const reservation = await this.ledger!.reserve(params.userId, params.requestId, params.bankAccountId, cents, params.quoteId);
+    if (reservation.alreadyReserved) {
+      const current = await this.ledger!.dispatchIntent(params.userId, reservation.reference, false);
+      return { ...reservation, status: current.status, confirmation: 'recovery_required' };
     }
+    return { ...reservation, ...await this.dispatch!.dispatch(params.userId, reservation.reference) };
+  }
 
-    // 2. Lock USD funds in wallet
-    await this.walletService.lockFunds(params.userId, usdCents, 'Withdrawal request pending');
+  async quoteWithdrawal(params: { userId: string; requestId: string; bankAccountId: string; amountUsd: number }) {
+    this.requireAuthority();
+    const cents = Math.round(params.amountUsd * 100);
+    if (!Number.isFinite(params.amountUsd) || !Number.isSafeInteger(cents) || cents < 500 || cents > 2147483647 ||
+        Math.abs(params.amountUsd * 100 - cents) > 0.0000001) throw new BadRequestException('Invalid withdrawal amount');
+    return this.ledger!.quote(params.userId, params.requestId, params.bankAccountId, cents);
+  }
 
-    // 3. Get current exchange rate snapshot
-    const fx = await this.fxService.getUsdToNgnRate();
-    const conversion = await this.fxService.convertUsdCentsToNgn(usdCents, fx.rate);
+  private requireAuthority() {
+    if (!this.ledger || !this.dispatch) throw new ServiceUnavailableException('This payment operation is unavailable pending its atomic reservation, provider reconciliation and completion contract');
+  }
 
-    const reference = `crimfig_wdr_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+  async recoverRequest(userId: string, requestId: string) {
+    this.requireAuthority();
+    return this.dispatch!.recover(userId, this.ledger!.referenceForRequest(userId, requestId));
+  }
 
-    // 4. Create withdrawal request record
-    const [withdrawal] = await this.db
-      .insert(billingWithdrawalRequests)
-      .values({
-        userId: params.userId,
-        bankAccountId: params.bankAccountId,
-        amountUsdCents: usdCents,
-        amountNgnKobo: conversion.ngnKobo,
-        exchangeRateId: fx.rateId,
-        status: 'pending',
-      })
-      .returning();
-
-    // 5. Create transaction record
-    const [tx] = await this.db
-      .insert(billingTransactions)
-      .values({
-        userId: params.userId,
-        type: 'wallet_withdraw',
-        status: 'pending',
-        provider: 'paystack',
-        reference,
-        amountUsdCents: usdCents,
-        amountNgnKobo: conversion.ngnKobo,
-        exchangeRateId: fx.rateId,
-        metadata: JSON.stringify({
-          withdrawalId: withdrawal.id,
-          bankAccountId: bankAccount.id,
-          bankName: bankAccount.bankName,
-          accountNumber: bankAccount.accountNumber,
-          accountName: bankAccount.accountName,
-          description: `Withdrawal $${params.amountUsd.toFixed(2)} USD (₦${conversion.ngnAmount.toLocaleString()} NGN) to ${bankAccount.bankName} - ${bankAccount.accountNumber}`,
-        }),
-      })
-      .returning();
-
-    // Update withdrawal with transactionId
-    await this.db
-      .update(billingWithdrawalRequests)
-      .set({ transactionId: tx.id })
-      .where(eq(billingWithdrawalRequests.id, withdrawal.id));
-
-    // 6. Attempt automated Paystack transfer payout
-    try {
-      if (bankAccount.recipientCode) {
-        const transferRes = await this.paystackService.initiateTransfer({
-          amountKobo: conversion.ngnKobo,
-          recipientCode: bankAccount.recipientCode,
-          reason: `CrimFig payout ${reference}`,
-          reference,
-        });
-
-        await this.db
-          .update(billingWithdrawalRequests)
-          .set({
-            status: 'processing',
-            paystackTransferCode: transferRes.transfer_code,
-            paystackTransferReference: reference,
-            updatedAt: new Date(),
-          })
-          .where(eq(billingWithdrawalRequests.id, withdrawal.id));
-      }
-    } catch (err: any) {
-      this.logger.warn(`Automated Paystack transfer queued for manual / retry: ${err.message}`);
-    }
-
-    return {
-      status: 'pending',
-      withdrawalId: withdrawal.id,
-      amountUsd: params.amountUsd,
-      amountNgn: conversion.ngnAmount,
-      exchangeRate: fx.rate,
-      bankAccount: {
-        bankName: bankAccount.bankName,
-        accountNumber: bankAccount.accountNumber,
-        accountName: bankAccount.accountName,
-      },
-    };
+  async recoverWithdrawal(userId: string, reference: string) {
+    this.requireAuthority();
+    return this.dispatch!.recover(userId, reference);
+  }
+  async dispatchWithdrawal(userId: string, reference: string) {
+    this.requireAuthority();
+    return this.dispatch!.dispatch(userId, reference);
+  }
+  async cancelWithdrawal(userId: string, reference: string) {
+    this.requireAuthority();
+    return this.ledger!.cancel(userId, reference);
   }
 
   /**

@@ -7,6 +7,7 @@ import { ValidationPipe, VersioningType, Logger, ShutdownSignal } from '@nestjs/
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { dashboardOrigins } from '@crimfig/shared';
 
 const logger = new Logger('BillingBootstrap');
 
@@ -20,10 +21,10 @@ async function bootstrap() {
   app.use(helmet());
 
   app.enableCors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
-    credentials: true,
+    origin: dashboardOrigins(process.env.ALLOWED_ORIGINS, process.env.NODE_ENV === 'production'),
+    credentials: false,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-key', 'x-user-id', 'x-user-email', 'x-paystack-signature', 'stripe-signature'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-key', 'x-paystack-signature', 'stripe-signature'],
   });
 
   app.useGlobalPipes(

@@ -22,7 +22,7 @@ export class AnalyticsController {
     @Query('startDate') startDate?: string,
     @Query('endDate') endDate?: string,
   ) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const summary = await this.analyticsService.getDashboardSummary(userId, period, startDate, endDate);
     return { status: 'success', data: summary };
   }
@@ -31,7 +31,7 @@ export class AnalyticsController {
   @ApiOperation({ summary: 'Get advertiser dashboard timeseries chart data' })
   @ApiQuery({ name: 'period', required: false, enum: ['7d', '30d', '90d', 'custom'] })
   async getDashboardTimeseries(@Req() req: any, @Query('period') period?: string) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const timeseries = await this.analyticsService.getDashboardTimeseries(userId, period);
     return { status: 'success', data: timeseries };
   }
@@ -40,7 +40,7 @@ export class AnalyticsController {
   @ApiOperation({ summary: 'Get advertiser channel performance breakdown' })
   @ApiQuery({ name: 'period', required: false, enum: ['7d', '30d', '90d'] })
   async getDashboardChannelBreakdown(@Req() req: any, @Query('period') period?: string) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const breakdown = await this.analyticsService.getDashboardChannelBreakdown(userId, period);
     return { status: 'success', data: breakdown };
   }
@@ -48,7 +48,7 @@ export class AnalyticsController {
   @Get('dashboard/alerts')
   @ApiOperation({ summary: 'Get actionable alerts for advertiser dashboard' })
   async getDashboardAlerts(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const alerts = await this.analyticsService.getDashboardAlerts(userId);
     return { status: 'success', data: alerts };
   }
@@ -57,7 +57,7 @@ export class AnalyticsController {
   @ApiOperation({ summary: 'Get customized table column preferences' })
   @ApiQuery({ name: 'tableName', required: false })
   async getTablePreferences(@Req() req: any, @Query('tableName') tableName?: string) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const prefs = await this.analyticsService.getUserTablePreferences(userId, tableName);
     return { status: 'success', data: prefs };
   }
@@ -69,7 +69,7 @@ export class AnalyticsController {
     @Body('tableName') tableName: string,
     @Body('columnsConfig') columnsConfig: any,
   ) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const saved = await this.analyticsService.saveUserTablePreferences(userId, tableName, columnsConfig);
     return { status: 'success', data: saved };
   }
@@ -77,7 +77,7 @@ export class AnalyticsController {
   @Get('promoter')
   @ApiOperation({ summary: 'Get promoter impressions, clicks, CTR, and earnings' })
   async getPromoterAnalytics(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId);
     const stats = await this.analyticsService.getPromoterAnalytics(promoter.id);
     return { status: 'success', data: stats };
@@ -86,7 +86,7 @@ export class AnalyticsController {
   @Get('advertiser')
   @ApiOperation({ summary: 'Get advertiser campaigns, budget spend, and conversion metrics' })
   async getAdvertiserAnalytics(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const stats = await this.analyticsService.getAdvertiserAnalytics(userId);
     return { status: 'success', data: stats };
   }

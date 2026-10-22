@@ -40,7 +40,7 @@ export class SubscriptionsController {
   @Get()
   @ApiOperation({ summary: 'List user subscriptions across apps' })
   async getUserSubscriptions(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const subs = await this.subsService.getUserSubscriptions(userId);
     return { status: 'success', data: subs };
   }
@@ -48,8 +48,8 @@ export class SubscriptionsController {
   @Post('subscribe')
   @ApiOperation({ summary: 'Subscribe to an app plan' })
   async subscribe(@Req() req: any, @Body() dto: SubscribeDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
-    const userEmail = req.user?.email || req.headers['x-user-email'] || 'user@crimfig.com';
+    const userId = req.user.sub;
+    const userEmail = req.user.email;
     const appSlug = dto.appSlug || dto.appName || 'chat';
 
     const result = await this.subsService.subscribe({
@@ -67,7 +67,7 @@ export class SubscriptionsController {
   @Delete(':id')
   @ApiOperation({ summary: 'Cancel a subscription' })
   async cancel(@Param('id') subId: string, @Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const result = await this.subsService.cancelSubscription(userId, subId);
     return { status: 'success', data: result };
   }

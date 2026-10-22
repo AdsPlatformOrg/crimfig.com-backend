@@ -52,7 +52,7 @@ export class PromotersController {
   @Get('profile')
   @ApiOperation({ summary: 'Get or auto-initialize promoter profile for current user' })
   async getProfile(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const profile = await this.promotersService.getOrCreatePromoter(userId);
     return { status: 'success', data: profile };
   }
@@ -60,7 +60,7 @@ export class PromotersController {
   @Post('register')
   @ApiOperation({ summary: 'Register/set promoter profile type' })
   async register(@Req() req: any, @Body() dto: RegisterPromoterDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const profile = await this.promotersService.getOrCreatePromoter(userId, dto.type, dto.displayName);
     return { status: 'success', data: profile };
   }
@@ -68,7 +68,7 @@ export class PromotersController {
   @Get('websites')
   @ApiOperation({ summary: 'List registered websites' })
   async getWebsites(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'WEBSITE');
     const websites = await this.promotersService.getWebsites(promoter.id);
     return { status: 'success', data: websites };
@@ -77,7 +77,7 @@ export class PromotersController {
   @Post('websites')
   @ApiOperation({ summary: 'Register a website for embed codes' })
   async addWebsite(@Req() req: any, @Body() dto: AddWebsiteDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'WEBSITE');
     const website = await this.promotersService.addWebsite(promoter.id, dto);
     return { status: 'success', data: website };
@@ -86,7 +86,7 @@ export class PromotersController {
   @Get('apps')
   @ApiOperation({ summary: 'List registered mobile apps' })
   async getApps(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'MOBILE_APP');
     const apps = await this.promotersService.getMobileApps(promoter.id);
     return { status: 'success', data: apps };
@@ -95,7 +95,7 @@ export class PromotersController {
   @Post('apps')
   @ApiOperation({ summary: 'Register a mobile app for ad SDK' })
   async addApp(@Req() req: any, @Body() dto: AddMobileAppDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'MOBILE_APP');
     const app = await this.promotersService.addMobileApp(promoter.id, dto);
     return { status: 'success', data: app };
@@ -104,7 +104,7 @@ export class PromotersController {
   @Put('categories')
   @ApiOperation({ summary: 'Update allowed ad categories for promoter profile' })
   async updateCategories(@Req() req: any, @Body('categories') categories: string[]) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId);
     const updated = await this.promotersService.updateCategories(promoter.id, categories || []);
     return { status: 'success', data: updated };
@@ -113,7 +113,7 @@ export class PromotersController {
   @Get('reels-consent')
   @ApiOperation({ summary: 'Get Reels auto-posting consent status' })
   async getReelsConsent(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'INDIVIDUAL');
     const consent = await this.promotersService.getReelsConsent(promoter.id);
     return { status: 'success', data: consent };
@@ -122,7 +122,7 @@ export class PromotersController {
   @Put('reels-consent')
   @ApiOperation({ summary: 'Update Reels auto-posting consent' })
   async setReelsConsent(@Req() req: any, @Body('consent') consent: boolean) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'INDIVIDUAL');
     const updated = await this.promotersService.setReelsConsent(promoter.id, consent);
     return { status: 'success', data: updated };
@@ -131,7 +131,7 @@ export class PromotersController {
   @Get('quality')
   @ApiOperation({ summary: 'Get promoter trust score and invalid traffic breakdown' })
   async getQuality(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId);
     const quality = await this.promotersService.getQualityMetrics(promoter.id);
     return { status: 'success', data: quality };

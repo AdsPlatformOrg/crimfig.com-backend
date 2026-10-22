@@ -1,3 +1,4 @@
+import { AdsRoles } from '../security/ads-staff-grants';
 import {
   Controller,
   Get,
@@ -52,7 +53,7 @@ export class ResolveDisputeDto {
 }
 
 @ApiTags('Ads Disputes & Traffic Quality Appeals')
-@Controller('api/v1')
+@Controller()
 export class DisputesController {
   constructor(private readonly disputesService: DisputesService) {}
 
@@ -63,7 +64,7 @@ export class DisputesController {
   @Post('disputes')
   @ApiOperation({ summary: 'Open invalid traffic dispute or appeal' })
   async createDispute(@Req() req: any, @Body() dto: CreateDisputeDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const dispute = await this.disputesService.createDispute({
       openedBy: userId,
       role: dto.role,
@@ -91,7 +92,7 @@ export class DisputesController {
     @Query('status') status?: string,
     @Query('limit') limit = '50',
   ) {
-    const userId = req.user?.sub || req.headers['x-user-id'];
+    const userId = req.user.sub;
     const data = await this.disputesService.getDisputes({
       openedBy: userId,
       role,
@@ -108,8 +109,8 @@ export class DisputesController {
    */
   @Get('disputes/:id')
   @ApiOperation({ summary: 'Get dispute details' })
-  async getDisputeById(@Param('id') id: string) {
-    const data = await this.disputesService.getDisputeById(id);
+  async getDisputeById(@Param('id') id: string, @Req() req: any) {
+    const data = await this.disputesService.getDisputeById(id, req.user.sub);
     return { status: 'success', data };
   }
 
@@ -117,6 +118,7 @@ export class DisputesController {
    * Admin resolution of dispute
    * POST /api/v1/admin/ads/disputes/:id/resolve
    */
+  @AdsRoles('ads_finance', 'ads_admin', 'super_admin')
   @Post('admin/ads/disputes/:id/resolve')
   @ApiOperation({ summary: 'Resolve dispute with findings and ledger adjustment' })
   async resolveDispute(
@@ -124,7 +126,7 @@ export class DisputesController {
     @Req() req: any,
     @Body() dto: ResolveDisputeDto,
   ) {
-    const adminId = req.user?.sub || req.headers['x-user-id'] || 'demo-admin-id';
+    const adminId = req.user.sub;
     const data = await this.disputesService.resolveDispute(id, {
       outcome: dto.outcome,
       status: dto.status,

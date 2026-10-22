@@ -1,8 +1,10 @@
+import { Public } from '@crimfig/shared';
 import { Controller, Get, Inject } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DATABASE_TOKEN } from '../database/database.module';
 
 @ApiTags('Health')
+@Public()
 @Controller('health')
 export class HealthController {
   constructor(

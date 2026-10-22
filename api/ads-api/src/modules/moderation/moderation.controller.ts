@@ -1,3 +1,4 @@
+import { AdsRoles } from '../security/ads-staff-grants';
 import { Controller, Get, Post, Body, Param, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ModerationService } from './moderation.service';
@@ -34,6 +35,7 @@ export class SuspendPromoterDto {
 }
 
 @ApiTags('Admin Moderation')
+@AdsRoles('ads_admin', 'ads_reviewer', 'ads_manager', 'ads_support', 'super_admin')
 @Controller('admin/ads/moderation')
 export class ModerationController {
   constructor(private readonly moderationService: ModerationService) {}
@@ -46,6 +48,7 @@ export class ModerationController {
     return { status: 'success', data: queue };
   }
 
+  @AdsRoles('ads_reviewer')
   @Post('creatives/:id/decision')
   @ApiOperation({ summary: 'Approve or reject creative asset' })
   async reviewCreative(
@@ -53,7 +56,7 @@ export class ModerationController {
     @Body() dto: ReviewDecisionDto,
     @Req() req: any,
   ) {
-    const reviewerId = req.user?.sub || req.headers['x-user-id'] || 'admin-reviewer';
+    const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCreative(creativeId, {
       decision: dto.decision,
       reasonCode: dto.reasonCode,
@@ -63,6 +66,7 @@ export class ModerationController {
     return { status: 'success', data: result };
   }
 
+  @AdsRoles('ads_reviewer')
   @Post('campaigns/:id/primary-review')
   @ApiOperation({ summary: 'Tier-1 primary review by ADS ADMIN Reviewer (under_review -> pending_manager_approval | rejected)' })
   async primaryReviewCampaign(
@@ -70,7 +74,7 @@ export class ModerationController {
     @Body() dto: ReviewDecisionDto,
     @Req() req: any,
   ) {
-    const reviewerId = req.user?.sub || req.headers['x-user-id'] || 'admin-reviewer-primary';
+    const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCampaignPrimary(campaignId, {
       decision: dto.decision,
       reasonCode: dto.reasonCode,
@@ -80,6 +84,7 @@ export class ModerationController {
     return { status: 'success', data: result };
   }
 
+  @AdsRoles('ads_manager')
   @Post('campaigns/:id/manager-approval')
   @ApiOperation({ summary: 'Tier-2 manager approval by ADS ADMIN Reviewer Manager (pending_manager_approval -> active | rejected)' })
   async managerApprovalCampaign(
@@ -87,7 +92,7 @@ export class ModerationController {
     @Body() dto: ReviewDecisionDto,
     @Req() req: any,
   ) {
-    const reviewerId = req.user?.sub || req.headers['x-user-id'] || 'admin-reviewer-manager';
+    const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCampaignManager(campaignId, {
       decision: dto.decision,
       reasonCode: dto.reasonCode,
@@ -97,6 +102,7 @@ export class ModerationController {
     return { status: 'success', data: result };
   }
 
+  @AdsRoles('super_admin')
   @Post('campaigns/:id/emergency-override')
   @ApiOperation({ summary: 'Super Admin emergency override with mandatory documented reason and audit trail' })
   async emergencyOverride(
@@ -104,7 +110,7 @@ export class ModerationController {
     @Body() dto: EmergencyOverrideDto,
     @Req() req: any,
   ) {
-    const reviewerId = req.user?.sub || req.headers['x-user-id'] || 'super-admin-override';
+    const reviewerId = req.user.sub;
     const result = await this.moderationService.emergencyOverride(campaignId, {
       reviewerId,
       decision: dto.decision,
@@ -113,6 +119,7 @@ export class ModerationController {
     return { status: 'success', data: result };
   }
 
+  @AdsRoles('ads_reviewer')
   @Post('campaigns/:id/decision')
   @ApiOperation({ summary: 'Legacy campaign review fallback (calls primary review)' })
   async reviewCampaign(
@@ -120,7 +127,7 @@ export class ModerationController {
     @Body() dto: ReviewDecisionDto,
     @Req() req: any,
   ) {
-    const reviewerId = req.user?.sub || req.headers['x-user-id'] || 'admin-reviewer';
+    const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCampaign(campaignId, {
       decision: dto.decision,
       reasonCode: dto.reasonCode,
@@ -130,6 +137,7 @@ export class ModerationController {
     return { status: 'success', data: result };
   }
 
+  @AdsRoles('ads_admin', 'super_admin')
   @Post('promoters/:id/suspend')
   @ApiOperation({ summary: 'Suspend or unsuspend promoter account' })
   async suspendPromoter(

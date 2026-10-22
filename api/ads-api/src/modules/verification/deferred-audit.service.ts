@@ -30,7 +30,7 @@ export class DeferredAuditService {
   /**
    * Scheduled cron worker running every 30 minutes.
    * Processes deferred verification audits, validates partner domains/bundle IDs,
-   * detects domain spoofing, aggregates hourly metric rollups, and executes batch settlements.
+   * records domain diagnostics and aggregates hourly metric rollups. Financial settlement is disabled.
    */
   @Cron(CronExpression.EVERY_30_MINUTES)
   async handleDeferredAuditCron() {
@@ -47,17 +47,10 @@ export class DeferredAuditService {
       const auditsProcessed = await this.processEmbedAudits();
       const rollupsGenerated = await this.aggregateHourlyMetrics();
 
-      // Trigger the 30-minute deferred batch settlement engine
-      let settlementBatch: any = null;
-      try {
-        settlementBatch = await this.settlementService.processPendingSettlement();
-      } catch (settleErr: any) {
-        this.logger.error(`Settlement engine error during deferred audit: ${settleErr.message}`, settleErr.stack);
-      }
-
+      // Financial settlement is unavailable pending event attribution and funded reconciliation.
       const durationMs = Date.now() - startTime;
       this.logger.log(
-        `Deferred audit cycle completed in ${durationMs}ms: ${auditsProcessed} audits processed, ${rollupsGenerated} hourly rollups updated, batch ${settlementBatch?.batchNumber || 'N/A'}.`,
+        `Deferred audit cycle completed in ${durationMs}ms: ${auditsProcessed} audits processed, ${rollupsGenerated} hourly rollups updated. Financial settlement unavailable.`,
       );
     } catch (error: any) {
       this.logger.error(`Error during deferred audit cron cycle: ${error.message}`, error.stack);
@@ -116,16 +109,10 @@ export class DeferredAuditService {
                 `Domain mismatch detected on embed ping: auditDomain=${auditDomain}, registeredDomain=${registeredDomain}`,
               );
             } else {
-              // Valid ping - update last ping timestamp
+              // Diagnostic ping only - update last ping timestamp
               const updates: any = { embedPingLastAt: audit.runTimestamp };
 
-              // If website was pending and ping origin matches registered domain, auto-promote to verified
-              if (website.verificationStatus === 'pending') {
-                updates.verificationStatus = 'verified';
-                updates.verifiedAt = new Date();
-                this.logger.log(`Website ${website.domain} auto-verified via verified embed execution ping.`);
-              }
-
+              // Public execution pings cannot establish website ownership.
               await this.db.update(adsPromoterWebsites).set(updates).where(eq(adsPromoterWebsites.id, website.id));
             }
           } else {
@@ -145,13 +132,9 @@ export class DeferredAuditService {
             .where(and(...conditions))
             .limit(1);
 
-          if (app && app.verificationStatus === 'pending') {
-            await this.db
-              .update(adsPromoterApps)
-              .set({ verificationStatus: 'verified', verifiedAt: new Date() })
-              .where(eq(adsPromoterApps.id, app.id));
-            this.logger.log(`App ${app.appName} (${app.bundleId}) auto-verified via verified app execution token.`);
-          }
+          if (!app) flag = 'unknown_app_target';
+          // Mobile execution pings do not establish app-store ownership or attestation.
+
         }
 
         // Update audit record status
