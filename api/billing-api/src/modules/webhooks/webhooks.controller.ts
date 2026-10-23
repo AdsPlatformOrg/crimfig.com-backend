@@ -1,4 +1,4 @@
-import { Controller, Post, Headers, Req, HttpCode } from '@nestjs/common';
+import { Controller, Post, Headers, Req, HttpCode, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { WebhooksService } from './webhooks.service';
 import { Public } from '@crimfig/shared';
@@ -16,9 +16,9 @@ export class WebhooksController {
     @Headers('x-paystack-signature') signature: string,
     @Req() req: any,
   ) {
-    const rawBody = req.body;
+    if (!Buffer.isBuffer(req.rawBody)) throw new BadRequestException('Raw webhook body required');
     return this.webhooksService.handlePaystackWebhook(
-      typeof rawBody === 'string' ? rawBody : JSON.stringify(rawBody),
+      req.rawBody.toString('utf8'),
       signature,
     );
   }

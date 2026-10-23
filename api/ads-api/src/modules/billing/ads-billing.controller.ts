@@ -1,9 +1,21 @@
+import { AdsRoles } from '../security/ads-staff-grants';
 import { Controller, Get, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AdsEscrowService } from './ads-escrow.service';
 import { AdsSettlementService } from './ads-settlement.service';
 import { DeferredAuditService } from './deferred-audit.service';
-import { IsString, IsNumber, Min, IsOptional } from 'class-validator';
+import { IsString, IsNumber, Min, IsOptional, IsUUID, IsISO8601 } from 'class-validator';
+
+export class SettleFundedCampaignDto {
+  @IsUUID('4')
+  campaignId: string;
+
+  @IsUUID('4')
+  requestId: string;
+
+  @IsISO8601({ strict: true })
+  periodEnd: string;
+}
 
 export class LockCampaignEscrowDto {
   @IsString()
@@ -28,7 +40,8 @@ export class ReleaseCampaignEscrowDto {
 }
 
 @ApiTags('Ads Billing & Escrow')
-@Controller('api/v1/ads/billing')
+@AdsRoles('ads_finance', 'ads_admin', 'super_admin')
+@Controller('ads/billing')
 export class AdsBillingController {
   constructor(
     private readonly escrowService: AdsEscrowService,
@@ -36,18 +49,20 @@ export class AdsBillingController {
     private readonly auditService: DeferredAuditService,
   ) {}
 
+  @AdsRoles()
   @Get('overview')
   @ApiOperation({ summary: 'Get unified advertiser balance and escrow status' })
   async getOverview(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const data = await this.escrowService.getBillingOverview(userId);
     return { status: 'success', data };
   }
 
+  @AdsRoles()
   @Post('escrow/lock')
   @ApiOperation({ summary: 'Lock campaign budget into escrow' })
   async lockEscrow(@Req() req: any, @Body() dto: LockCampaignEscrowDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const escrow = await this.escrowService.lockCampaignBudget({
       campaignId: dto.campaignId,
       userId,
@@ -57,10 +72,11 @@ export class AdsBillingController {
     return { status: 'success', data: escrow };
   }
 
+  @AdsRoles()
   @Post('escrow/release')
   @ApiOperation({ summary: 'Release unconsumed escrow budget upon campaign pause/trash' })
   async releaseEscrow(@Req() req: any, @Body() dto: ReleaseCampaignEscrowDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const result = await this.escrowService.releaseCampaignBudget({
       campaignId: dto.campaignId,
       userId,
@@ -69,10 +85,11 @@ export class AdsBillingController {
     return { status: 'success', data: result };
   }
 
+  @AdsRoles()
   @Get('escrow/:campaignId')
   @ApiOperation({ summary: 'Get escrow details for a campaign' })
-  async getCampaignEscrow(@Param('campaignId') campaignId: string) {
-    const escrow = await this.escrowService.getCampaignEscrow(campaignId);
+  async getCampaignEscrow(@Param('campaignId') campaignId: string, @Req() req: any) {
+    const escrow = await this.escrowService.getCampaignEscrow(campaignId, req.user.sub);
     return { status: 'success', data: escrow };
   }
 
@@ -95,6 +112,12 @@ export class AdsBillingController {
   async triggerSettlement() {
     const batch = await this.settlementService.processPendingSettlement();
     return { status: 'success', message: 'Batch reconciliation completed', data: batch };
+  }
+
+  @Post('settlements/funded')
+  @ApiOperation({ summary: 'Finance staff: settle a versioned campaign into held earnings using a durable request UUID' })
+  async settleFunded(@Body() dto: SettleFundedCampaignDto) {
+    return { status: 'success', data: await this.settlementService.settleFundedCampaign(dto.campaignId, dto.requestId, dto.periodEnd) };
   }
 
   @Get('audits')

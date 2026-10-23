@@ -4,6 +4,11 @@ import { UnauthorizedException } from '@nestjs/common';
 import { TokensService } from './tokens.service';
 import { DATABASE_TOKEN } from '../database/database.module';
 
+jest.mock('../../config/config', () => ({ config: { JWT: {
+  ACCESS_SECRET: 'unit-test-signing-secret', ACCESS_EXPIRES_IN: '15m',
+  REFRESH_EXPIRES_DAYS: 30, MFA_CHALLENGE_EXPIRES_IN: '5m',
+} } }));
+
 describe('TokensService', () => {
   let service: TokensService;
   let mockDb: any;
@@ -12,6 +17,7 @@ describe('TokensService', () => {
   beforeEach(async () => {
     mockJwtService = {
       sign: jest.fn().mockReturnValue('mock_jwt_token'),
+      decode: jest.fn().mockImplementation(() => ({ exp: Math.floor(Date.now() / 1000) + 900 })),
       verify: jest.fn().mockReturnValue({ sub: 'user_123', email: 'test@crimfig.com', type: 'access' }),
     };
 

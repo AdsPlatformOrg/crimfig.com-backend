@@ -14,7 +14,7 @@ export class VerificationController {
   @Post('website/:websiteId')
   @ApiOperation({ summary: 'Trigger domain verification for a website' })
   async verifyWebsite(@Param('websiteId') websiteId: string, @Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'WEBSITE');
     const result = await this.verificationService.verifyWebsite(promoter.id, websiteId);
     return { status: 'success', data: result };
@@ -23,7 +23,7 @@ export class VerificationController {
   @Post('app/:appId')
   @ApiOperation({ summary: 'Trigger verification for a mobile app' })
   async verifyApp(@Param('appId') appId: string, @Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'MOBILE_APP');
     const result = await this.verificationService.verifyMobileApp(promoter.id, appId);
     return { status: 'success', data: result };

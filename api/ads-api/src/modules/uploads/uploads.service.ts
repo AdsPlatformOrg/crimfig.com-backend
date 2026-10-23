@@ -4,7 +4,7 @@ import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
 import { adsMediaAssets } from '@crimfig/database/schema';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, or } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import * as path from 'path';
 import { FirebaseStorageService } from './firebase-storage.service';
@@ -283,12 +283,28 @@ export class UploadsService {
   /**
    * Streams a private file securely from Firebase Storage bucket
    */
-  async getMediaStream(storageKey: string) {
+  async getMediaStream(storageKey: string, ownerId?: string, staffReview = false) {
     // Validate storageKey format to prevent directory traversal
     if (storageKey.includes('/') || storageKey.includes('\\') || storageKey.includes('..')) {
       throw new BadRequestException('Invalid media key format. Subdirectories not permitted.');
     }
 
+    const [asset] = await this.db.select().from(adsMediaAssets).where(and(
+      eq(adsMediaAssets.storageKey, storageKey), eq(adsMediaAssets.status, 'ready'),
+      ...(ownerId ? [eq(adsMediaAssets.ownerId, ownerId)] : []),
+    )).limit(1);
+    if (!asset) throw new NotFoundException('Media asset not found');
+    if (!ownerId && !staffReview) {
+      const [approved] = await this.db.select({ id: schema.adsCreatives.id }).from(schema.adsCreatives)
+        .innerJoin(schema.adsCampaigns, eq(schema.adsCreatives.campaignId, schema.adsCampaigns.id))
+        .where(and(
+          eq(schema.adsCampaigns.advertiserId, asset.ownerId),
+          eq(schema.adsCampaigns.status, 'active'), eq(schema.adsCampaigns.moderationStatus, 'approved'),
+          eq(schema.adsCreatives.status, 'active'), eq(schema.adsCreatives.reviewStatus, 'approved'),
+          or(eq(schema.adsCreatives.imageUrl, asset.cdnUrl), eq(schema.adsCreatives.videoUrl, asset.cdnUrl)),
+        )).limit(1);
+      if (!approved) throw new NotFoundException('Public media asset not found');
+    }
     const bucket = this.firebaseStorageService.getBucket();
     if (!bucket) {
       throw new NotFoundException('Storage bucket not initialized');

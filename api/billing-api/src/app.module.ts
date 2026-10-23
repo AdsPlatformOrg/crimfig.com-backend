@@ -12,11 +12,15 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { EcosystemModule } from './modules/ecosystem/ecosystem.module';
 import { HealthModule } from './modules/health/health.module';
+import { APP_GUARD } from '@nestjs/core';
+import { DashboardAuthModule } from '@crimfig/shared';
+import { BillingAccessGuard } from './modules/security/billing-access.guard';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     DatabaseModule,
+    DashboardAuthModule,
     ExchangeRateModule,
     ProvidersModule,
     WalletModule,
@@ -29,5 +33,6 @@ import { HealthModule } from './modules/health/health.module';
     EcosystemModule,
     HealthModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: BillingAccessGuard }],
 })
 export class AppModule {}

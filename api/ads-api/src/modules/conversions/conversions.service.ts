@@ -58,7 +58,7 @@ export class ConversionsService {
    * Verifies an advertiser API key from S2S Authorization header
    */
   async verifyApiKey(rawKey: string) {
-    if (!rawKey || !rawKey.startsWith('cf_adv_')) {
+    if (typeof rawKey !== 'string' || rawKey.length > 256 || !rawKey.startsWith('cf_adv_')) {
       throw new UnauthorizedException('Invalid or missing API key format');
     }
 
@@ -73,6 +73,13 @@ export class ConversionsService {
       throw new UnauthorizedException('Advertiser API key not recognized or revoked');
     }
 
+    if (!keyRecord.scopes.split(/[ ,]+/).includes('conversions:write')) {
+      throw new UnauthorizedException('API key lacks conversions:write scope');
+    }
+    const owner = await this.db.query.users.findFirst({ where: eq(users.id, keyRecord.advertiserId) });
+    if (!owner || owner.status === 'SUSPENDED' || owner.status === 'DELETED') {
+      throw new UnauthorizedException('Advertiser account is not available');
+    }
     // Update lastUsedAt asynchronously
     this.db
       .update(adsAdvertiserApiKeys)
@@ -156,9 +163,9 @@ export class ConversionsService {
   async ingestConversion(params: ReportConversionParams) {
     let advertiserId = params.advertiserId;
 
-    // If S2S with API key, authenticate
-    if (params.apiKey && !advertiserId) {
-      const verifiedKey = await this.verifyApiKey(params.apiKey);
+    // A supplied advertiser ID can never replace server authentication.
+    if (params.source === 's2s') {
+      const verifiedKey = await this.verifyApiKey(params.apiKey || '');
       advertiserId = verifiedKey.advertiserId;
     }
 
@@ -167,7 +174,7 @@ export class ConversionsService {
     }
 
     // 1. Deduplication Check: if orderId is provided, check if (advertiserId, orderId, event) exists
-    if (params.orderId) {
+    if (params.orderId && params.source === 's2s') {
       const [existing] = await this.db
         .select()
         .from(adsConversions)
@@ -176,6 +183,7 @@ export class ConversionsService {
             eq(adsConversions.advertiserId, advertiserId),
             eq(adsConversions.orderId, params.orderId),
             eq(adsConversions.event, params.event),
+            eq(adsConversions.source, params.source),
           ),
         )
         .limit(1);
@@ -195,23 +203,32 @@ export class ConversionsService {
     let attributedPromoterId: string | undefined;
     let attributionStatus: 'attributed' | 'unattributed' = 'unattributed';
 
-    if (params.clickId) {
+    // Browser beacons are untrusted telemetry, never payable attribution.
+    if (params.clickId && params.source === 's2s') {
       const [click] = await this.db
         .select()
         .from(adsClicks)
         .where(and(eq(adsClicks.clickId, params.clickId), gte(adsClicks.expiresAt, new Date())))
         .limit(1);
 
-      if (click) {
+      const [ownedCampaign] = click ? await this.db.select().from(adsCampaigns).where(and(
+        eq(adsCampaigns.id, click.campaignId), eq(adsCampaigns.advertiserId, advertiserId),
+      )).limit(1) : [];
+      if (click && ownedCampaign) {
         campaignId = click.campaignId;
         attributedPromoterId = click.promoterId || undefined;
         attributionStatus = 'attributed';
       }
     }
 
-    // Convert value to micros ($1 = 1,000,000 micros)
-    const valueMicros = params.value ? Math.round(params.value * 1_000_000) : null;
-    const valueUsdMicros = valueMicros; // Default 1:1 USD fallback
+    // Preserve zero; never invent a USD conversion for other currencies.
+    const currency = (params.currency || 'USD').toUpperCase();
+    if (!/^[A-Z]{3}$/.test(currency)) throw new BadRequestException('Invalid conversion currency');
+    const valueMicros = params.value == null ? null : Math.round(params.value * 1_000_000);
+    if (valueMicros !== null && (!Number.isFinite(params.value) || params.value! < 0 || !Number.isSafeInteger(valueMicros))) {
+      throw new BadRequestException('Invalid conversion value');
+    }
+    const valueUsdMicros = currency === 'USD' ? valueMicros : null;
     const holdbackReleaseAt = new Date(Date.now() + 72 * 60 * 60 * 1000); // 72-Hour Clearance Hold
 
     // 3. Insert conversion record into ads_conversions
@@ -222,9 +239,10 @@ export class ConversionsService {
         campaignId,
         clickId: params.clickId || null,
         event: params.event,
-        orderId: params.orderId || null,
+        // Public telemetry cannot reserve the advertiser's authoritative order dedupe key.
+        orderId: params.source === 's2s' ? params.orderId || null : null,
         valueMicros,
-        currency: params.currency || 'USD',
+        currency,
         valueUsdMicros,
         source: params.source,
         status: attributionStatus,
@@ -358,7 +376,7 @@ export class ConversionsService {
       event: eventName,
       orderId: params.orderId || params.order_id,
       value: params.value,
-      currency: params.currency || 'USD',
+      currency,
       metadata: params,
       source: 'pixel',
       url: window.location.href,

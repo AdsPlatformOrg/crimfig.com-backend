@@ -16,7 +16,7 @@ export class TransactionsController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
   ) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const result = await this.transactionsService.getUserTransactions(userId, {
       type,
       status,
@@ -29,7 +29,7 @@ export class TransactionsController {
   @Get(':id')
   @ApiOperation({ summary: 'Get single transaction receipt details' })
   async getTransaction(@Req() req: any, @Param('id') id: string) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const tx = await this.transactionsService.getTransactionById(userId, id);
     return { status: 'success', data: tx };
   }

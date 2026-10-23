@@ -28,7 +28,6 @@ export class BankAccountsController {
     return { status: 'success', data: banks };
   }
 
-  @Public()
   @Get('resolve')
   @ApiOperation({ summary: 'Resolve account name from account number and bank code' })
   async resolveAccount(
@@ -42,7 +41,7 @@ export class BankAccountsController {
   @Get()
   @ApiOperation({ summary: 'Get user saved bank accounts' })
   async getUserAccounts(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const accounts = await this.bankAccountsService.getUserBankAccounts(userId);
     return { status: 'success', data: accounts };
   }
@@ -50,7 +49,7 @@ export class BankAccountsController {
   @Post()
   @ApiOperation({ summary: 'Save a verified bank account' })
   async addAccount(@Req() req: any, @Body() dto: AddBankAccountDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const account = await this.bankAccountsService.addBankAccount({
       userId,
       accountNumber: dto.accountNumber,
@@ -63,7 +62,7 @@ export class BankAccountsController {
   @Delete(':id')
   @ApiOperation({ summary: 'Delete a saved bank account' })
   async deleteAccount(@Param('id') id: string, @Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const result = await this.bankAccountsService.deleteBankAccount(userId, id);
     return { status: 'success', data: result };
   }

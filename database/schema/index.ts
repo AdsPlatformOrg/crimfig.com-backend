@@ -49,3 +49,5 @@ export * from './ads_disputes';                  // includes: adsDisputes, dispu
 // ─── Shared Ecosystem Monetization ───────────────────────────────────────────
 export * from './monetization';                 // includes: monetizationProducts, monetizationTiers, monetizationRevenuePolicies, monetizationAccountTiers, monetizationEarningEvents, monetizationSettlementEntries, monetizationCommissionRules
 
+
+export * from './ads_settlement_claims';

@@ -1,3 +1,5 @@
+import { AdsRoles } from '../security/ads-staff-grants';
+import { Public } from '@crimfig/shared';
 import {
   Controller,
   Post,
@@ -80,7 +82,7 @@ export class UploadsController {
     if (!file) {
       throw new BadRequestException('No file uploaded in form field "file"');
     }
-    const ownerId = req.user?.sub || req.headers['x-user-id'] || 'demo-advertiser';
+    const ownerId = req.user.sub;
     const result = await this.uploadsService.uploadDirect({
       ownerId,
       file,
@@ -88,8 +90,9 @@ export class UploadsController {
     return { status: 'success', data: result };
   }
 
+  @Public()
   @Get('media/:storageKey')
-  @ApiOperation({ summary: 'Stream private media asset securely from Firebase bucket' })
+  @ApiOperation({ summary: 'Stream approved active public ad media' })
   async getMedia(
     @Param('storageKey') storageKey: string,
     @Res() res: Response,
@@ -99,14 +102,35 @@ export class UploadsController {
     if (contentLength) {
       res.setHeader('Content-Length', contentLength);
     }
-    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.setHeader('Cache-Control', 'no-store');
+    stream.pipe(res);
+  }
+
+  @Get('private-media/:storageKey')
+  @ApiOperation({ summary: 'Authenticated owner preview of a ready media asset' })
+  async previewMedia(@Param('storageKey') storageKey: string, @Req() req: any, @Res() res: Response) {
+    const { stream, contentType, contentLength } = await this.uploadsService.getMediaStream(storageKey, req.user.sub);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'no-store');
+    if (contentLength) res.setHeader('Content-Length', contentLength);
+    stream.pipe(res);
+  }
+
+  @AdsRoles('ads_reviewer', 'ads_manager', 'ads_admin', 'ads_support', 'super_admin')
+  @Get('review-media/:storageKey')
+  @ApiOperation({ summary: 'Ready asset preview for explicitly assigned moderation staff' })
+  async reviewMedia(@Param('storageKey') storageKey: string, @Res() res: Response) {
+    const { stream, contentType, contentLength } = await this.uploadsService.getMediaStream(storageKey, undefined, true);
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'no-store');
+    if (contentLength) res.setHeader('Content-Length', contentLength);
     stream.pipe(res);
   }
 
   @Post('presign')
   @ApiOperation({ summary: 'Obtain presigned upload URL for direct Firebase bucket asset upload' })
   async presign(@Body() dto: PresignUploadDto, @Req() req: any) {
-    const ownerId = req.user?.sub || req.headers['x-user-id'] || 'demo-advertiser';
+    const ownerId = req.user.sub;
     const result = await this.uploadsService.presign({
       ownerId,
       fileName: dto.fileName,
@@ -124,7 +148,7 @@ export class UploadsController {
     @Body() dto: CompleteUploadDto,
     @Req() req: any,
   ) {
-    const ownerId = req.user?.sub || req.headers['x-user-id'] || 'demo-advertiser';
+    const ownerId = req.user.sub;
     const result = await this.uploadsService.complete({
       assetId,
       ownerId,
@@ -139,7 +163,7 @@ export class UploadsController {
   @Delete(':assetId')
   @ApiOperation({ summary: 'Delete unattached media asset' })
   async deleteAsset(@Param('assetId') assetId: string, @Req() req: any) {
-    const ownerId = req.user?.sub || req.headers['x-user-id'] || 'demo-advertiser';
+    const ownerId = req.user.sub;
     const result = await this.uploadsService.deleteAsset(assetId, ownerId);
     return { status: 'success', data: result };
   }

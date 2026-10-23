@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import * as schema from '@crimfig/database/schema';
+import { auctionScoreMicros, eventPriceNanos } from './pricing-contract';
 
 export interface AuctionCandidate {
   campaignId: string;
@@ -10,6 +10,7 @@ export interface AuctionCandidate {
   imageUrl?: string | null;
   destinationUrl: string;
   pricingModel: 'cpm' | 'cpc';
+  pricingVersion: number;
   costPerImpressionUsdCents: number;
   costPerClickUsdCents: number;
   remainingBudgetUsdCents: number;
@@ -34,6 +35,7 @@ export interface AuctionResolutionContext {
 export interface AuctionResult {
   winner: AuctionCandidate;
   clearingPriceMicros: number; // in 1/1,000,000 USD
+  billingPriceNanos: bigint;
   secondPriceMicros: number;
   score: number;
 }
@@ -59,25 +61,26 @@ export class AuctionEngineService {
     // 1. Eligibility Filtering
     const eligible = candidates.filter((cand) => {
       // Must have positive remaining budget
-      if (cand.remainingBudgetUsdCents <= 0) return false;
+      if (cand.pricingVersion !== 2 || cand.remainingBudgetUsdCents <= 0) return false;
+      if (![cand.costPerImpressionUsdCents, cand.costPerClickUsdCents].every(value => Number.isSafeInteger(value) && value > 0 && value <= 2147483647)) return false;
 
       // Device targeting filter
-      if (cand.targetDevices && cand.targetDevices.length > 0 && context.clientDevice) {
-        if (!cand.targetDevices.includes(context.clientDevice)) {
+      if (cand.targetDevices && cand.targetDevices.length > 0) {
+        if (!context.clientDevice || !cand.targetDevices.includes(context.clientDevice)) {
           return false;
         }
       }
 
       // Geo-country targeting filter
-      if (cand.targetCountries && cand.targetCountries.length > 0 && context.clientGeoCountry) {
-        if (!cand.targetCountries.includes(context.clientGeoCountry)) {
+      if (cand.targetCountries && cand.targetCountries.length > 0) {
+        if (!context.clientGeoCountry || !cand.targetCountries.includes(context.clientGeoCountry)) {
           return false;
         }
       }
 
       // Geo-state targeting filter (e.g. Lagos, Abuja)
-      if (cand.targetStates && cand.targetStates.length > 0 && context.clientGeoRegion) {
-        if (!cand.targetStates.includes(context.clientGeoRegion)) {
+      if (cand.targetStates && cand.targetStates.length > 0) {
+        if (!context.clientGeoRegion || !cand.targetStates.includes(context.clientGeoRegion)) {
           return false;
         }
       }
@@ -96,24 +99,10 @@ export class AuctionEngineService {
       return null;
     }
 
-    // 2. eCPM Scoring & Normalization
-    // CPM: bid in cents * 10 = eCPM in micros
-    // CPC: bid in cents * expected CTR (1.5% default) * 1000
-    const scored = eligible.map((cand) => {
-      let eCpmMicros = 0;
-      if (cand.pricingModel === 'cpm') {
-        eCpmMicros = cand.costPerImpressionUsdCents * 10000;
-      } else {
-        // Assume default baseline CTR of 1.5%
-        const expectedCtr = 0.015;
-        eCpmMicros = cand.costPerClickUsdCents * expectedCtr * 10000;
-      }
-
-      return {
-        candidate: cand,
-        score: Math.max(100, Math.round(eCpmMicros)),
-      };
-    });
+    // Standard CPM cents per 1,000 impressions; CPC normalized at versioned 1.5% ranking CTR.
+    const scored = eligible.map(candidate => ({ candidate,
+      score: auctionScoreMicros(candidate.pricingModel, candidate.pricingModel === 'cpm' ? candidate.costPerImpressionUsdCents : candidate.costPerClickUsdCents),
+    }));
 
     // Sort descending by highest effective CPM score
     scored.sort((a, b) => b.score - a.score);
@@ -129,6 +118,7 @@ export class AuctionEngineService {
     return {
       winner: winnerItem.candidate,
       clearingPriceMicros,
+      billingPriceNanos: eventPriceNanos(winnerItem.candidate.pricingModel, clearingPriceMicros),
       secondPriceMicros,
       score: winnerItem.score,
     };

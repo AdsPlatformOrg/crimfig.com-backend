@@ -32,7 +32,7 @@ export class PlacementsController {
   @Get()
   @ApiOperation({ summary: 'Get all active placements and embed codes for promoter' })
   async getPlacements(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId);
     const placements = await this.placementsService.getPromoterPlacements(promoter.id);
     return { status: 'success', data: placements };
@@ -41,7 +41,7 @@ export class PlacementsController {
   @Post()
   @ApiOperation({ summary: 'Apply to campaign and generate placement embed code or share link' })
   async createPlacement(@Req() req: any, @Body() dto: CreatePlacementDto) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId);
     const placement = await this.placementsService.createPlacement({
       promoterId: promoter.id,

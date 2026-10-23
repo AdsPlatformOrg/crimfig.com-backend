@@ -10,7 +10,7 @@ export class CardsController {
   @Get()
   @ApiOperation({ summary: 'List all saved cards for current user' })
   async getCards(@Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const cards = await this.cardsService.getUserCards(userId);
     return { status: 'success', data: cards };
   }
@@ -18,7 +18,7 @@ export class CardsController {
   @Post(':id/default')
   @ApiOperation({ summary: 'Set card as default' })
   async setDefault(@Param('id') cardId: string, @Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const result = await this.cardsService.setDefaultCard(userId, cardId);
     return { status: 'success', data: result };
   }
@@ -26,7 +26,7 @@ export class CardsController {
   @Delete(':id')
   @ApiOperation({ summary: 'Remove a saved card' })
   async deleteCard(@Param('id') cardId: string, @Req() req: any) {
-    const userId = req.user?.sub || req.headers['x-user-id'] || 'demo-user-id';
+    const userId = req.user.sub;
     const result = await this.cardsService.deleteCard(userId, cardId);
     return { status: 'success', data: result };
   }

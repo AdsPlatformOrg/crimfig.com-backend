@@ -1,3 +1,4 @@
+import { adsCorsOptions } from './modules/security/ads-cors';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -18,12 +19,7 @@ async function bootstrap() {
   app.enableShutdownHooks([ShutdownSignal.SIGINT, ShutdownSignal.SIGTERM]);
   app.use(helmet());
 
-  app.enableCors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  });
+  app.enableCors(adsCorsOptions(process.env.ALLOWED_ORIGINS, process.env.NODE_ENV === 'production'));
 
   app.useGlobalPipes(
     new ValidationPipe({

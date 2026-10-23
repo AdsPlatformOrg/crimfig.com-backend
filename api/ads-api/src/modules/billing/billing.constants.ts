@@ -19,16 +19,27 @@ export const DEFAULT_INTERNAL_MARKETING_COMMISSION_RATIO = 0.05; // Default 5% (
 // Premium publisher bonuses are budgeted separately to prevent diluting the referral pool
 export const PERFORMANCE_BONUS_POOL_RATIO = 0.00;          // Separately budgeted, 0% dilution of referral pool
 
-// ─── Exchange Rate Fallback ─────────────────────────────────────────────────
-export const DEFAULT_USD_NGN_EXCHANGE_RATE = 1625.50;      // 1 USD = ₦1,625.50 fallback if feed offline
+// NOTE: No hardcoded USD/NGN fallback rate exists by design. FX must come only from the fresh,
+// persisted, validated Billing quote (PLAN-0009 FX policy); if unavailable, fail closed.
 
 /**
  * Helper to calculate revenue distribution for a given gross spend in cents.
+ *
+ * Integer-exact: publisher and commission-pool shares are floored and CrimFig base revenue is
+ * the remainder, so publisher + crimfigBase + commissionPool === grossSpendUsdCents always.
+ * Independent rounding of each share could create or destroy cents; flooring the publisher
+ * side never over-pays promoters. Gross must be a non-negative safe integer.
  */
 export function calculateRevenueDistribution(grossSpendUsdCents: number) {
-  const publisherEarningsCents = Math.round(grossSpendUsdCents * PUBLISHER_REVENUE_SHARE_RATIO);
-  const crimfigBaseRevenueCents = Math.round(grossSpendUsdCents * CRIMFIG_BASE_REVENUE_RATIO);
-  const commissionPoolCents = Math.round(grossSpendUsdCents * MARKETING_COMMISSION_POOL_RATIO);
+  if (!Number.isSafeInteger(grossSpendUsdCents) || grossSpendUsdCents < 0) {
+    throw new RangeError('grossSpendUsdCents must be a non-negative safe integer');
+  }
+  // Integer percent math (ratios are whole percents) avoids binary-float drift such as 0.55*n.
+  const publisherPct = Math.round(PUBLISHER_REVENUE_SHARE_RATIO * 100);
+  const commissionPct = Math.round(MARKETING_COMMISSION_POOL_RATIO * 100);
+  const publisherEarningsCents = Number(BigInt(grossSpendUsdCents) * BigInt(publisherPct) / 100n);
+  const commissionPoolCents = Number(BigInt(grossSpendUsdCents) * BigInt(commissionPct) / 100n);
+  const crimfigBaseRevenueCents = grossSpendUsdCents - publisherEarningsCents - commissionPoolCents;
 
   return {
     grossSpendUsdCents,

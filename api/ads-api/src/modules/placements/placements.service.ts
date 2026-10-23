@@ -33,31 +33,41 @@ export class PlacementsService {
     websiteId?: string;
     appId?: string;
   }) {
+    const [promoter] = await this.db.select().from(adsPromoters).where(eq(adsPromoters.id, params.promoterId)).limit(1);
+    if (!promoter || !promoter.isActive || promoter.isSuspended) throw new NotFoundException('Active promoter not found');
+    if (params.websiteId && params.appId) throw new BadRequestException('Choose one website or app');
+    if (params.websiteId) {
+      const [site] = await this.db.select().from(adsPromoterWebsites).where(and(
+        eq(adsPromoterWebsites.id, params.websiteId), eq(adsPromoterWebsites.promoterId, params.promoterId),
+      )).limit(1);
+      if (!site || !site.isActive || site.isSuspended) throw new NotFoundException('Active website not found');
+    }
+    if (params.appId) {
+      const [app] = await this.db.select().from(adsPromoterApps).where(and(
+        eq(adsPromoterApps.id, params.appId), eq(adsPromoterApps.promoterId, params.promoterId),
+      )).limit(1);
+      if (!app || !app.isActive) throw new NotFoundException('Active app not found');
+    }
+    // Ownership is required for code generation; delivery separately enforces verification.
     // 1. Verify active campaign
     const [campaign] = await this.db
       .select()
       .from(adsCampaigns)
-      .where(and(eq(adsCampaigns.id, params.campaignId), eq(adsCampaigns.status, 'active')))
+      .where(and(eq(adsCampaigns.id, params.campaignId), eq(adsCampaigns.status, 'active'), eq(adsCampaigns.moderationStatus, 'approved')))
       .limit(1);
 
     if (!campaign) {
       throw new BadRequestException('Campaign not found or not currently active');
     }
 
-    // 2. Select or verify creative
-    let creativeId = params.creativeId;
-    if (!creativeId) {
-      const [firstCreative] = await this.db
-        .select()
-        .from(adsCreatives)
-        .where(and(eq(adsCreatives.campaignId, params.campaignId), eq(adsCreatives.status, 'active')))
-        .limit(1);
-
-      if (!firstCreative) {
-        throw new BadRequestException('This campaign has no active creatives');
-      }
-      creativeId = firstCreative.id;
-    }
+    // Both supplied and automatically selected creatives must belong to this approved campaign.
+    const [creative] = await this.db.select().from(adsCreatives).where(and(
+      eq(adsCreatives.campaignId, params.campaignId), eq(adsCreatives.status, 'active'),
+      eq(adsCreatives.reviewStatus, 'approved'),
+      ...(params.creativeId ? [eq(adsCreatives.id, params.creativeId)] : []),
+    )).limit(1);
+    if (!creative) throw new BadRequestException('Approved campaign creative not found');
+    const creativeId = creative.id;
 
     // 3. Generate secure placement token and HMAC signature
     const placementToken = crypto.randomBytes(32).toString('hex');

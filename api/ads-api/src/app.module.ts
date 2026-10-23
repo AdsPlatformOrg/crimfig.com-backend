@@ -1,3 +1,7 @@
+import { APP_GUARD } from '@nestjs/core';
+import { DashboardAuthModule } from '@crimfig/shared';
+import { AdsAccessGuard } from './modules/security/ads-access.guard';
+import { AdsStaffGrants } from './modules/security/ads-staff-grants';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -20,6 +24,7 @@ import { DisputesModule } from './modules/disputes/disputes.module';
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
     DatabaseModule,
+    DashboardAuthModule,
     CampaignsModule,
     PromotersModule,
     VerificationModule,
@@ -33,5 +38,6 @@ import { DisputesModule } from './modules/disputes/disputes.module';
     ConversionsModule,
     DisputesModule,
   ],
+  providers: [AdsStaffGrants, { provide: APP_GUARD, useClass: AdsAccessGuard }],
 })
 export class AppModule {}

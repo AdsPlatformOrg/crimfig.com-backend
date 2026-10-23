@@ -59,6 +59,7 @@ export class ModerationService {
         bodyText: adsCreatives.bodyText,
         ctaText: adsCreatives.ctaText,
         imageUrl: adsCreatives.imageUrl,
+        videoUrl: adsCreatives.videoUrl,
         destinationUrl: adsCreatives.destinationUrl,
         mediaFormat: adsCreatives.mediaFormat,
         adFormat: adsCreatives.adFormat,
@@ -90,6 +91,10 @@ export class ModerationService {
     if (!creative) {
       throw new NotFoundException('Creative not found');
     }
+
+    const [ownerCampaign] = await this.db.select().from(adsCampaigns).where(eq(adsCampaigns.id, creative.campaignId)).limit(1);
+    if (!ownerCampaign) throw new NotFoundException('Campaign not found');
+    if (ownerCampaign.advertiserId === params.reviewerId) throw new BadRequestException('Creative owners cannot review their own assets');
 
     if (params.decision === 'rejected' && !params.reasonCode) {
       throw new BadRequestException('A reasonCode is mandatory when rejecting a creative');
@@ -140,6 +145,8 @@ export class ModerationService {
     if (!campaign) {
       throw new NotFoundException('Campaign not found');
     }
+
+    if (campaign.advertiserId === params.reviewerId) throw new BadRequestException('Campaign owners cannot review their own campaigns');
 
     if (campaign.moderationStatus !== 'pending_primary_review' && campaign.status !== 'under_review') {
       throw new BadRequestException(
@@ -196,6 +203,8 @@ export class ModerationService {
       throw new NotFoundException('Campaign not found');
     }
 
+    if (campaign.advertiserId === params.reviewerId) throw new BadRequestException('Campaign owners cannot approve their own campaigns');
+
     if (campaign.moderationStatus !== 'pending_manager_approval' && campaign.status !== 'pending_manager_approval') {
       throw new BadRequestException(
         `Campaign cannot undergo manager sign-off from moderation status '${campaign.moderationStatus}'. Expected 'pending_manager_approval'.`,
@@ -223,7 +232,8 @@ export class ModerationService {
     }
 
     const nextModStatus = params.decision === 'approved' ? 'approved' : 'rejected';
-    const nextOpStatus = params.decision === 'approved' ? 'active' : 'rejected';
+    // Approval permits activation; Billing must atomically confirm funding and status.
+    const nextOpStatus = params.decision === 'approved' ? 'paused' : 'rejected';
 
     const [decisionRecord] = await this.db
       .insert(adsModerationDecisions)
@@ -251,7 +261,7 @@ export class ModerationService {
       campaign: updatedCampaign,
       decision: decisionRecord,
       stage: 'tier2_manager_completed',
-      live: nextModStatus === 'approved',
+      live: false,
     };
   }
 
@@ -275,7 +285,8 @@ export class ModerationService {
     }
 
     const nextModStatus = params.decision === 'approved' ? 'approved' : 'rejected';
-    const nextOpStatus = params.decision === 'approved' ? 'active' : 'rejected';
+    // Approval permits activation; Billing must atomically confirm funding and status.
+    const nextOpStatus = params.decision === 'approved' ? 'paused' : 'rejected';
 
     const [decisionRecord] = await this.db
       .insert(adsModerationDecisions)
@@ -305,7 +316,7 @@ export class ModerationService {
       campaign: updatedCampaign,
       decision: decisionRecord,
       isEmergencyOverride: true,
-      live: nextModStatus === 'approved',
+      live: false,
     };
   }
 
