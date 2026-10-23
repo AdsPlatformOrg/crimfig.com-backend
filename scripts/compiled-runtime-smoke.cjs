@@ -3,7 +3,8 @@
 const assert = require('node:assert/strict');
 const { createRequire } = require('node:module');
 const path = require('node:path');
-require('reflect-metadata');
+const loadBilling = createRequire(path.resolve(__dirname, '../api/billing-api/package.json'));
+loadBilling('reflect-metadata');
 for (const app of ['auth', 'api/ads-api', 'api/billing-api']) {
   const load = createRequire(path.resolve(__dirname, '..', app, 'package.json'));
   const entry = load.resolve('@crimfig/database/schema');
