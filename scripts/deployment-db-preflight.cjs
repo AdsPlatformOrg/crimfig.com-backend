@@ -1,6 +1,9 @@
-/* global require, process, console, URL */
+/* global require, process, console, URL, __dirname */
 // Read-only schema/lock diagnostics; never applies a migration or reads customer rows.
-const { Client } = require('pg');
+const { createRequire } = require('node:module');
+const path = require('node:path');
+const loadDatabase = createRequire(path.resolve(__dirname, '../database/package.json'));
+const { Client } = loadDatabase('pg');
 const connectionString = process.env.DATABASE_URL;
 const ssl = process.env.DB_SSL === 'false' ? false : process.env.DB_SSL === 'true' ||
   (connectionString && new URL(connectionString).hostname.includes('railway') &&
