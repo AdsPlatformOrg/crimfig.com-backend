@@ -68,14 +68,14 @@ export const config = {
   APP: {
     AUTH_WEB_URL: (() => {
       const url = process.env.AUTH_WEB_URL;
-      if (!url || url.includes('.railway.app')) {
+      if (!url) {
         return process.env.NODE_ENV === 'production' ? 'https://auth.crimfig.com' : 'http://localhost:3000';
       }
       return url.replace(/\/+$/, '');
     })(),
     ADS_WEB_URL: (() => {
       const url = process.env.ADS_WEB_URL;
-      if (!url || url.includes('.railway.app')) {
+      if (!url) {
         return process.env.NODE_ENV === 'production' ? 'https://ads.crimfig.com' : 'http://localhost:3001';
       }
       return url.replace(/\/+$/, '');

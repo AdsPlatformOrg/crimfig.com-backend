@@ -11,6 +11,7 @@ const { readMigrationFiles } = load('drizzle-orm/migrator');
 const folder = process.env.RELEASE_MIGRATIONS_DIR || path.resolve(__dirname, '../database/migrations');
 const migrations = readMigrationFiles({ migrationsFolder: folder });
 const connectionString = process.env.DATABASE_URL;
+const initializeStaging = process.argv.includes('--initialize-staging');
 const client = new Client({
   connectionString, connectionTimeoutMillis: 10000, statement_timeout: 60000, lock_timeout: 10000,
   application_name: 'crimfig-controlled-schema-release',
@@ -20,12 +21,18 @@ const client = new Client({
 });
 (async () => {
   if (!connectionString) throw new Error('Explicit DATABASE_URL required');
+  if (initializeStaging && process.env.RAILWAY_ENVIRONMENT_NAME !== 'staging') throw new Error('Empty-schema initialization is restricted to the staging environment');
   if (!fs.existsSync(path.join(folder, 'meta/_journal.json'))) throw new Error('Migration journal required');
   await client.connect();
   const lock = await client.query('SELECT pg_try_advisory_lock($1) AS acquired', ['6746578390210']);
   if (!lock.rows[0].acquired) throw new Error('Another schema release holds the lock');
-  const before = await client.query('SELECT hash,created_at FROM drizzle.__drizzle_migrations ORDER BY created_at');
-  if (!before.rows.length || before.rows.length > migrations.length) throw new Error('Unexpected migration history');
+  const ledger = await client.query("SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS present");
+  const before = ledger.rows[0].present ? await client.query('SELECT hash,created_at FROM drizzle.__drizzle_migrations ORDER BY created_at') : { rows: [] };
+  if (!before.rows.length) {
+    const existing = await client.query("SELECT count(*)::integer AS count FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE'");
+    if (!initializeStaging || existing.rows[0].count !== 0) throw new Error('Empty migration history requires an explicitly initialized empty staging database');
+  }
+  if (before.rows.length > migrations.length) throw new Error('Unexpected migration history');
   for (const [index, row] of before.rows.entries()) {
     if (row.hash !== migrations[index].hash || Number(row.created_at) !== migrations[index].folderMillis) {
       throw new Error(`Migration history mismatch at index ${index}; no pending migrations applied`);

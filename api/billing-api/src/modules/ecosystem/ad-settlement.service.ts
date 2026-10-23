@@ -76,6 +76,7 @@ export class AdSettlementService {
           eq(s.adsPlacements.promoterId, s.adsPromoters.id), eq(s.adsPlacements.status, 'active'),
           eq(s.adsCreatives.campaignId, s.adsServes.campaignId), eq(s.adsCreatives.status, 'active'), eq(s.adsCreatives.reviewStatus, 'approved'),
           eq(s.adsPromoters.isActive, true), eq(s.adsPromoters.isSuspended, false), eq(s.users.status, 'ACTIVE'), ne(s.adsPromoters.userId, campaign.advertiserId),
+          sql`not exists (select 1 from billing_provider_events review where review.provider = 'paystack' and review.event_type = 'internal.ad.rejection' and review.error_message is distinct from 'review_dismissed' and review.reference like ${`internal.ad.rejection:${escrow.id}:`} || ${s.adsPromoters.id}::text || ':%')`,
           or(eq(s.adsPromoters.type, 'INDIVIDUAL'), and(eq(s.adsPromoters.type, 'WEBSITE'), eq(s.adsPromoterWebsites.promoterId, s.adsPromoters.id),
             eq(s.adsPromoterWebsites.verificationStatus, 'verified'), eq(s.adsPromoterWebsites.isActive, true), eq(s.adsPromoterWebsites.isSuspended, false))),
           or(and(eq(s.adsServes.pricingModel, 'cpm'), eq(s.adsInteractions.type, 'viewable_impression')),

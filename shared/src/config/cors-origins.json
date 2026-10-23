@@ -16,6 +16,18 @@
     "https://chat-frontend-production-176c.up.railway.app",
     "https://tetris-frontend-production-723c.up.railway.app"
   ],
+  "staging": [
+    "https://auth.staging.crimfig.com",
+    "https://ads.staging.crimfig.com",
+    "https://billing.staging.crimfig.com",
+    "https://chat.staging.crimfig.com",
+    "https://tetris.staging.crimfig.com",
+    "https://auth-frontend-staging.up.railway.app",
+    "https://ads-frontend-staging.up.railway.app",
+    "https://billing-frontend-staging.up.railway.app",
+    "https://chat-frontend-staging-5d17.up.railway.app",
+    "https://tetris-frontend-staging.up.railway.app"
+  ],
   "development": [
     "http://localhost:3000",
     "http://localhost:3001",

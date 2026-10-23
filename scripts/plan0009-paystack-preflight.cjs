@@ -4,14 +4,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 (async () => {
   try {
-    const values = new Map();
-    for (const line of fs.readFileSync(path.join(__dirname, '../local-docker'), 'utf8').split(/\r?\n/)) {
-      if (!line.trim() || line.trimStart().startsWith('#')) continue;
-      const match = /^([A-Z_]+)=(.*)$/.exec(line.trim());
-      if (!match) throw Error('Invalid private configuration format');
-      if (values.has(match[1])) throw Error('Duplicate private configuration field');
-      values.set(match[1], match[2].trim().replace(/^(["'])(.*)\1$/, '$2'));
-    }
+    const { createRequire } = require('node:module');
+    const load = createRequire(path.join(__dirname, '../api/billing-api/package.json'));
+    const file = process.argv[2] || path.join(__dirname, '../api/billing-api/.env');
+    const values = new Map(Object.entries(load('dotenv').parse(fs.readFileSync(file))));
     const key = values.get('PAYSTACK_SECRET_KEY') || '';
     const publicKey = values.get('PAYSTACK_PUBLIC_KEY') || '';
     if (!/^sk_test_[A-Za-z0-9]+$/.test(key) || !/^pk_test_[A-Za-z0-9]+$/.test(publicKey)) {

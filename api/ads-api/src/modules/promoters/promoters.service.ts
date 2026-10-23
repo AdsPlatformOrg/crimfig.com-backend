@@ -25,34 +25,27 @@ export class PromotersService {
    * Get or create a promoter profile for a user
    */
   async getOrCreatePromoter(userId: string, type: 'WEBSITE' | 'INDIVIDUAL' | 'MOBILE_APP' = 'INDIVIDUAL', displayName?: string) {
-    const [existing] = await this.db
-      .select()
-      .from(adsPromoters)
-      .where(eq(adsPromoters.userId, userId))
-      .limit(1);
+    return this.db.transaction(async tx => {
+      await tx.execute(sql`set local lock_timeout = '5s'`);
+      await tx.execute(sql`set local statement_timeout = '10s'`);
+      // The unique user key arbitrates concurrent first-load requests. A separate
+      // SELECT gets a fresh READ COMMITTED snapshot after the winning insert.
+      await tx.insert(adsPromoters).values({
+        userId, type, displayName: displayName || 'CrimFig Promoter',
+      }).onConflictDoNothing({ target: adsPromoters.userId });
+      const [promoter] = await tx.select().from(adsPromoters)
+        .where(eq(adsPromoters.userId, userId)).limit(1);
+      if (!promoter) throw new NotFoundException('Promoter profile unavailable');
 
-    if (existing) {
-      return existing;
-    }
-
-    const [created] = await this.db
-      .insert(adsPromoters)
-      .values({
-        userId,
-        type,
-        displayName: displayName || 'CrimFig Promoter',
-      })
-      .returning();
-
-    // If individual, initialize Reels consent record
-    if (type === 'INDIVIDUAL') {
-      await this.db.insert(adsReelsConsents).values({
-        promoterId: created.id,
-        consentGiven: 0,
-      });
-    }
-
-    return created;
+      // A website/app request may have created the shared profile first. Ensure
+      // Reels has a consent record, without overwriting any existing decision.
+      if (type === 'INDIVIDUAL') {
+        await tx.insert(adsReelsConsents).values({
+          promoterId: promoter.id, consentGiven: 0,
+        }).onConflictDoNothing({ target: adsReelsConsents.promoterId });
+      }
+      return promoter;
+    });
   }
 
   /**
