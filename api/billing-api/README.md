@@ -7,9 +7,10 @@ remain gated; this change does not enable live payment processing.
 
 - `JWT_ACCESS_SECRET`: the same secret used by the Auth API to sign HS256 access
   tokens. No fallback exists; missing configuration prevents authentication module startup.
-- `ALLOWED_ORIGINS`: optional comma-separated exact dashboard origins. Defaults are
-  Ads, Billing and Auth HTTPS origins, plus explicit localhost development ports
-  outside production. Wildcards, URL credentials/paths and production HTTP are rejected.
+- Browser origins are maintained in `shared/src/config/cors-origins.json`, with
+  separate production and development lists. Rebuild and deploy after editing.
+  No origin-list environment variable is used. Wildcards, URL credentials/paths
+  and production HTTP are rejected.
 - `INTERNAL_ECOSYSTEM_KEY`: explicit shared service key for ecosystem wallet calls,
   configured on both the Billing server and authorized service clients. There is no
   built-in key or development bypass. Missing configuration denies these calls.

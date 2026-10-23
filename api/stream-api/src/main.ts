@@ -1,3 +1,4 @@
+import { dashboardOrigins } from '@crimfig/shared';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -19,7 +20,7 @@ async function bootstrap() {
   app.use(helmet());
 
   app.enableCors({
-    origin: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : '*',
+    origin: dashboardOrigins(process.env.NODE_ENV === 'production'),
     credentials: true,
   });
 

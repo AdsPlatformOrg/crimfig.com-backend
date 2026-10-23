@@ -12,7 +12,7 @@ import { Logger } from '@nestjs/common';
 
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: dashboardOrigins(process.env.NODE_ENV === 'production'),
   },
   namespace: '/chat',
 })
@@ -52,3 +52,4 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return { status: 'sent', timestamp: payload.timestamp };
   }
 }
+import { dashboardOrigins } from '@crimfig/shared';

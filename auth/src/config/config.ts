@@ -80,14 +80,7 @@ export const config = {
       }
       return url.replace(/\/+$/, '');
     })(),
-    ALLOWED_ORIGINS: (
-      process.env.ALLOWED_ORIGINS ??
-      ('https://auth.crimfig.com,https://billing.crimfig.com,https://ads.crimfig.com,https://chat.crimfig.com,https://stream.crimfig.com,https://reels.crimfig.com,https://tetris.crimfig.com,https://crimfig.com,https://www.crimfig.com' +
-        (process.env.NODE_ENV === 'production' ? '' : ',http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://localhost:3005,http://localhost:3006,http://localhost:3007'))
-    )
-      .split(',')
-      .map((o) => o.trim())
-      .filter(Boolean),
+
   },
 
   IS_PRODUCTION: process.env.NODE_ENV === 'production',

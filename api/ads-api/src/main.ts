@@ -19,7 +19,7 @@ async function bootstrap() {
   app.enableShutdownHooks([ShutdownSignal.SIGINT, ShutdownSignal.SIGTERM]);
   app.use(helmet());
 
-  app.enableCors(adsCorsOptions(process.env.ALLOWED_ORIGINS, process.env.NODE_ENV === 'production'));
+  app.enableCors(adsCorsOptions(process.env.NODE_ENV === 'production'));
 
   app.useGlobalPipes(
     new ValidationPipe({

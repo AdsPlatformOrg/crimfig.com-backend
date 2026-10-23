@@ -37,12 +37,44 @@ try {
   started = true;
   pg('createdb', ['-h', '127.0.0.1', '-p', '25432', '-U', 'plan0009test', 'plan0009_test']);
   console.log('Isolated PostgreSQL 17 SCRAM cluster ready on loopback 25432. Existing services untouched.');
+  if (process.argv.includes('--migrations')) {
+    const env = { ...process.env, DATABASE_URL: `postgresql://plan0009test:${password}@127.0.0.1:25432/plan0009_test`, DB_SSL: 'false' };
+    const baseline = path.join(temp, 'baseline');
+    fs.mkdirSync(path.join(baseline, 'meta'), { recursive: true });
+    const journal = JSON.parse(fs.readFileSync(path.join(root, 'database/migrations/meta/_journal.json'), 'utf8'));
+    fs.writeFileSync(path.join(baseline, 'meta/_journal.json'), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
+    fs.copyFileSync(path.join(root, 'database/migrations', journal.entries[0].tag + '.sql'), path.join(baseline, journal.entries[0].tag + '.sql'));
+    const bootstrap = `const {createRequire}=require('node:module'); const load=createRequire(require('node:path').resolve('database/package.json'));
+      const {Client}=load('pg'),{drizzle}=load('drizzle-orm/node-postgres'),{migrate}=load('drizzle-orm/node-postgres/migrator');
+      const c=new Client({connectionString:process.env.DATABASE_URL});
+      (async()=>{try{await c.connect();await migrate(drizzle(c),{migrationsFolder:process.env.BASELINE_MIGRATIONS_DIR});}finally{await c.end();}})().catch(()=>{process.exitCode=1;});`;
+    const first = spawnSync(process.execPath, ['-e', bootstrap], { cwd: root, windowsHide: true, encoding: 'utf8', env: { ...env, BASELINE_MIGRATIONS_DIR: baseline } });
+    if (first.status) throw new Error('Initial-schema fixture failed');
+    for (const args of [['scripts/release-migrate.cjs'], ['scripts/deployment-db-preflight.cjs'], ['scripts/release-migrate.cjs']]) {
+      const run = spawnSync(process.execPath, args, { cwd: root, windowsHide: true, encoding: 'utf8', env });
+      if (run.status !== 0) throw new Error(`Migration verification failed: ${run.stderr}`);
+      if (args[0].includes('preflight')) {
+        const line = run.stdout.split('\n').find(value => value.includes('Missing current columns:'));
+        if (!line || !line.endsWith('[]')) throw new Error('Registered migrations do not match application columns');
+      }
+    }
+    const corrupt = `const {createRequire}=require('node:module');const load=createRequire(require('node:path').resolve('database/package.json'));
+      const {Client}=load('pg'),c=new Client({connectionString:process.env.DATABASE_URL});
+      (async()=>{try{await c.connect();await c.query("UPDATE drizzle.__drizzle_migrations SET hash='unknown-test-history' WHERE id=1");}finally{await c.end();}})().catch(()=>{process.exitCode=1;});`;
+    const changed = spawnSync(process.execPath, ['-e', corrupt], { cwd: root, windowsHide: true, encoding: 'utf8', env });
+    if (changed.status) throw new Error('Unknown-history fixture failed');
+    const rejected = spawnSync(process.execPath, ['scripts/release-migrate.cjs'], { cwd: root, windowsHide: true, encoding: 'utf8', env });
+    if (rejected.status === 0 || !rejected.stderr.includes('Migration history mismatch')) throw new Error('Unknown migration history was not rejected');
+    console.log('Initial-schema upgrade, schema columns, idempotent replay and unknown-history rejection PASS.');
+    exitCode = 0;
+  } else {
   const result = spawnSync(process.execPath, ['node_modules/jest/bin/jest.js', '--config', 'auth/jest.config.js',
     '--runInBand', '--runTestsByPath', 'auth/test/security/funding-postgres.spec.ts'], {
     cwd: root, windowsHide: true, stdio: 'inherit',
     env: { ...process.env, PLAN0009_PG_URL: `postgresql://plan0009test:${password}@127.0.0.1:25432/plan0009_test` },
   });
   exitCode = result.status ?? 1;
+  }
 } catch (error) { console.error(error.message); }
 finally {
   if (initialized) {
