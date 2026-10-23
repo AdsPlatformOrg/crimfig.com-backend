@@ -55,3 +55,12 @@ database/drizzle/__snapshots__/
 
 # Private local Docker provider acceptance credentials
 /local-docker
+# Generated database artifacts belong in database/dist only.
+database/schema/*.js
+database/schema/*.js.map
+database/schema/*.d.ts
+database/schema/*.d.ts.map
+database/src/*.js
+database/src/*.js.map
+database/src/*.d.ts
+database/src/*.d.ts.map

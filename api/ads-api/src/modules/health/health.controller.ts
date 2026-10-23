@@ -1,5 +1,5 @@
 import { Public } from '@crimfig/shared';
-import { Controller, Get, Inject } from '@nestjs/common';
+import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DATABASE_TOKEN } from '../database/database.module';
 
@@ -32,11 +32,11 @@ export class HealthController {
         timestamp: new Date().toISOString(),
       };
     } catch {
-      return {
+      throw new ServiceUnavailableException({
         status: 'not_ready',
         checks: { database: 'fail' },
         timestamp: new Date().toISOString(),
-      };
+      });
     }
   }
 }

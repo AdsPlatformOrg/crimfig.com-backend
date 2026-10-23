@@ -12,7 +12,7 @@
   },
   "scripts": {
     "preinstall": "npx only-allow pnpm",
-    "build": "turbo run build",
+    "build": "turbo run build && node scripts/compiled-runtime-smoke.cjs",
     "db:generate": "pnpm --filter @crimfig/database db:generate",
     "db:migrate": "pnpm --filter @crimfig/database db:migrate",
     "dev": "turbo run dev",
