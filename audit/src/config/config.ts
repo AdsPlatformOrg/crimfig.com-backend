@@ -1,3 +1,4 @@
+import { dashboardOrigins } from '@crimfig/shared';
 /**
  * Crimfig Audit API — Typed Configuration
  *
@@ -24,7 +25,7 @@ export const config = {
   },
 
   APP: {
-    ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'],
+    CORS_ORIGINS: dashboardOrigins(process.env.NODE_ENV === 'production'),
   },
 
   IS_PRODUCTION: process.env.NODE_ENV === 'production',

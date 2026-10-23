@@ -68,7 +68,7 @@ describe('Ads production guards and controllers over HTTP', () => {
     grants = module.get(AdsStaffGrants);
     app = module.createNestApplication({ logger: false });
     app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' }); app.setGlobalPrefix('api');
-    app.enableCors(adsCorsOptions(undefined, true));
+    app.enableCors(adsCorsOptions(true));
     await app.listen(0, '127.0.0.1'); base = await app.getUrl();
   });
   beforeEach(() => { status = 'ACTIVE'; jest.clearAllMocks(); jest.restoreAllMocks(); });

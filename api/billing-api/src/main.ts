@@ -21,7 +21,7 @@ async function bootstrap() {
   app.use(helmet());
 
   app.enableCors({
-    origin: dashboardOrigins(process.env.ALLOWED_ORIGINS, process.env.NODE_ENV === 'production'),
+    origin: dashboardOrigins(process.env.NODE_ENV === 'production'),
     credentials: false,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-key', 'x-paystack-signature', 'stripe-signature'],

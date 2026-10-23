@@ -30,6 +30,7 @@ COPY api/ads-api ./api/ads-api
 COPY api/billing-api ./api/billing-api
 COPY scripts/compiled-runtime-smoke.cjs ./scripts/compiled-runtime-smoke.cjs
 COPY scripts/deployment-db-preflight.cjs ./scripts/deployment-db-preflight.cjs
+COPY scripts/release-migrate.cjs ./scripts/release-migrate.cjs
 
 # Build packages in dependency order
 RUN pnpm --filter @crimfig/shared build

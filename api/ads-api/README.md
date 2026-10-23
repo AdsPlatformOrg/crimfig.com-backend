@@ -57,8 +57,8 @@ must preserve these endpoint checks and add auditable grant/revoke administratio
 - Removed duplicated controller prefixes: Ads billing, conversions and disputes now resolve
   under the application's single `/api/v1` prefix.
 - Public delivery/pixel/catalog/media browser routes use wildcard CORS without cookies.
-  Dashboard/admin/private-media routes use exact `ALLOWED_ORIGINS` through the shared origin
-  parser, without credentials or identity headers. CORS does not replace route authentication.
+  Dashboard/admin/private-media routes use exact origins from `shared/src/config/cors-origins.json`
+  through the shared validator, without credentials or identity headers. CORS does not replace route authentication.
 
 ## Verification and unfinished gates
 

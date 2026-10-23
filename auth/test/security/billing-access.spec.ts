@@ -12,7 +12,7 @@ import { WalletController } from '../../../api/billing-api/src/modules/wallet/wa
 import { WalletService } from '../../../api/billing-api/src/modules/wallet/wallet.service';
 import { DATABASE_TOKEN } from '../../../api/billing-api/src/modules/database/database.module';
 import { Public } from '../../../shared/src/decorators';
-import { dashboardOrigins } from '../../../shared/src/security/dashboard-origins';
+import { dashboardOrigins, validateDashboardOrigins } from '../../../shared/src/security/dashboard-origins';
 import { DashboardAuthModule } from '../../../shared/src/security/access-token.guard';
 
 const secret = 'test-only-billing-access-signing-key';
@@ -62,7 +62,7 @@ describe('Billing default-deny authentication over HTTP', () => {
     }
     app = module.createNestApplication({ logger: false });
     app.enableCors({
-      origin: dashboardOrigins(undefined, true), credentials: false,
+      origin: dashboardOrigins(true), credentials: false,
       methods: ['GET', 'POST', 'OPTIONS'], allowedHeaders: ['Content-Type', 'Authorization'],
     });
     await app.listen(0, '127.0.0.1');
@@ -176,10 +176,20 @@ describe('private API browser origin policy', () => {
   });
 
   it('uses exact defaults and rejects wildcard, credential URLs, paths and production HTTP', () => {
-    expect(dashboardOrigins(undefined, true)).toContain('https://billing.crimfig.com');
-    expect(dashboardOrigins('https://billing.crimfig.com, https://ads.crimfig.com', true)).toHaveLength(2);
-    for (const origin of ['*', '', 'https://user:password@example.com', 'https://example.com/path',
-      'http://example.com', 'http://localhost:3007']) expect(() => dashboardOrigins(origin, true)).toThrow();
-    expect(dashboardOrigins('http://localhost:3007', false)).toEqual(['http://localhost:3007']);
+    expect(dashboardOrigins(true)).toContain('https://billing.crimfig.com');
+    expect(validateDashboardOrigins(['https://billing.crimfig.com', 'https://ads.crimfig.com'], true)).toHaveLength(2);
+    for (const origin of ['*', '', 'https://*.example.com', 'https:\\//example.com', 'https://user:password@example.com', 'https://example.com/path',
+      'http://example.com', 'http://localhost:3007']) expect(() => validateDashboardOrigins([origin], true)).toThrow();
+    expect(validateDashboardOrigins(['http://localhost:3007'], false)).toEqual(['http://localhost:3007']);
+  });
+
+  it('loads first-party file origins and excludes development origins in production', () => {
+    const origins = dashboardOrigins(true);
+    for (const origin of ['https://auth.crimfig.com', 'https://ads.crimfig.com', 'https://billing.crimfig.com']) {
+      expect(origins).toContain(origin);
+    }
+    expect(origins).not.toContain('http://localhost:3000');
+    expect(origins).not.toContain('https://unlisted.example.com');
+    expect(dashboardOrigins(false)).toContain('http://localhost:3000');
   });
 });

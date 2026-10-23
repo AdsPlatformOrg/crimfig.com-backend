@@ -1,0 +1,39 @@
+{
+  "production": [
+    "https://crimfig.com",
+    "https://www.crimfig.com",
+    "https://auth.crimfig.com",
+    "https://ads.crimfig.com",
+    "https://billing.crimfig.com",
+    "https://chat.crimfig.com",
+    "https://reels.crimfig.com",
+    "https://stream.crimfig.com",
+    "https://tetris.crimfig.com",
+    "https://tetrisgame.crimfig.com",
+    "https://auth-frontend-production-42f8.up.railway.app",
+    "https://ads-frontend-production-49bd.up.railway.app",
+    "https://billing-frontend-production-4256.up.railway.app",
+    "https://chat-frontend-production-176c.up.railway.app",
+    "https://tetris-frontend-production-723c.up.railway.app"
+  ],
+  "development": [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://localhost:3002",
+    "http://localhost:3003",
+    "http://localhost:3004",
+    "http://localhost:3005",
+    "http://localhost:3006",
+    "http://localhost:3007",
+    "http://localhost:3008",
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:3001",
+    "http://127.0.0.1:3002",
+    "http://127.0.0.1:3003",
+    "http://127.0.0.1:3004",
+    "http://127.0.0.1:3005",
+    "http://127.0.0.1:3006",
+    "http://127.0.0.1:3007",
+    "http://127.0.0.1:3008"
+  ]
+}
