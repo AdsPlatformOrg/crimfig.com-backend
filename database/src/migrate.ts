@@ -12,7 +12,14 @@ export async function runMigrations() {
   const pool = connectionString
     ? new Pool({
         connectionString,
-        ssl: process.env.DB_SSL === 'true' || connectionString.includes('railway') ? { rejectUnauthorized: false } : false,
+        ssl: process.env.DB_SSL === 'false' ? false :
+          process.env.DB_SSL === 'true' || (new URL(connectionString).hostname.includes('railway') &&
+            !new URL(connectionString).hostname.endsWith('.railway.internal'))
+            ? { rejectUnauthorized: false } : false,
+        connectionTimeoutMillis: 10_000,
+        statement_timeout: 60_000,
+        lock_timeout: 10_000,
+        application_name: 'crimfig-migrations',
       })
     : new Pool({
         host: process.env.DB_HOST || 'localhost',
@@ -21,6 +28,10 @@ export async function runMigrations() {
         user: process.env.DB_USER || 'postgres',
         password: process.env.DB_PASSWORD || '',
         ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
+        connectionTimeoutMillis: 10_000,
+        statement_timeout: 60_000,
+        lock_timeout: 10_000,
+        application_name: 'crimfig-migrations',
       });
 
   const db = drizzle(pool);
@@ -33,6 +44,9 @@ export async function runMigrations() {
   console.log(`[Drizzle Migrate] Running migrations from: ${migrationsFolder}`);
 
   try {
+    console.log('[Drizzle Migrate] Checking database connection (10s timeout)');
+    await pool.query('SELECT 1');
+    console.log('[Drizzle Migrate] Database connected; applying registered migrations');
     await migrate(db, { migrationsFolder });
     console.log('[Drizzle Migrate] All migrations applied successfully to crimfig_core!');
 
@@ -51,7 +65,9 @@ export async function runMigrations() {
     `);
     console.log('[Drizzle Migrate] Core ecosystem apps verified & seeded successfully!');
   } catch (error) {
-    console.error('[Drizzle Migrate] Migration failed:', error);
+    // PostgreSQL errors can contain row data or connection details. Log only the failure class/code.
+    const failure = error as { code?: string; name?: string };
+    console.error('[Drizzle Migrate] Migration failed:', failure.code || failure.name || 'unknown');
     throw error;
   } finally {
     await pool.end();

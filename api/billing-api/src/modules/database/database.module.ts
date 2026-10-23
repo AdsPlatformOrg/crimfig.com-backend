@@ -18,7 +18,10 @@ export const DATABASE_TOKEN = 'DATABASE_CONNECTION';
               max: Number(process.env.DB_POOL_MAX) || 10,
               idleTimeoutMillis: 30000,
               connectionTimeoutMillis: 5000,
-              ssl: process.env.DB_SSL === 'true' || connectionString.includes('railway') ? { rejectUnauthorized: false } : false,
+              ssl: process.env.DB_SSL === 'false' ? false : process.env.DB_SSL === 'true' ||
+                (new URL(connectionString).hostname.includes('railway') &&
+                  !new URL(connectionString).hostname.endsWith('.railway.internal'))
+                  ? { rejectUnauthorized: false } : false,
             })
           : new Pool({
               host: process.env.DB_HOST || 'localhost',

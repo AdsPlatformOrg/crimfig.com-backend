@@ -20,7 +20,7 @@ COPY api/reels-api/package.json ./api/reels-api/
 COPY api/stream-api/package.json ./api/stream-api/
 
 # Install dependencies
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 # Copy source trees
 COPY shared ./shared
@@ -28,6 +28,8 @@ COPY database ./database
 COPY auth ./auth
 COPY api/ads-api ./api/ads-api
 COPY api/billing-api ./api/billing-api
+COPY scripts/compiled-runtime-smoke.cjs ./scripts/compiled-runtime-smoke.cjs
+COPY scripts/deployment-db-preflight.cjs ./scripts/deployment-db-preflight.cjs
 
 # Build packages in dependency order
 RUN pnpm --filter @crimfig/shared build
@@ -35,6 +37,7 @@ RUN pnpm --filter @crimfig/database build
 RUN pnpm --filter @crimfig/auth-api build
 RUN pnpm --filter @crimfig/ads-api build
 RUN pnpm --filter @crimfig/billing-api build
+RUN node scripts/compiled-runtime-smoke.cjs
 
 # Runner stage
 FROM node:22-alpine AS runner
@@ -52,7 +55,7 @@ COPY --from=builder /app ./
 EXPOSE 4000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:4000/api/health || exit 1
+  CMD wget --no-verbose --tries=1 --spider http://127.0.0.1:${PORT}/api/v1/health || exit 1
 
-# Execute Drizzle migrations before starting service
-CMD ["sh", "-c", "pnpm --filter @crimfig/database db:migrate && node auth/dist/auth/src/main.js"]
+# Schema changes run as one controlled release operation, never on every process restart.
+CMD ["node", "auth/dist/auth/src/main.js"]
