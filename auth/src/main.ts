@@ -11,22 +11,10 @@ import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { config } from './config/config';
 
-import { runMigrations } from '@crimfig/database';
-
 const logger = new Logger('Bootstrap');
 
 async function bootstrap() {
-  // Ensure database tables and migrations are up to date on every boot/deployment
-  try {
-    logger.log('Checking and running database migrations for crimfig_core...');
-    await runMigrations();
-    logger.log('Database migrations completed successfully');
-  } catch (migErr) {
-    logger.error('Failed to run database migrations during bootstrap', migErr);
-    // Continue or throw depending on environment; throw to avoid starting on corrupt/empty DB
-    throw migErr;
-  }
-
+  // Migrations are controlled release operations, never repeated on process startup.
   const app = await NestFactory.create(AppModule, {
     logger: config.IS_PRODUCTION ? ['error', 'warn', 'log'] : ['error', 'warn', 'log', 'debug', 'verbose'],
   });
