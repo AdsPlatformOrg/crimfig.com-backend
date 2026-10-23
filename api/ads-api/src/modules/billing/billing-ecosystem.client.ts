@@ -70,6 +70,29 @@ export class BillingEcosystemClient {
     };
   }
 
+  async settleCampaign(campaignId: string, requestId: string, periodEnd: string) {
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuid.test(campaignId) || !uuid.test(requestId) || !Number.isFinite(Date.parse(periodEnd)) || Date.parse(periodEnd) > Date.now()) {
+      throw new BadRequestException('A campaign, durable request UUID and closed period are required');
+    }
+    if (!this.internalKey) throw new ServiceUnavailableException('Billing service authorization is not configured');
+    try {
+      const response = await fetch(`${this.billingApiUrl}/ecosystem/campaigns/${campaignId}/settlements`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-internal-key': this.internalKey },
+        body: JSON.stringify({ requestId, periodEnd }), redirect: 'error', signal: AbortSignal.timeout(10_000),
+      });
+      const json = await response.json() as any;
+      const data = json?.data;
+      if (!response.ok || json?.status !== 'success' || !uuid.test(data?.batchId) || data?.status !== 'completed' ||
+        !Number.isSafeInteger(data?.billedUsdCents) || data.billedUsdCents < 0 || typeof data?.replayed !== 'boolean') {
+        throw new Error('Invalid settlement acknowledgement');
+      }
+      return data;
+    } catch {
+      throw new ServiceUnavailableException('Settlement is unconfirmed; recover using the same request UUID and period');
+    }
+  }
+
   private checkedEscrow(data: any, userId: string, campaignId: string, action: 'reserve' | 'release') {
     const escrow = data?.escrow;
     const cents = [escrow?.allocatedUsdCents, escrow?.consumedUsdCents, escrow?.refundedUsdCents];

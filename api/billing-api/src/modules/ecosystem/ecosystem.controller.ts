@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Body, Param, Headers, UnauthorizedException, ServiceUnavailableException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Headers, UnauthorizedException, ServiceUnavailableException, Optional, ParseUUIDPipe } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { CampaignEscrowService } from './campaign-escrow.service';
 import { WalletService } from '../wallet/wallet.service';
-import { IsNumber, IsString, Min, IsIn } from 'class-validator';
+import { IsNumber, IsString, Min, IsIn, IsUUID, IsISO8601 } from 'class-validator';
+import { AdSettlementService } from './ad-settlement.service';
 import { Public } from '@crimfig/shared';
 import { timingSafeEqual } from 'crypto';
 
@@ -44,12 +45,31 @@ export class CampaignStatusDto {
   status: 'active' | 'paused' | 'trash';
 }
 
+export class FundedSettlementDto {
+  @IsUUID('4')
+  requestId: string;
+
+  @IsISO8601({ strict: true })
+  periodEnd: string;
+}
+
 @ApiTags('Internal Ecosystem')
 @Controller('ecosystem')
 export class EcosystemController {
   private readonly internalApiKey = process.env.INTERNAL_ECOSYSTEM_KEY;
 
-  constructor(private readonly walletService: WalletService, private readonly campaignEscrow: CampaignEscrowService) {}
+  constructor(private readonly walletService: WalletService, private readonly campaignEscrow: CampaignEscrowService,
+    @Optional() private readonly settlement?: AdSettlementService) {}
+
+  @Public()
+  @Post('campaigns/:campaignId/settlements')
+  @ApiOperation({ summary: 'Internal: claim verified events and create funded held earnings; never immediate wallet credit' })
+  async settleCampaign(@Param('campaignId', new ParseUUIDPipe({ version: '4' })) campaignId: string,
+    @Headers('x-internal-key') key: string, @Body() dto: FundedSettlementDto) {
+    this.verifyInternalKey(key);
+    if (!this.settlement) throw new ServiceUnavailableException('Funded settlement unavailable');
+    return { status: 'success', data: await this.settlement.settle(campaignId, dto.requestId, new Date(dto.periodEnd)) };
+  }
 
   private verifyInternalKey(providedKey: string) {
     if (!this.internalApiKey || typeof providedKey !== 'string' || !providedKey ||

@@ -1,3 +1,4 @@
+import { RefundReviewService } from './refund-review.service';
 import { WithdrawalLedgerService } from './withdrawal-ledger.service';
 import { WithdrawalDispatchService } from './withdrawal-dispatch.service';
 import { Module } from '@nestjs/common';
@@ -10,7 +11,7 @@ import { ProvidersModule } from '../providers/providers.module';
 @Module({
   imports: [WalletModule, ExchangeRateModule, ProvidersModule],
   controllers: [WithdrawalsController],
-  providers: [WithdrawalsService, WithdrawalLedgerService, WithdrawalDispatchService],
+  providers: [RefundReviewService, WithdrawalsService, WithdrawalLedgerService, WithdrawalDispatchService],
   exports: [WithdrawalsService, WithdrawalLedgerService, WithdrawalDispatchService],
 })
 export class WithdrawalsModule {}

@@ -1,3 +1,4 @@
+import { SubscriptionsModule } from '../subscriptions/subscriptions.module';
 import { WithdrawalsModule } from '../withdrawals/withdrawals.module';
 import { Module } from '@nestjs/common';
 import { WebhooksService } from './webhooks.service';
@@ -6,7 +7,7 @@ import { ProvidersModule } from '../providers/providers.module';
 import { WalletModule } from '../wallet/wallet.module';
 
 @Module({
-  imports: [ProvidersModule, WalletModule, WithdrawalsModule],
+  imports: [ProvidersModule, WalletModule, WithdrawalsModule, SubscriptionsModule],
   controllers: [WebhooksController],
   providers: [WebhooksService],
 })

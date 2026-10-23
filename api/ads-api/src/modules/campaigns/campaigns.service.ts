@@ -42,6 +42,9 @@ export class CampaignsService {
       throw new BadRequestException('Minimum campaign budget is $5.00 USD');
     }
 
+    for (const bid of [params.costPerImpressionCents ?? 1, params.costPerClickCents ?? 10]) {
+      if (!Number.isSafeInteger(bid) || bid < 1 || bid > 2147483647) throw new BadRequestException('Bids require integer cents from 1 to 2147483647');
+    }
     const budgetCents = Math.round(params.budgetUsd * 100);
     const dailyBudgetCents = params.dailyBudgetUsd ? Math.round(params.dailyBudgetUsd * 100) : null;
     const hourlyPacingCents = dailyBudgetCents ? Math.ceil(dailyBudgetCents / 24) : null;
@@ -56,9 +59,10 @@ export class CampaignsService {
         dailyBudgetUsdCents: dailyBudgetCents,
         hourlyPacingUsdCents: hourlyPacingCents,
         remainingBudgetUsdCents: budgetCents,
+        pricingVersion: 2,
         pricingModel: params.pricingModel || 'cpm',
-        costPerImpressionUsdCents: params.costPerImpressionCents || 1, // $0.01
-        costPerClickUsdCents: params.costPerClickCents || 10,         // $0.10
+        costPerImpressionUsdCents: params.costPerImpressionCents ?? 1, // $0.01 per 1,000 eligible impressions
+        costPerClickUsdCents: params.costPerClickCents ?? 10,         // $0.10
         format: params.format || 'card',
         status: 'paused',
         moderationStatus: 'pending_primary_review',

@@ -1,3 +1,4 @@
+import { SubscriptionPaymentsService } from '../subscriptions/subscription-payments.service';
 import { WithdrawalLedgerService } from '../withdrawals/withdrawal-ledger.service';
 import { Injectable, Inject, Logger, Optional, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
@@ -21,6 +22,7 @@ export class WebhooksService {
     private readonly paystackService: PaystackService,
     private readonly walletService: WalletService,
     @Optional() private readonly withdrawalLedger?: WithdrawalLedgerService,
+    @Optional() private readonly subscriptionPayments?: SubscriptionPaymentsService,
   ) {}
 
   /**
@@ -81,13 +83,16 @@ export class WebhooksService {
     const [intent] = await this.db.select().from(billingTransactions)
       .where(and(eq(billingTransactions.reference, data.reference), eq(billingTransactions.provider, 'paystack'))).limit(1);
     if (!intent) throw new ServiceUnavailableException('Funding intent not available; callback must be retried');
-    if (intent.type !== 'wallet_fund') throw new ServiceUnavailableException('This charge requires its own verified subscription/payment completion contract');
+    const subscription = ['subscription_charge', 'subscription_renewal'].includes(intent.type);
+    if (subscription && !this.subscriptionPayments) throw new ServiceUnavailableException('Subscription completion authority unavailable');
+    if (!subscription && intent.type !== 'wallet_fund') throw new ServiceUnavailableException('This charge requires its own verified subscription/payment completion contract');
     // Scope identity by event type. transfer.failed/reversed must never suppress charge.success.
     const reference = `charge.success:${data.reference}`;
     await this.db.insert(billingProviderEvents).values({ provider: 'paystack', reference,
       eventType: 'charge.success', rawPayload: event, processed: false }).onConflictDoNothing();
     try {
-      await this.walletService.completeSuccessfulFunding(intent.id, data);
+      if (subscription) await this.subscriptionPayments!.complete(data.reference, data);
+      else await this.walletService.completeSuccessfulFunding(intent.id, data);
       await this.db.update(billingProviderEvents).set({ processed: true, processedAt: new Date(), errorMessage: null })
         .where(and(eq(billingProviderEvents.provider, 'paystack'), eq(billingProviderEvents.reference, reference)));
       return { status: 'success' };

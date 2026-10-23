@@ -161,11 +161,16 @@ export class PaystackService {
     email: string;
     amountKobo: number;
     authorizationCode: string;
+    reference: string;
     metadata?: Record<string, any>;
   }): Promise<PaystackVerifyResponse['data']> {
+    this.paymentDomain();
+    if (!/^[a-zA-Z0-9.=-]{1,200}$/.test(params.reference) || !Number.isSafeInteger(params.amountKobo) || params.amountKobo <= 0) throw new ServiceUnavailableException('Invalid durable charge reference or amount');
     try {
       const res = await fetch(`${this.baseUrl}/transaction/charge_authorization`, {
         method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(10000),
         headers: {
           Authorization: `Bearer ${this.secretKey}`,
           'Content-Type': 'application/json',
@@ -173,18 +178,50 @@ export class PaystackService {
         body: JSON.stringify({
           email: params.email,
           amount: params.amountKobo,
+          currency: 'NGN',
+          reference: params.reference,
           authorization_code: params.authorizationCode,
           metadata: params.metadata,
         }),
       });
 
       const json: any = await res.json();
-      if (!json.status) {
+      if (!res.ok || json.status !== true) {
         throw new Error(json.message || 'Paystack charge authorization failed');
       }
       return json.data;
     } catch (err: any) {
-      this.logger.error(`chargeAuthorization error: ${err.message}`);
+      this.logger.error('Saved authorization charge could not be confirmed');
+      throw err;
+    }
+  }
+
+  /**
+   * Deactivate a saved authorization so it can no longer be charged.
+   * Success requires an explicit provider confirmation (HTTP ok AND status === true).
+   * The authorization code is never logged.
+   */
+  async deactivateAuthorization(authorizationCode: string): Promise<void> {
+    if (typeof authorizationCode !== 'string' || !authorizationCode.trim()) {
+      throw new Error('Authorization code is required');
+    }
+    try {
+      const res = await fetch(`${this.baseUrl}/customer/deactivate_authorization`, {
+        method: 'POST',
+        redirect: 'error',
+        signal: AbortSignal.timeout(10000),
+        headers: {
+          Authorization: `Bearer ${this.secretKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ authorization_code: authorizationCode }),
+      });
+      const json: any = await res.json().catch(() => ({}));
+      if (!res.ok || json.status !== true) {
+        throw new Error(json.message || 'Paystack authorization deactivation was not confirmed');
+      }
+    } catch (err: any) {
+      this.logger.error(`deactivateAuthorization error: ${err.message}`);
       throw err;
     }
   }

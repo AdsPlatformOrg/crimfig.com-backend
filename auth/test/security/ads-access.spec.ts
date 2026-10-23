@@ -25,7 +25,7 @@ const id = 'e68f2fac-09d2-481b-85b2-896300cd169e';
 const config = (raw: string) => ({ get: () => raw }) as any;
 const moderation = { getQueue: jest.fn(async () => ({})), reviewCreative: jest.fn(), reviewCampaignPrimary: jest.fn(), reviewCampaignManager: jest.fn(), emergencyOverride: jest.fn(), reviewCampaign: jest.fn(), setPromoterSuspension: jest.fn() };
 const escrow = { getBillingOverview: jest.fn(async (userId: string) => ({ userId })), getCampaignEscrow: jest.fn(async () => null), lockCampaignBudget: jest.fn(), releaseCampaignBudget: jest.fn() };
-const settlement = { getHistoricalBatches: jest.fn(async () => []), processPendingSettlement: jest.fn() };
+const settlement = { getHistoricalBatches: jest.fn(async () => []), processPendingSettlement: jest.fn(), settleFundedCampaign: jest.fn(async () => ({ status: 'completed' })) };
 const conversions = { getPixelScript: jest.fn(() => '// pixel'), ingestConversion: jest.fn(), getConversions: jest.fn(async () => []) };
 const uploads = { getMediaStream: jest.fn(async () => ({ stream: Readable.from('preview'), contentType: 'image/png', contentLength: 7 })) };
 let status = 'ACTIVE';
@@ -85,6 +85,15 @@ describe('Ads production guards and controllers over HTTP', () => {
     expect(res.status).toBe(200); expect(escrow.getBillingOverview).toHaveBeenCalledWith(id);
     await fetch(`${base}/api/v1/ads/billing/escrow/campaign`, { headers: headers() });
     expect(escrow.getCampaignEscrow).toHaveBeenCalledWith('campaign', id);
+  });
+
+  it('only configured finance staff can dispatch a funded settlement', async () => {
+    const body = JSON.stringify({ campaignId: id, requestId: id, periodEnd: '2026-01-01T00:00:00.000Z' });
+    expect((await fetch(`${base}/api/v1/ads/billing/settlements/funded`, { method: 'POST', headers: headers(), body })).status).toBe(403);
+    expect(settlement.settleFundedCampaign).not.toHaveBeenCalled();
+    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_finance']);
+    expect((await fetch(`${base}/api/v1/ads/billing/settlements/funded`, { method: 'POST', headers: headers(), body })).status).toBe(201);
+    expect(settlement.settleFundedCampaign).toHaveBeenCalledWith(id, id, '2026-01-01T00:00:00.000Z');
   });
 
   it('rejects MFA, expired, wrong-key tokens and suspended/deleted accounts before service calls', async () => {

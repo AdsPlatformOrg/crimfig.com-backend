@@ -1,3 +1,4 @@
+import { withdrawalRefundCents } from '../../../api/billing-api/src/modules/withdrawals/withdrawal-fees';
 import { netWithdrawalQuote, transferCharges } from '../../../api/billing-api/src/modules/withdrawals/withdrawal-fees';
 
 describe('User-funded withdrawal fee quotation', () => {
@@ -21,4 +22,15 @@ describe('User-funded withdrawal fee quotation', () => {
   }
   expect(quoted).toBeGreaterThan(700);
  });
+});
+
+describe('confirmed non-refundable charges', () => {
+  test.each([[0,500],[1000,490],[500,495],[50,499],[49,500]])('retained kobo %s yields refund cents %s at original rate', (fee, refund) => {
+    const result = withdrawalRefundCents(500,100,fee,1000);
+    expect(result.refundUsdCents).toBe(refund);
+    expect(result.refundUsdCents + result.retainedUsdCents).toBe(500);
+  });
+  test.each([-1,1001,NaN,Infinity,0.5])('rejects unbounded retained cost %s', fee => {
+    expect(() => withdrawalRefundCents(500,100,fee,1000)).toThrow();
+  });
 });

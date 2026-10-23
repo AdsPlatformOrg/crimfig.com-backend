@@ -4,7 +4,18 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AdsEscrowService } from './ads-escrow.service';
 import { AdsSettlementService } from './ads-settlement.service';
 import { DeferredAuditService } from './deferred-audit.service';
-import { IsString, IsNumber, Min, IsOptional } from 'class-validator';
+import { IsString, IsNumber, Min, IsOptional, IsUUID, IsISO8601 } from 'class-validator';
+
+export class SettleFundedCampaignDto {
+  @IsUUID('4')
+  campaignId: string;
+
+  @IsUUID('4')
+  requestId: string;
+
+  @IsISO8601({ strict: true })
+  periodEnd: string;
+}
 
 export class LockCampaignEscrowDto {
   @IsString()
@@ -101,6 +112,12 @@ export class AdsBillingController {
   async triggerSettlement() {
     const batch = await this.settlementService.processPendingSettlement();
     return { status: 'success', message: 'Batch reconciliation completed', data: batch };
+  }
+
+  @Post('settlements/funded')
+  @ApiOperation({ summary: 'Finance staff: settle a versioned campaign into held earnings using a durable request UUID' })
+  async settleFunded(@Body() dto: SettleFundedCampaignDto) {
+    return { status: 'success', data: await this.settlementService.settleFundedCampaign(dto.campaignId, dto.requestId, dto.periodEnd) };
   }
 
   @Get('audits')

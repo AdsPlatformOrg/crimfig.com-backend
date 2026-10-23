@@ -64,7 +64,10 @@ export const adsCampaigns = pgTable(
     remainingBudgetUsdCents: bigint('remaining_budget_usd_cents', { mode: 'number' }).notNull(),
 
     // Pricing model per event type
+    // Version 1 historical bids are never interpreted as standard CPM without explicit review.
+    pricingVersion: smallint('pricing_version').notNull().default(1),
     pricingModel: varchar('pricing_model', { length: 20 }).notNull().default('cpm'), // 'cpm' | 'cpc' | 'cpa' | 'cpcv'
+    // Version 2: legacy column name stores USD cents PER 1,000 eligible impressions.
     costPerImpressionUsdCents: bigint('cost_per_impression_usd_cents', { mode: 'number' }).notNull().default(1), // $0.01
     costPerClickUsdCents: bigint('cost_per_click_usd_cents', { mode: 'number' }).notNull().default(10),          // $0.10
     targetCpaUsdCents: bigint('target_cpa_usd_cents', { mode: 'number' }),

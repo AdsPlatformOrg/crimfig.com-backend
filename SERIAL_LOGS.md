@@ -2,7 +2,23 @@
 
 All significant changes, decisions, and agent actions are recorded here in reverse chronological order.
 
-## 2026-10-21
+## 2026-10-22
+- **Subscriptions `cancelSubscription`**: Refactored to conditional atomic `cancelAtPeriodEnd = true` update for active/trialing/past_due subscriptions, preserving customer access until the end of the paid billing period. Idempotent return without mutation if already ended; owner-scoped with `NotFoundException`.
+- **Operator Withdrawal Refund Fee Reconciliation**:
+  - Implemented `WithdrawalLedgerService.registerRefundEvidence` and `WithdrawalsService.registerRefundEvidence` with atomic transaction advisory locking (`withdrawal:<ref>`).
+  - Enforced dual distinct operator requirement (`preparedBy !== reviewedBy`), strict transfer code & domain validation, and bounded retained charges (`retainedFeeKobo <= payoutQuote.transferFeeKobo`, `retainedStampDutyKobo <= payoutQuote.stampDutyKobo`).
+  - Stored immutable receipt in `billing_provider_events` under namespace `internal.withdrawal.refund:<ref>` with `processed = true`.
+  - Exposed `POST /api/v1/withdrawals/:reference/refund-evidence` with `RegisterRefundEvidenceDto` in `withdrawals.controller.ts`.
+- **Typing & Test Infrastructure Fix**: Added `"types": ["jest", "node"]` to `backend/auth/tsconfig.spec.json` and explicit `@jest/globals` declarations in `unavailable-payments.spec.ts` resolving editor language-server errors.
+- **Verification Matrix**:
+  - `pnpm --filter @crimfig/auth-api test -- unavailable-payments` -> 10/10 PASS.
+  - `pnpm --filter @crimfig/auth-api test -- cards-and-revenue-split` -> 20/20 PASS.
+  - `pnpm --filter @crimfig/billing-api build` & `lint` -> PASS.
+  - `pnpm --filter @crimfig/ads-api build` & `lint` -> PASS.
+  - `pnpm --filter @crimfig/session test` -> 74/74 PASS.
+  - `pnpm --filter @crimfig/web-billing build` & `@crimfig/web-ads build` -> PASS.
+
+
 - Continued PLAN-0009: transactional refresh-family rotation/logout with advisory locking, preserved app/family, bounded 409 collision and actual signed access expiry.
 - Added reusable bearer verifier and exact dashboard origins; Billing registers a default-deny guard, checks current account status and removes controller demo/header identity fallback.
 - Owner-scoped funding verification; explicit ecosystem service key in every environment; configured raw-body Paystack signatures without development bypass/default key.
@@ -397,3 +413,86 @@ Billing backend build and diff whitespace checks PASS. local-docker remains igno
 
 Still open: explicit undispatched cancel/dispatch UI, fee-aware failure/reversal reconciliation,
 provider acceptance, funded settlement, subscription engine and remaining full-plan acceptance gates.
+
+## ACT-20261022-011 — Continued refund recovery (2026-10-22 09:30 UTC)
+
+Checkpoint commits created on dev: frontend fd99f8f, backend 3313be3. No push/production merge.
+Continued immediately: unsent reservation cancellation UI and exact-reference cancellation response
+validation; new API test. JED's subsequent decision: deduct confirmed non-refundable charges from
+failed/reversed withdrawal refunds. Quote UI discloses this and original-rate nearest-cent rounding.
+
+Backend now supports atomic fee-deducted refunds only when a separately reviewed internal evidence
+receipt matches reference, quote, mode, currency, outcome and transfer code. Costs must be nonnegative
+integer kobo within the quoted fee/levy limits; two different reviewer identities are required. Missing
+proof retains the reserve. Original FX converts retained costs; receipt records refund and retained
+amounts. Concurrent failure/reversal completions refund once. This is the ledger consumer, NOT a
+completed operator evidence-ingestion/approval workflow; no public endpoint can submit that receipt.
+
+Evidence: 32 fee/refund math tests PASS; 41 separate real Docker PostgreSQL tests PASS using synthetic
+reviewed evidence. No actual transfer/refund, production data changes or provider-fee acceptance.
+Provider sources: https://paystack.com/docs/api/transfer/ ;
+https://paystack.com/docs/api/transfer-control/ ; https://support.paystack.com/en/articles/7573314 .
+Provider samples do not establish levy refund semantics: fee_charged alone is not a reconciled net cost.
+Remaining: operator evidence workflow, full UI verification for this addition, settlement, subscriptions,
+and all remaining acceptance gates. Execution continues; PLAN-0009 remains IN_PROGRESS.
+
+## ACT-20261022-017 — Handoff security audit
+
+Read .agents/HANDOFF.md and preserved the newer agent changes. Closed the legacy refund-evidence
+endpoint before service access: authenticated owners could supply both purported operator identities,
+which did not establish authorization or independent approval. Added a forged-role/body regression.
+Targeted withdrawal API suite: 12 PASS. Billing Nest build: PASS. The operator workflow remains
+unfinished; actual grants, server-derived identities and independent review are required before release.
+Prior checkpoint commits remain frontend fd99f8f/backend 3313be3. No push or production merge.
+
+## ACT-20261022-018 — Independent refund review workflow
+
+Continued PLAN-0009 after handoff audit. Added RefundReviewService with server-only explicit UUID
+operator grants (BILLING_REFUND_OPERATOR_IDS, empty denies all), current ACTIVE-account checks,
+self-withdrawal prohibition, immutable pending evidence drafts and separate authenticated approval.
+Preparation/review identities come from verified subjects, never body-supplied names. Approval checks
+both actors and fresh provider transfer verification; repeated concurrent approval is idempotent.
+The ledger accepts version-2 independent-review receipts only; old single-call version-1 evidence is
+quarantined rather than adopted. Human operators must actually inspect referenced provider balance
+records: transfer verification alone does not prove retained charges. Approved receipts are consumed
+by callback retry/owner recovery through the existing atomic refund ledger.
+
+Verification so far: 19 focused API/authorization tests PASS; Billing build and targeted lint PASS
+before final provenance refinement; full suite and final build pending. Added a real-PG scenario for
+unauthorized access, self-review, incorrect draft, suspended preparer and concurrent approval, but
+Docker engine is unavailable (named pipe absent). Launch attempted; user asked to start Desktop and
+resolve any startup prompt. This is missing environment access, not a phase approval. Independent
+work continues. No real provider transfer, production migration, merge or push.
+
+
+## ACT-20261022-019 — Continuous implementation and verification
+
+Refund review checkpoint: full backend suite 332 PASS, 42 opt-in PG cases skipped (Docker engine unavailable). Frontend 75 PASS from preceding run; final Billing production build and post-build tsc PASS; temporary fixture removed. Actual refund component in synthetic 375px iframe: viewport/document both 375, light/dark and keyboard focus inspected. No provider calls in fixture. Ads attribution prerequisite removes default signing secret, validates versioned token structure/TTL/IP and persisted serve binding, and rejects fabricated mobile attestation/reward success. Initial 20 token tests and Ads build PASS; expanded checks pending. Plan remains IN_PROGRESS; settlement/subscriptions and real provider/environment acceptance remain open.
+
+
+## ACT-20261022-020 — Subscription engine and approved ad price units
+
+- JED confirmed standard CPM per 1,000 eligible impressions and CPC per eligible click. New campaign/serve pricingVersion=2; historical rows stay version 1. Migration 0015 is registered after journal entry 0013; existing standalone/unregistered 0014 is not silently adopted. Migration has NOT run against existing databases. Auction ranks normalized eCPM but records immutable per-event nano-USD prices; exact carry avoids per-impression cent rounding. Six pricing tests pass.
+- Subscription initial checkout: request UUID persisted before one provider initialize; common atomic completion for signed webhook and server Verify callback; exact amount/currency/mode/email/owner/intent binding. Paid entitlement has a bounded UTC calendar period and verified receipt. Callback routing separates subscription payments from wallet funding.
+- Recurring engine: explicit authenticated consent, owned saved authorization, fixed USD price and maximum NGN debit; durable generation/reference before one charge call, no resend after uncertainty, period-end cancellation, recovery after cancellation preserves paid access but keeps future renewal disabled. Bounded worker scans use cursors to avoid starvation and require BILLING_SUBSCRIPTION_RENEWALS_ENABLED=true (not enabled locally).
+- Dashboard: one-period checkout/recovery integrated; recurring-consent UI still pending. Synthetic actual-component browser proof: one POST total across checkout/status confirmation, 375px viewport/document, light/dark and keyboard focus inspected. Fixture removed.
+- Verification: 370 general backend PASS; 48 separate real PostgreSQL cases PASS (new disposable SCRAM PostgreSQL 17 fallback, provider doubles only), all temporary cluster files removed. Frontend 80 PASS. Final Billing frontend production build/post-build tsc PASS. Ads/Billing Nest builds PASS; targeted backend lint PASS. Latest pricing/token focused suites 29 PASS. Full suite predates the six new pricing cases; no inflated combined final-run claim.
+- Remaining: funded settlement/clearance and historical reconciliation; renewal settings UI and expanded release/worker/provider acceptance; session/OAuth/a11y/DTO/deployed configuration checks; final merges and push. No actual provider payments/charges/transfers, production migration, merge, push or deployment.
+
+## ACT-20261022-021 — Funded settlement and independent clearance
+
+PLAN-0009 remains IN_PROGRESS. Implemented versioned persisted-event claims, fractional CPM carry, Billing-owned escrow consumption and 72-hour pending publisher receipts. Clearance requires two distinct active explicitly granted operators, excludes beneficiaries, rechecks claimed activity and credits the publisher atomically once. Authenticated read/prepare/approve review routes are registered; settlement dispatch integration and rejection/rebate workflows remain unfinished. Fixed PostgreSQL microsecond boundary comparison and isolated settlement-batch fixtures.
+
+Verification: 53/53 isolated PostgreSQL tests PASS (temporary SCRAM cluster removed), 2/2 clearance API identity/DTO tests PASS, latest Billing Nest build PASS. Provider calls in database tests are doubles; no real Paystack acceptance, existing database migration, production merge or push. Continue implementation and remaining release verification without checkpoint approval.
+
+## ACT-20261022-022 — Staff settlement transport verified
+
+Funded per-campaign settlement is now connected: Ads finance staff POST /ads/billing/settlements/funded sends campaignId, durable requestId and closed ISO periodEnd once to Billing's authenticated internal /ecosystem/campaigns/:campaignId/settlements boundary. A lost response retains the original UUID/period for idempotent recovery. Legacy global settlement/automatic cron remains quarantined. UUIDs are canonicalized before financial locks/receipts; clearance holds shared locks on examined interaction rows.
+
+Evidence: 381 general backend tests PASS (53 PG opt-in cases skipped there and separately 53/53 PASS against disposable PostgreSQL); both latest Ads/Billing Nest builds PASS; targeted Ads billing and Billing ecosystem ESLint PASS. Initial sandbox HTTP run failed on loopback EACCES; authorized rerun passed. No real provider acceptance or production merge/push. Rejection/rebate, recurring preferences UI, migration/staging and other release gates remain open.
+
+## ACT-20261023-001 — Requested dev / production synchronization
+
+JED explicitly requested committing current work to dev, merging to production and pushing origin after updating RAILWAY_API_TOKEN. This request supersedes the earlier conditional release timing; PLAN-0009 remains IN_PROGRESS. Verified 381 general backend tests PASS, 53 isolated PostgreSQL tests PASS (temporary cluster removed), 80 frontend tests PASS, Ads/Billing backend and frontend production builds PASS, Billing post-build types PASS and changed backend TypeScript lint PASS. Initial sandbox loopback/PostgreSQL failures were resolved by authorized execution outside sandbox; directory-wide lint included generated JS, then changed-source TypeScript lint passed.
+
+Next PLAN-0009: complete funded-claim rejection/rebate workflow; verify the present recurring-preferences UI; historical financial reconciliation and deployed schema/migrations 0015/0016 review; provider/worker/callback, real session/cookie/OAuth and accessibility/DTO acceptance. No production database migration or provider money operation performed. Railway deployment outcome is not established by Git synchronization.

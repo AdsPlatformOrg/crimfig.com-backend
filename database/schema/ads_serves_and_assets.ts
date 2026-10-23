@@ -66,6 +66,9 @@ export const adsServes = pgTable(
 
     slotHandle: varchar('slot_handle', { length: 50 }).notNull(),
     // Clearing price in micros (1/1,000,000 USD) for high-precision second-price auction resolution
+    pricingVersion: smallint('pricing_version').notNull().default(1),
+    // Immutable exact price per eligible event; never derive money from the eCPM score.
+    billingPriceNanos: bigint('billing_price_nanos', { mode: 'bigint' }).notNull().default(0n),
     clearingPriceMicros: bigint('clearing_price_micros', { mode: 'number' }).notNull().default(0),
     pricingModel: varchar('pricing_model', { length: 20 }).notNull().default('cpm'),
 

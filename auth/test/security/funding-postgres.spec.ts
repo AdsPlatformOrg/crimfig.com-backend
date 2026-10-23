@@ -1,3 +1,7 @@
+import { AdClearanceService } from '../../../api/billing-api/src/modules/ecosystem/ad-clearance.service';
+import { AdSettlementService } from '../../../api/billing-api/src/modules/ecosystem/ad-settlement.service';
+import { SubscriptionPaymentsService } from '../../../api/billing-api/src/modules/subscriptions/subscription-payments.service';
+import { RefundReviewService } from '../../../api/billing-api/src/modules/withdrawals/refund-review.service';
 import { WebhooksService } from '../../../api/billing-api/src/modules/webhooks/webhooks.service';
 import { WithdrawalDispatchService } from '../../../api/billing-api/src/modules/withdrawals/withdrawal-dispatch.service';
 import { ExchangeRateService } from '../../../api/billing-api/src/modules/exchange-rate/exchange-rate.service';
@@ -38,7 +42,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query('create table apps(id uuid primary key)');
     // Actual Drizzle columns/defaults/enums/unique constraints/FKs, not the serialized mock adapter.
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
-    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests];
+    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreatives, schema.adsPromoters, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries];
     const enums = new Set<string>();
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
       if (col.enum && !enums.has(col.enum.enumName)) {
@@ -56,7 +60,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     try { const ids = await Promise.all(clients.map(client=>client.query('select pg_backend_pid() id'))); expect(new Set(ids.map(result=>result.rows[0].id)).size).toBe(3); } finally { clients.forEach(client=>client.release()); }
   }, 30000);
   beforeEach(async () => {
-    await pool.query('truncate billing_provider_events,billing_saved_cards,billing_transactions,billing_wallets,billing_exchange_rates,refresh_tokens,ads_campaign_escrows,ads_campaigns,users,apps cascade');
+    await pool.query('truncate ads_settlement_batches,billing_provider_events,billing_saved_cards,billing_transactions,billing_wallets,billing_exchange_rates,refresh_tokens,ads_campaign_escrows,ads_campaigns,users,apps cascade');
     owner=randomUUID();rateId=randomUUID();
     await pool.query('insert into users(id,email,status) values($1,$2,$3)',[owner,'owner@example.test','ACTIVE']);
     await pool.query("insert into billing_exchange_rates(id,usd_to_ngn,source) values($1,100,'exchangerate_api')",[rateId]);
@@ -69,6 +73,196 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     const [row]=await db.insert(schema.billingTransactions).values({userId:owner,type:'wallet_fund',status:'pending',provider:'paystack',reference:'fixture-'+randomUUID(),amountUsdCents:cents,amountNgnKobo:cents*100,exchangeRateId:rateId,metadata:JSON.stringify({fundingVersion:2,expectedEmail:'owner@example.test',saveCard:false})}).returning();return row;
   }
   const proof = (row:any) => ({reference:row.reference,status:'success',currency:'NGN',domain:'test',amount:row.amountNgnKobo,metadata:{transactionId:row.id,userId:owner},customer:{email:'owner@example.test'}});
+  test('subscription checkout race initializes once and webhook/recovery completion grants one paid period', async () => {
+    const psp: any = provider();
+    const payments = () => new SubscriptionPaymentsService(db, fx() as any, psp);
+    const input = { userId: owner, requestId: randomUUID(), appSlug: 'chat', planId: 'chat_pro', interval: 'monthly' as const };
+    const results = await Promise.all(Array.from({length: 4}, () => payments().initialize(input)));
+    expect(psp.initializeTransaction).toHaveBeenCalledTimes(1);
+    expect(new Set(results.map(row => row.reference)).size).toBe(1);
+    const row = (await pool.query("select * from billing_transactions where type='subscription_charge'")).rows[0];
+    const data = { reference: row.reference, status: 'success', currency: 'NGN', domain: 'test', amount: row.amount_ngn_kobo,
+      customer: { email: 'owner@example.test' }, metadata: { userId: owner, transactionId: row.id } };
+    psp.verifyTransaction = async () => data;
+    await Promise.all([payments().complete(row.reference, data), payments().recover(owner, input.requestId), payments().complete(row.reference, data)]);
+    expect((await pool.query('select count(*)::int count from billing_subscriptions')).rows[0].count).toBe(1);
+    expect((await payments().entitlement(owner, 'chat')).entitled).toBe(true);
+    expect((await pool.query('select count(*)::int count from billing_wallets')).rows[0].count).toBe(0);
+    await expect(payments().initialize({ ...input, requestId: randomUUID() })).rejects.toThrow('existing paid period');
+    await expect(payments().initialize({ ...input, planId: 'chat_business' })).rejects.toThrow('already bound');
+    expect(psp.initializeTransaction).toHaveBeenCalledTimes(1);
+    expect((await pool.query('select cancel_at_period_end from billing_subscriptions')).rows[0].cancel_at_period_end).toBe(true);
+  }, 30000);
+  test('ambiguous subscription checkout is not resent by another service instance', async () => {
+    const psp: any = provider(); psp.initializeTransaction.mockRejectedValue(Error('ack lost'));
+    const input = { userId: owner, requestId: randomUUID(), appSlug: 'chat', planId: 'chat_pro', interval: 'annual' as const };
+    await expect(new SubscriptionPaymentsService(db,fx() as any,psp).initialize(input)).rejects.toThrow('unconfirmed');
+    const recovered = await new SubscriptionPaymentsService(db,fx() as any,psp).initialize(input);
+    expect(recovered.checkoutUrl).toBeNull(); expect(recovered.status).toBe('pending');
+    expect(psp.initializeTransaction).toHaveBeenCalledTimes(1);
+    await expect(new SubscriptionPaymentsService(db,fx() as any,psp).initialize({...input,requestId:randomUUID()})).rejects.toThrow('Recover');
+  });
+  test('subscription receipt failure rolls activation back and bad provider proof cannot activate', async () => {
+    const psp: any = provider(); const svc = new SubscriptionPaymentsService(db,fx() as any,psp);
+    await svc.initialize({userId:owner,requestId:randomUUID(),appSlug:'chat',planId:'chat_pro',interval:'monthly'});
+    const row=(await pool.query("select * from billing_transactions where type='subscription_charge'")).rows[0];
+    const data={reference:row.reference,status:'success',currency:'NGN',domain:'test',amount:row.amount_ngn_kobo,
+      customer:{email:'owner@example.test'},metadata:{userId:owner,transactionId:row.id}};
+    for(const changed of [{amount:1},{domain:'live'},{customer:{email:'foreign@example.test'}},{metadata:{userId:randomUUID(),transactionId:row.id}}]) {
+      await expect(svc.complete(row.reference,{...data,...changed})).rejects.toThrow('does not match');
+    }
+    await pool.query("create function reject_sub_receipt() returns trigger language plpgsql as $$ begin if new.status='completed' then raise exception 'injected receipt failure'; end if; return new; end $$");
+    await pool.query('create trigger fail_sub_receipt before update on billing_transactions for each row execute function reject_sub_receipt()');
+    try { await expect(svc.complete(row.reference,data)).rejects.toThrow(); expect((await pool.query('select count(*)::int count from billing_subscriptions')).rows[0].count).toBe(0); }
+    finally {await pool.query('drop trigger fail_sub_receipt on billing_transactions');await pool.query('drop function reject_sub_receipt()');}
+    await svc.complete(row.reference,data);expect((await svc.entitlement(owner,'chat')).entitled).toBe(true);
+  });
+  async function renewableSubscription(psp: any, maximum = 100000) {
+    const svc = new SubscriptionPaymentsService(db,fx() as any,psp);
+    const input={userId:owner,requestId:randomUUID(),appSlug:'chat',planId:'chat_pro',interval:'monthly' as const};
+    const initial=await svc.initialize(input);
+    const row=(await pool.query('select * from billing_transactions where reference=$1',[initial.reference])).rows[0];
+    await svc.complete(row.reference,{reference:row.reference,status:'success',currency:'NGN',domain:'test',amount:row.amount_ngn_kobo,
+      customer:{email:'owner@example.test'},metadata:{userId:owner,transactionId:row.id}});
+    const sub=(await pool.query('select * from billing_subscriptions')).rows[0];
+    const card=randomUUID();await pool.query("insert into billing_saved_cards(id,user_id,provider,provider_token,last4,exp_month,exp_year,billing_email) values($1,$2,'paystack','AUTH_fixture','4242','12','2099','owner@example.test')",[card,owner]);
+    const consent={requestId:randomUUID(),savedCardId:card,maxNgnKobo:maximum,expectedPeriodEnd:sub.current_period_end.toISOString()};
+    await svc.consent(owner,sub.id,consent);
+    // Advance only this synthetic paid generation; preserve its receipt-to-period equality.
+    const end=new Date(Date.now()-1000),start=new Date(end.getTime()-30*86400000);
+    await pool.query('update billing_subscriptions set current_period_start=$1,current_period_end=$2,next_billing_date=$2 where id=$3',[start,end,sub.id]);
+    const metadata=JSON.parse(row.metadata);metadata.completion={periodStart:start.toISOString(),periodEnd:end.toISOString()};
+    const receipt=(await pool.query('select metadata from billing_transactions where id=$1',[row.id])).rows[0];
+    const current=JSON.parse(receipt.metadata);current.completion=metadata.completion;
+    await pool.query('update billing_transactions set metadata=$1 where id=$2',[JSON.stringify(current),row.id]);
+    psp.verifyTransaction=jest.fn(async(reference:string)=>{
+      const payment=(await pool.query('select * from billing_transactions where reference=$1',[reference])).rows[0];
+      return {reference,status:'success',currency:'NGN',domain:'test',amount:payment.amount_ngn_kobo,customer:{email:'owner@example.test'},metadata:{userId:owner,transactionId:payment.id}};
+    });
+    psp.chargeAuthorization=jest.fn(async()=>({status:'pending'}));
+    return {svc,sub,consent};
+  }
+  test('recurring charge races dispatch once and grant one new paid generation',async()=>{
+    const psp:any=provider();const {svc,sub}=await renewableSubscription(psp);
+    await Promise.all(Array.from({length:5},()=>svc.renew(sub.id)));
+    expect(psp.chargeAuthorization).toHaveBeenCalledTimes(1);
+    expect((await pool.query("select count(*)::int count from billing_transactions where type='subscription_renewal'")).rows[0].count).toBe(1);
+    expect((await svc.entitlement(owner,'chat')).entitled).toBe(true);
+    expect(await svc.renew(sub.id)).toEqual({status:'not_due'});
+  });
+  test('renewal respects owner FX ceiling and cancellation before dispatch',async()=>{
+    const psp:any=provider();const {svc,sub}=await renewableSubscription(psp,100);
+    await expect(svc.renew(sub.id)).rejects.toThrow('agreed charge limit');
+    expect(psp.chargeAuthorization).not.toHaveBeenCalled();
+    await svc.cancel(owner,sub.id);expect(await svc.renew(sub.id)).toEqual({status:'not_due'});
+    expect((await svc.entitlement(owner,'chat')).entitled).toBe(false);
+  });
+  test('lost renewal response is recovered without charging again, including cancellation after dispatch',async()=>{
+    const psp:any=provider();const {svc,sub}=await renewableSubscription(psp);
+    psp.chargeAuthorization.mockRejectedValue(Error('ack lost'));
+    await expect(svc.renew(sub.id)).rejects.toThrow('unconfirmed');
+    const row=(await pool.query("select * from billing_transactions where type='subscription_renewal'")).rows[0];
+    await svc.cancel(owner,sub.id);
+    await svc.recoverReference(owner,row.reference);
+    await svc.recoverReference(owner,row.reference);
+    expect(psp.chargeAuthorization).toHaveBeenCalledTimes(1);
+    expect((await pool.query('select cancel_at_period_end from billing_subscriptions')).rows[0].cancel_at_period_end).toBe(true);
+    expect((await svc.entitlement(owner,'chat')).entitled).toBe(true);
+    await expect(svc.recoverReference(randomUUID(),row.reference)).rejects.toThrow('not found');
+  });
+  async function settlementFixture(price = 100_000_000n, model = 'cpc') {
+    const [campaign] = await db.insert(schema.adsCampaigns).values({advertiserId:owner,title:'Versioned settlement fixture',budgetUsdCents:1000,
+      remainingBudgetUsdCents:1000,status:'paused',moderationStatus:'approved',pricingVersion:2,pricingModel:model}).returning();
+    await db.insert(schema.billingWallets).values({userId:owner,balanceUsdCents:2000});
+    await new CampaignEscrowService(db).change(owner,campaign.id,'reserve',undefined,'active');
+    const publisher=randomUUID();await pool.query("insert into users(id,email,status) values($1,'publisher@example.test','ACTIVE')",[publisher]);
+    const [promoter]=await db.insert(schema.adsPromoters).values({userId:publisher,type:'INDIVIDUAL'}).returning();
+    const [creative]=await db.insert(schema.adsCreatives).values({campaignId:campaign.id,headline:'Reviewed',destinationUrl:'https://example.test',status:'active',reviewStatus:'approved'}).returning();
+    const [placement]=await db.insert(schema.adsPlacements).values({campaignId:campaign.id,creativeId:creative.id,promoterId:promoter.id,placementToken:randomUUID()}).returning();
+    const add=async(version=2)=>{
+      const [serve]=await db.insert(schema.adsServes).values({campaignId:campaign.id,creativeId:creative.id,promoterId:promoter.id,
+        placementId:placement.id,slotHandle:'fixture',pricingModel:model,pricingVersion:2,billingPriceNanos:price}).returning();
+      const [event]=await db.insert(schema.adsInteractions).values({placementId:placement.id,promoterId:promoter.id,serveId:serve.id,
+        type:model==='cpm'?'viewable_impression':'click',verificationVersion:version,isValid:true}).returning();
+      await pool.query('select pg_sleep(0.01)'); // Closed test period, avoiding JS millisecond/PG microsecond boundary ambiguity.
+      return {serve,event};
+    };
+    return {campaign,publisher,promoter,creative,placement,add,svc:new AdSettlementService(db)};
+  }
+  test('funded settlement races claim a serve once and hold publisher earnings outside available balance',async()=>{
+    const f=await settlementFixture();const {serve}=await f.add();
+    await db.insert(schema.adsInteractions).values({placementId:f.placement.id,promoterId:f.promoter.id,serveId:serve.id,type:'click',verificationVersion:2,isValid:true});
+    const request=randomUUID(),end=new Date(Date.now());
+    await Promise.all(Array.from({length:4},()=>f.svc.settle(f.campaign.id,request,end)));
+    expect((await f.svc.settle(f.campaign.id.toUpperCase(),request.toUpperCase(),end)).replayed).toBe(true);
+    expect((await pool.query('select count(*)::int count from ads_settlement_claims')).rows[0].count).toBe(1);
+    expect((await pool.query('select consumed_usd_cents from ads_campaign_escrows')).rows[0].consumed_usd_cents).toBe('10');
+    const wallet=(await pool.query('select * from billing_wallets where user_id=$1',[owner])).rows[0];expect(wallet.locked_usd_cents).toBe(990);expect(wallet.balance_usd_cents).toBe(1000);
+    expect((await pool.query('select count(*)::int count from billing_wallets where user_id=$1',[f.publisher])).rows[0].count).toBe(0);
+    const item=(await pool.query('select * from ads_promoter_settlement_items')).rows[0];expect(item.earned_usd_cents).toBe('5');expect(item.status).toBe('pending');expect(item.clearance_status).toBe('pending');
+    expect(item.hold_expires_at.getTime()-item.created_at.getTime()).toBeGreaterThan(71*3600000);
+    await f.svc.settle(f.campaign.id,randomUUID(),new Date());expect((await pool.query('select consumed_usd_cents from ads_campaign_escrows')).rows[0].consumed_usd_cents).toBe('10');
+  });
+  test('CPM fractions survive batch boundaries and only whole cents consume escrow',async()=>{
+    const f=await settlementFixture(5_000_000n,'cpm');await f.add();
+    await f.svc.settle(f.campaign.id,randomUUID(),new Date());
+    expect((await pool.query('select consumed_usd_cents from ads_campaign_escrows')).rows[0].consumed_usd_cents).toBe('0');
+    expect((await pool.query('select carry_nanos from ads_settlement_carries')).rows[0].carry_nanos).toBe('5000000');
+    await f.add();await f.svc.settle(f.campaign.id,randomUUID(),new Date());
+    expect((await pool.query('select consumed_usd_cents from ads_campaign_escrows')).rows[0].consumed_usd_cents).toBe('1');
+    expect((await pool.query('select carry_nanos from ads_settlement_carries')).rows[0].carry_nanos).toBe('0');
+  });
+  test('unproven legacy events cannot settle and injected receipt failure rolls all claims and funds back',async()=>{
+    const f=await settlementFixture();await f.add(0);await f.svc.settle(f.campaign.id,randomUUID(),new Date());
+    expect((await pool.query('select count(*)::int count from ads_settlement_claims')).rows[0].count).toBe(0);
+    await f.add();
+    await pool.query("create function reject_ad_receipt() returns trigger language plpgsql as $$ begin if new.type='ads_spend' then raise exception 'injected spend failure'; end if; return new; end $$");
+    await pool.query('create trigger fail_ad_receipt before insert on billing_transactions for each row execute function reject_ad_receipt()');
+    try {await expect(f.svc.settle(f.campaign.id,randomUUID(),new Date())).rejects.toThrow();
+      expect((await pool.query('select count(*)::int count from ads_settlement_claims')).rows[0].count).toBe(0);
+      expect((await pool.query('select consumed_usd_cents from ads_campaign_escrows')).rows[0].consumed_usd_cents).toBe('0');}
+    finally {await pool.query('drop trigger fail_ad_receipt on billing_transactions');await pool.query('drop function reject_ad_receipt()');}
+    await f.svc.settle(f.campaign.id,randomUUID(),new Date());expect((await pool.query('select count(*)::int count from ads_settlement_claims')).rows[0].count).toBe(1);
+  });
+  test('72-hour clearance needs independent active operators and concurrent approvals credit once',async()=>{
+    const f=await settlementFixture();await f.add();await f.svc.settle(f.campaign.id,randomUUID(),new Date());
+    const item=(await pool.query('select * from ads_promoter_settlement_items')).rows[0];
+    const preparer=randomUUID(),reviewer=randomUUID();
+    for(const actor of [preparer,reviewer])await pool.query("insert into users(id,email,status) values($1,'operator@example.test','ACTIVE')",[actor]);
+    const svc=new AdClearanceService(db,{get:()=>JSON.stringify([preparer,reviewer,owner,f.publisher])} as any);
+    await expect(svc.prepare(preparer,item.id,'audit-evidence')).rejects.toThrow('72-hour');
+    await pool.query("update ads_promoter_settlement_items set hold_expires_at=now()-interval '1 second' where id=$1",[item.id]);
+    await expect(svc.prepare(owner,item.id,'audit-evidence')).rejects.toThrow('beneficiaries');
+    const draft=await svc.prepare(preparer,item.id,'audit-evidence');
+    await expect(svc.read(randomUUID(),item.id)).rejects.toThrow('operator access');
+    expect((await svc.read(reviewer,item.id.toUpperCase())).review?.draftId).toBe(draft.draftId);
+    await expect(svc.prepare(reviewer,item.id,'replacement')).rejects.toThrow('immutable');
+    await expect(svc.approve(preparer.toUpperCase(),item.id,draft.draftId)).rejects.toThrow('Independent');
+    await pool.query("update users set status='SUSPENDED' where id=$1",[preparer]);
+    await expect(svc.approve(reviewer,item.id,draft.draftId)).rejects.toThrow('Active settlement');
+    await pool.query("update users set status='ACTIVE' where id=$1",[preparer]);
+    const approvals = await Promise.allSettled(Array.from({length:4},()=>svc.approve(reviewer,item.id,draft.draftId)));
+    expect(approvals.map(result => result.status)).toEqual(Array(4).fill('fulfilled'));
+    const wallet=(await pool.query('select * from billing_wallets where user_id=$1',[f.publisher])).rows[0];expect(wallet.balance_usd_cents).toBe(5);expect(wallet.version).toBe(1);
+    expect((await pool.query('select clearance_status from ads_promoter_settlement_items')).rows[0].clearance_status).toBe('cleared');
+    expect((await pool.query('select total_credited_usd_cents from ads_settlement_batches where id=$1',[item.batch_id])).rows[0].total_credited_usd_cents).toBe('5');
+  });
+  test('clearance receipt failure rolls publisher credit back and invalidated claims prevent release',async()=>{
+    const f=await settlementFixture();const {event}=await f.add();await f.svc.settle(f.campaign.id,randomUUID(),new Date());
+    const item=(await pool.query('select * from ads_promoter_settlement_items')).rows[0];
+    const preparer=randomUUID(),reviewer=randomUUID();for(const actor of [preparer,reviewer])await pool.query("insert into users(id,email,status) values($1,'reviewer@example.test','ACTIVE')",[actor]);
+    const svc=new AdClearanceService(db,{get:()=>JSON.stringify([preparer,reviewer])} as any);
+    await pool.query("update ads_promoter_settlement_items set hold_expires_at=now()-interval '1 second' where id=$1",[item.id]);
+    const draft=await svc.prepare(preparer,item.id,'verified-report');
+    await pool.query('update ads_interactions set is_valid=false where id=$1',[event.id]);
+    await expect(svc.approve(reviewer,item.id,draft.draftId)).rejects.toThrow('fraud reconciliation');
+    await pool.query('update ads_interactions set is_valid=true where id=$1',[event.id]);
+    await pool.query("create function reject_clearance() returns trigger language plpgsql as $$ begin if new.type='ads_earning' and new.status='completed' then raise exception 'injected clearance failure'; end if; return new; end $$");
+    await pool.query('create trigger fail_clearance before update on billing_transactions for each row execute function reject_clearance()');
+    try {await expect(svc.approve(reviewer,item.id,draft.draftId)).rejects.toThrow();expect((await pool.query('select count(*)::int count from billing_wallets where user_id=$1',[f.publisher])).rows[0].count).toBe(0);}
+    finally {await pool.query('drop trigger fail_clearance on billing_transactions');await pool.query('drop function reject_clearance()');}
+    await svc.approve(reviewer,item.id,draft.draftId);expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1',[f.publisher])).rows[0].balance_usd_cents).toBe(5);
+  });
   test('concurrent connections and service instances credit one intent exactly once', async()=>{
     const row=await intent();await Promise.all(Array.from({length:8},()=>service().completeSuccessfulFunding(row.id,proof(row))));
     const wallet=(await pool.query('select * from billing_wallets')).rows[0];expect(wallet.balance_usd_cents).toBe(500);expect(wallet.version).toBe(1);
@@ -224,6 +418,59 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     expect(rows).toHaveLength(1); expect(rows[0].amount_ngn_kobo).toBe(49000);
     expect(JSON.parse(rows[0].metadata).payoutQuote.quoteId).toBe(q.quoteId);
   });
+  test.each(['failed','reversed'])('quoted %s refund deducts only reviewed retained charges exactly once', async outcome => {
+    const bank = await reservableWithdrawal(), request = randomUUID(), ledger = withdrawalLedger();
+    const q = await ledger.quote(owner, request, bank, 500);
+    const reserved = await ledger.reserve(owner, request, bank, 500, q.quoteId);
+    const proof = {reference:reserved.reference,amount:q.netKobo,currency:'NGN',domain:'test',recipient:{recipient_code:'RCP_fixture'},transfer_code:'TRF_quoted',status:outcome};
+    await ledger.dispatchIntent(owner,reserved.reference,true);
+    if (outcome === 'reversed') await ledger.complete(reserved.reference,{...proof,status:'success'});
+    const before = await withdrawalWallet();
+    await expect(ledger.complete(reserved.reference,proof)).rejects.toThrow();
+    expect(await withdrawalWallet()).toEqual(before);
+    await db.insert(schema.billingProviderEvents).values({provider:'paystack',reference:`internal.withdrawal.refund:${reserved.reference}`,eventType:'internal.withdrawal.refund',processed:true,
+      rawPayload:{version:2,reviewKind:'independent-authenticated-operators',reference:reserved.reference,domain:'test',currency:'NGN',transferCode:'TRF_quoted',outcome,quoteId:q.quoteId,providerEvidenceId:'synthetic-ledger-evidence',preparedBy:'reviewer-one',reviewedBy:'reviewer-two',retainedFeeKobo:1000,retainedStampDutyKobo:0}});
+    await Promise.all(Array.from({length:4},()=>ledger.complete(reserved.reference,proof)));
+    expect(await withdrawalWallet()).toEqual({available:1490,locked:0});
+    const receipt=(await pool.query('select metadata from billing_transactions')).rows[0];
+    expect(JSON.parse(receipt.metadata).refundReconciliation).toMatchObject({retainedKobo:1000,retainedUsdCents:10,refundUsdCents:490});
+  });
+
+  test('refund review requires two active granted identities and immutable provider-bound draft', async () => {
+    const bank=await reservableWithdrawal(), ledger=withdrawalLedger(), request=randomUUID();
+    const q=await ledger.quote(owner,request,bank,500);
+    const reserved=await ledger.reserve(owner,request,bank,500,q.quoteId);
+    await ledger.dispatchIntent(owner,reserved.reference,true);
+    const one=randomUUID(),two=randomUUID();
+    await pool.query("insert into users(id,email,status) values($1,'one@fixture.invalid','ACTIVE'),($2,'two@fixture.invalid','ACTIVE')",[one,two]);
+    const proof={reference:reserved.reference,amount:q.netKobo,currency:'NGN',domain:'test',recipient:{recipient_code:'RCP_fixture'},transfer_code:'TRF_review',status:'failed'};
+    const provider:any={paymentDomain:()=> 'test',verifyTransfer:jest.fn(async()=>proof)};
+    const service=new RefundReviewService(db,provider,{get:()=>JSON.stringify([one,two])} as any);
+    const input={providerEvidenceId:'synthetic-provider-balance-record',retainedFeeKobo:1000,retainedStampDutyKobo:0};
+    await expect(service.prepare(owner,reserved.reference,input)).rejects.toThrow('Finance operator');
+    expect(provider.verifyTransfer).not.toHaveBeenCalled();
+    await expect(service.prepare(one,reserved.reference,{...input,retainedFeeKobo:1001})).rejects.toThrow('Charges exceed');
+    const selfService=new RefundReviewService(db,provider,{get:()=>JSON.stringify([owner,one,two])} as any);
+    await expect(selfService.prepare(owner,reserved.reference,input)).rejects.toThrow('own withdrawals');
+    const draft=await service.prepare(one,reserved.reference,input);
+    await expect(service.prepare(one,reserved.reference,input)).rejects.toThrow('already prepared');
+    proof.status='success';
+    await expect(service.approve(two,reserved.reference,draft.draftId)).rejects.toThrow('failed or reversed');
+    proof.status='failed';
+    await expect(service.approve(one,reserved.reference,draft.draftId)).rejects.toThrow('Independent reviewer');
+    await expect(service.approve(two,reserved.reference,randomUUID())).rejects.toThrow('exact current');
+    await expect(ledger.complete(reserved.reference,proof)).rejects.toThrow();
+    await pool.query("update users set status='SUSPENDED' where id=$1",[one]);
+    await expect(service.approve(two,reserved.reference,draft.draftId)).rejects.toThrow('Active finance');
+    await pool.query("update users set status='ACTIVE' where id=$1",[one]);
+    await Promise.all(Array.from({length:3},()=>service.approve(two,reserved.reference,draft.draftId)));
+    await ledger.complete(reserved.reference,proof);
+    expect(await withdrawalWallet()).toEqual({available:1490,locked:0});
+    expect((await service.read(two,reserved.reference)).evidence).toMatchObject({preparedBy:one,reviewedBy:two});
+    const recovery=await new WithdrawalDispatchService(ledger,provider).recover(owner,reserved.reference);
+    expect(recovery).toMatchObject({status:'failed',refund:{grossUsdCents:500,refundUsdCents:490,retainedUsdCents:10,retainedKobo:1000}});
+  });
+
   test('wrong quote confirmation and changed details cannot reserve funds', async () => {
     const bank = await reservableWithdrawal(), request = randomUUID();
     const q = await withdrawalLedger().quote(owner, request, bank, 500);

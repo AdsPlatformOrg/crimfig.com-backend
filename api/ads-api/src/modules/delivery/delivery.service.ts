@@ -14,7 +14,7 @@ import {
   adsServes,
 } from '@crimfig/database/schema';
 import { eq, sql, and } from 'drizzle-orm';
-import { ImpressionTokenService } from './impression-token.service';
+import { ImpressionTokenService, ImpressionTokenPayload } from './impression-token.service';
 import { AuctionEngineService } from './auction-engine.service';
 import { FraudRulesService } from '../verification/fraud-rules.service';
 
@@ -29,6 +29,15 @@ export class DeliveryService {
     private readonly auctionEngine: AuctionEngineService,
     private readonly fraudRules: FraudRulesService,
   ) {}
+
+  /** A valid signature is necessary but never sufficient: bind every identity to its stored serve. */
+  private async boundServe(payload: ImpressionTokenPayload): Promise<boolean> {
+    const [serve] = await this.db.select().from(adsServes).where(eq(adsServes.id, payload.servedId)).limit(1);
+    return !!serve && serve.placementId === payload.placementId && serve.campaignId === payload.campaignId &&
+      serve.creativeId === payload.creativeId && serve.promoterId === payload.promoterId &&
+      serve.ipHash === payload.ipHash && serve.servedAt.getTime() <= payload.timestamp &&
+      payload.timestamp - serve.servedAt.getTime() <= 60_000;
+  }
 
   /**
    * Return client-side embed.js script code
@@ -117,6 +126,7 @@ export class DeliveryService {
    * Interaction telemetry is recorded cleanly for the 30-min settlement cron.
    */
   async getAdForPlacement(token: string, clientIp?: string, userAgent?: string, referrerDomain?: string) {
+    this.tokenService.assertConfigured();
     const [placement] = await this.db
       .select({
         id: adsPlacements.id,
@@ -163,6 +173,7 @@ export class DeliveryService {
         imageUrl: adsCreatives.imageUrl,
         destinationUrl: adsCreatives.destinationUrl,
         pricingModel: adsCampaigns.pricingModel,
+        pricingVersion: adsCampaigns.pricingVersion,
         costPerImpressionUsdCents: adsCampaigns.costPerImpressionUsdCents,
         costPerClickUsdCents: adsCampaigns.costPerClickUsdCents,
         remainingBudgetUsdCents: adsCampaigns.remainingBudgetUsdCents,
@@ -178,8 +189,10 @@ export class DeliveryService {
       .where(
         and(
           eq(adsCampaigns.status, 'active'),
+          eq(adsCampaigns.pricingVersion, 2),
           eq(adsCampaigns.moderationStatus, 'approved'),
           eq(adsCreatives.status, 'active'),
+          eq(adsCreatives.reviewStatus, 'approved'),
           sql`${adsCampaigns.remainingBudgetUsdCents} > 0`,
         ),
       )
@@ -199,7 +212,9 @@ export class DeliveryService {
       clientIp,
     });
 
-    // Select the auction winner or fallback to the placement-bound creative
+    if (!auctionResult) throw new NotFoundException('No eligible versioned auction candidate');
+
+    // Select the eligible auction winner; legacy/unpriced fallback cannot create billable serves.
     const winningCreative = auctionResult ? auctionResult.winner : placement;
     const clearingPriceMicros = auctionResult ? auctionResult.clearingPriceMicros : 0;
     const finalCampaignId = auctionResult ? auctionResult.winner.campaignId : placement.campaignId;
@@ -217,6 +232,8 @@ export class DeliveryService {
         promoterId: placement.promoterId,
         slotHandle: 'cf_slot_auto',
         clearingPriceMicros,
+        pricingVersion: 2,
+        billingPriceNanos: auctionResult.billingPriceNanos,
         pricingModel: auctionResult ? auctionResult.winner.pricingModel : 'cpm',
         ipHash,
         userAgentHash: userAgent ? this.tokenService.hashIp(userAgent) : null,
@@ -276,6 +293,10 @@ export class DeliveryService {
 
     // 1. Try to decode as cryptographically signed impression token
     const tokenPayload = this.tokenService.verifyToken(token, clientIp);
+    if (tokenPayload && !(await this.boundServe(tokenPayload))) {
+      throw new NotFoundException('Click attribution does not match its ad serve');
+    }
+    if (!tokenPayload && token.startsWith('imp_')) throw new NotFoundException('Click token invalid or expired');
     if (tokenPayload) {
       serveId = tokenPayload.servedId;
       placementId = tokenPayload.placementId;
@@ -355,6 +376,7 @@ export class DeliveryService {
         actorIp: clientIp,
         userAgent,
         referrer,
+        verificationVersion: tokenPayload && validation.isValid ? 2 : 0,
         isValid: validation.isValid,
         invalidReason: validation.reasonCode || null,
       })
@@ -452,11 +474,14 @@ export class DeliveryService {
     let placementId: string | undefined;
     let promoterId: string | undefined;
     let serveId: string | undefined;
+    let signedPayload: ImpressionTokenPayload | undefined;
 
     // 1. If signed impToken is provided, decode cryptographic payload
     if (params.impToken) {
       const payload = this.tokenService.verifyToken(params.impToken, params.clientIp);
+      if (!payload || !(await this.boundServe(payload))) return;
       if (payload) {
+        signedPayload = payload;
         placementId = payload.placementId;
         promoterId = payload.promoterId;
         serveId = payload.servedId;
@@ -499,6 +524,21 @@ export class DeliveryService {
       invalidReason = validation.reasonCode || null;
     }
 
+    if (params.type === 'click') {
+      const validation = this.fraudRules.validateClick({ placementId, clientIp: params.clientIp,
+        userAgent: params.userAgent, tokenTimestampMs: signedPayload?.timestamp });
+      isValid = validation.isValid; invalidReason = validation.reasonCode || null;
+    }
+    if (params.type === 'viewable_impression') {
+      const [creative] = signedPayload ? await this.db.select({ format: adsCreatives.adFormat }).from(adsCreatives)
+        .where(eq(adsCreatives.id, signedPayload.creativeId)).limit(1) : [];
+      const minimum = creative?.format === 'video' ? 2 : 1;
+      if (!creative || !Number.isFinite(params.visibleRatio) || params.visibleRatio! < 0.5 || params.visibleRatio! > 1 ||
+        !Number.isFinite(params.durationSeconds) || params.durationSeconds! < minimum || params.durationSeconds! > 900) {
+        isValid = false; invalidReason = 'VIEWABILITY_THRESHOLD';
+      }
+    }
+
     await this.db.insert(adsInteractions).values({
       placementId,
       promoterId: promoterId || placementId,
@@ -508,6 +548,7 @@ export class DeliveryService {
       actorIp: params.clientIp,
       userAgent: params.userAgent,
       referrer: params.referrer,
+      verificationVersion: signedPayload && isValid ? 2 : 0,
       isValid,
       invalidReason,
     });

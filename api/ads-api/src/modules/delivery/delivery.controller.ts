@@ -1,36 +1,43 @@
-import { Controller, Get, Post, Body, Param, Query, Req, Res, Header, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, Req, Res, Header, HttpCode, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DeliveryService } from './delivery.service';
 import { Public } from '@crimfig/shared';
 import type { Response, Request } from 'express';
-import * as crypto from 'crypto';
+import { IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
 
 function extractClientIp(req: Request): string {
-  const xForwardedFor = req.headers['x-forwarded-for'];
-  if (typeof xForwardedFor === 'string') {
-    // Leftmost entry represents the original client before proxies
-    return xForwardedFor.split(',')[0].trim();
-  }
-  return req.socket.remoteAddress || '127.0.0.1';
+  // Express resolves trusted proxies only when explicitly configured. Never trust arbitrary XFF.
+  return req.ip || req.socket.remoteAddress || '';
 }
 
 export class AuditPingDto {
+  @IsOptional() @IsString() @MaxLength(200)
   placementToken?: string;
+  @IsOptional() @IsString() @MaxLength(255)
   domain?: string;
+  @IsOptional() @IsString() @MaxLength(255)
   bundleId?: string;
 }
 
 export class TrackInteractionDto {
+  @IsOptional() @IsString() @MaxLength(200)
   placementToken?: string;
+  @IsOptional() @IsString() @MaxLength(2048)
   impToken?: string;
+  @IsIn(['hover', 'touch', 'impression', 'viewable_impression', 'click', 'reels_view', 'video_q25', 'video_q50', 'video_q75', 'video_complete'])
   type: 'hover' | 'touch' | 'impression' | 'viewable_impression' | 'click' | 'reels_view' | 'video_q25' | 'video_q50' | 'video_q75' | 'video_complete';
+  @IsOptional() @IsIn(['embed', 'share_link', 'reels', 'direct'])
   source?: string;
 }
 
 export class ViewabilityTelemetryDto {
+  @IsString() @MaxLength(2048)
   impToken: string;
+  @IsNumber() @Min(0) @Max(1)
   visibleRatio: number;
+  @IsNumber() @Min(0) @Max(900)
   durationSeconds: number;
+  @IsOptional() @IsIn(['banner', 'card', 'video', 'interstitial'])
   format?: string;
 }
 
@@ -42,7 +49,7 @@ export class DeliveryController {
   @Public()
   @Post('viewability')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Log verified viewability telemetry (IAB 50%/1s continuous standard)' })
+  @ApiOperation({ summary: 'Record client-reported viewability telemetry; not independent measurement proof' })
   async logViewability(@Body() dto: ViewabilityTelemetryDto, @Req() req: Request) {
     const clientIp = extractClientIp(req);
     const userAgent = req.headers['user-agent'];
@@ -110,6 +117,7 @@ export class DeliveryController {
 
     await this.deliveryService.logInteraction({
       placementToken: dto.placementToken,
+      impToken: dto.impToken,
       type: dto.type,
       source: dto.source,
       clientIp,
@@ -157,55 +165,20 @@ export class DeliveryController {
     @Query('platform') platform = 'android',
     @Query('sdkVersion') sdkVersion = '1.0.0',
   ) {
-    return {
-      status: 'success',
-      data: {
-        appKey: appKey || 'cf_app_demo',
-        platform,
-        sdkVersion,
-        killSwitchActive: false,
-        refreshIntervalSeconds: 30,
-        requestTimeoutMs: 5000,
-        attestationRequired: true,
-        supportedFormats: ['banner', 'interstitial', 'rewarded', 'native_card'],
-        rewardVerificationUrl: '/delivery/reward-verify',
-      },
-    };
+    throw new ServiceUnavailableException('Mobile ad SDK configuration is unavailable pending verified application registration and attestation');
   }
 
   @Public()
   @Post('app-session')
   @ApiOperation({ summary: 'Exchange Play Integrity or App Attest token for signed session token' })
   createAppSession(@Body() dto: { appKey?: string; platform?: string; bundleId?: string; attestationToken?: string }) {
-    const isAttested = !!(dto?.attestationToken && dto.attestationToken.length > 20);
-    const sessionKey = `sess_${crypto.randomBytes(24).toString('hex')}`;
-    return {
-      status: 'success',
-      data: {
-        sessionKey,
-        attested: isAttested,
-        platform: dto?.platform || 'android',
-        bundleId: dto?.bundleId || 'com.crimfig.app',
-        expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
-      },
-    };
+    throw new ServiceUnavailableException('Mobile attestation is unavailable pending provider verification');
   }
 
   @Public()
   @Post('reward-verify')
   @ApiOperation({ summary: 'Verify completed rewarded video ad playback and issue signed publisher reward token' })
   verifyReward(@Body() dto: { impToken?: string; sessionKey?: string; userId?: string }) {
-    const rewardToken = `rwd_${crypto.randomBytes(16).toString('hex')}`;
-    return {
-      status: 'success',
-      data: {
-        verified: true,
-        rewardToken,
-        rewardAmount: 1,
-        rewardType: 'reward_unit',
-        timestamp: new Date().toISOString(),
-      },
-    };
+    throw new ServiceUnavailableException('Reward issuance is unavailable pending verified playback and funded reward eligibility');
   }
 }
-

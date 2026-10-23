@@ -79,6 +79,20 @@ export class WithdrawalsService {
     return this.ledger!.cancel(userId, reference);
   }
 
+  async registerRefundEvidence(params: {
+    reference: string;
+    transferCode: string;
+    outcome: 'failed' | 'reversed';
+    providerEvidenceId: string;
+    preparedBy: string;
+    reviewedBy: string;
+    retainedFeeKobo: number;
+    retainedStampDutyKobo: number;
+  }) {
+    this.requireAuthority();
+    return this.ledger!.registerRefundEvidence(params);
+  }
+
   /**
    * List withdrawal requests for a user
    */

@@ -23,6 +23,10 @@ export class AdsSettlementService {
     throw new ServiceUnavailableException('Settlement is unavailable until verified attribution, durable event claims and funded clearance reconciliation are implemented');
   }
 
+  async settleFundedCampaign(campaignId: string, requestId: string, periodEnd: string) {
+    return this.billingClient.settleCampaign(campaignId, requestId, periodEnd);
+  }
+
   /**
    * Get historical settlement batches
    */

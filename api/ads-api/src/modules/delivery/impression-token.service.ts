@@ -1,102 +1,65 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import * as crypto from 'crypto';
 
 export interface ImpressionTokenPayload {
+  version: 2;
   servedId: string;
-  placementId?: string;
+  placementId: string;
   campaignId: string;
   creativeId: string;
-  promoterId?: string;
+  promoterId: string;
   timestamp: number;
   ipHash: string;
 }
 
+const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 @Injectable()
 export class ImpressionTokenService {
-  private readonly logger = new Logger(ImpressionTokenService.name);
-  private readonly secretKey: string;
-  private readonly ttlMs = 15 * 60 * 1000; // 15 minutes TTL
+  private readonly secretKey = process.env.ADS_IMPRESSION_SIGNING_KEY;
+  private readonly ttlMs = 15 * 60 * 1000;
 
-  constructor() {
-    this.secretKey = process.env.ADS_IMPRESSION_SIGNING_KEY || 'crimfig_default_ads_sec_key_2026';
+  private configured(): boolean {
+    return typeof this.secretKey === 'string' && Buffer.byteLength(this.secretKey) >= 32 &&
+      this.secretKey !== 'crimfig_default_ads_sec_key_2026';
   }
 
-  /**
-   * Generates a signed, URL-safe impression token binding the serve context
-   */
-  generateToken(payload: Omit<ImpressionTokenPayload, 'timestamp'>): string {
-    const fullPayload: ImpressionTokenPayload = {
-      ...payload,
-      timestamp: Date.now(),
-    };
-
-    const payloadJson = JSON.stringify(fullPayload);
-    const encodedPayload = Buffer.from(payloadJson).toString('base64url');
-
-    const hmac = crypto.createHmac('sha256', this.secretKey);
-    hmac.update(encodedPayload);
-    const signature = hmac.digest('base64url');
-
-    return `imp_${encodedPayload}.${signature}`;
+  assertConfigured(): void {
+    if (!this.configured()) throw new ServiceUnavailableException('Ad delivery signing is not configured');
   }
 
-  /**
-   * Verifies and decodes an impression token. Returns null if invalid or expired.
-   */
+  generateToken(payload: Omit<ImpressionTokenPayload, 'timestamp' | 'version'>): string {
+    this.assertConfigured();
+    const fullPayload = { ...payload, version: 2 as const, timestamp: Date.now() };
+    if (!this.validPayload(fullPayload)) throw new ServiceUnavailableException('Ad serve identity is invalid');
+    const encoded = Buffer.from(JSON.stringify(fullPayload)).toString('base64url');
+    return `imp_${encoded}.${crypto.createHmac('sha256', this.secretKey!).update(encoded).digest('base64url')}`;
+  }
+
+  private validPayload(payload: any): payload is ImpressionTokenPayload {
+    return payload && payload.version === 2 &&
+      ['servedId', 'placementId', 'campaignId', 'creativeId', 'promoterId']
+        .every(key => typeof payload[key] === 'string' && uuid.test(payload[key])) &&
+      Number.isSafeInteger(payload.timestamp) && payload.timestamp <= Date.now() &&
+      Date.now() - payload.timestamp <= this.ttlMs &&
+      typeof payload.ipHash === 'string' && /^(?:[a-f0-9]{16}|unknown)$/.test(payload.ipHash);
+  }
+
   verifyToken(token: string, clientIp?: string): ImpressionTokenPayload | null {
-    if (!token || !token.startsWith('imp_')) {
-      return null;
-    }
-
-    const raw = token.slice(4); // Remove 'imp_' prefix
-    const parts = raw.split('.');
-    if (parts.length !== 2) {
-      return null;
-    }
-
-    const [encodedPayload, signature] = parts;
-
-    // Verify HMAC signature
-    const hmac = crypto.createHmac('sha256', this.secretKey);
-    hmac.update(encodedPayload);
-    const expectedSignature = hmac.digest('base64url');
-
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
-      this.logger.warn('Impression token signature mismatch');
-      return null;
-    }
-
+    if (!this.configured() || typeof token !== 'string' || token.length > 2048) return null;
+    const match = /^imp_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/.exec(token);
+    if (!match) return null;
+    const [, encoded, signature] = match;
+    const expected = crypto.createHmac('sha256', this.secretKey!).update(encoded).digest('base64url');
+    // Equal-length canonical ASCII prevents timingSafeEqual throwing on attacker input.
+    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
     try {
-      const payloadJson = Buffer.from(encodedPayload, 'base64url').toString('utf8');
-      const payload: ImpressionTokenPayload = JSON.parse(payloadJson);
-
-      // Check TTL expiry
-      if (Date.now() - payload.timestamp > this.ttlMs) {
-        this.logger.warn(`Impression token expired: age=${Date.now() - payload.timestamp}ms`);
-        return null;
-      }
-
-      // If client IP is provided, verify matching IP hash
-      if (clientIp) {
-        const expectedIpHash = crypto.createHash('sha256').update(clientIp).digest('hex').slice(0, 16);
-        if (payload.ipHash && payload.ipHash !== expectedIpHash) {
-          this.logger.warn('Impression token client IP hash mismatch');
-          return null;
-        }
-      }
-
+      const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+      if (!this.validPayload(payload) || payload.ipHash !== this.hashIp(clientIp)) return null;
       return payload;
-    } catch (err: any) {
-      this.logger.error(`Failed to parse impression token: ${err.message}`);
-      return null;
-    }
+    } catch { return null; }
   }
 
-  /**
-   * Computes truncated client IP hash for privacy-safe binding
-   */
   hashIp(clientIp?: string): string {
-    if (!clientIp) return 'unknown';
-    return crypto.createHash('sha256').update(clientIp).digest('hex').slice(0, 16);
+    return clientIp ? crypto.createHash('sha256').update(clientIp).digest('hex').slice(0, 16) : 'unknown';
   }
 }

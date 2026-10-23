@@ -9,3 +9,14 @@ PAYSTACK_PUBLIC_KEY=
 # scripts/plan0009-docker-test.cjs, not stored in this file.
 # That runner does not load this file or call Paystack.
 # Provider acceptance tooling must explicitly load this file and reject non-test keys.
+
+# Authorized finance operator UUIDs; empty denies preparation/review. No credentials here.
+BILLING_REFUND_OPERATOR_IDS=[]
+
+# Keep disabled until subscription provider/staging acceptance is complete.
+BILLING_SUBSCRIPTION_RENEWALS_ENABLED=false
+# Random server-only signing secret, >=32 bytes; no fallback key is accepted.
+ADS_IMPRESSION_SIGNING_KEY=
+
+# Independent ad settlement reviewers; no grants by default.
+BILLING_SETTLEMENT_OPERATOR_IDS=[]

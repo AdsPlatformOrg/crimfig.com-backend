@@ -49,6 +49,7 @@ export const adsInteractions = pgTable(
     type: interactionTypeEnum('type').notNull(),
 
     // Anti-Fraud & Quality Verification Flags
+    verificationVersion: integer('verification_version').notNull().default(0),
     isValid: boolean('is_valid').notNull().default(true),
     invalidReason: varchar('invalid_reason', { length: 50 }),
 

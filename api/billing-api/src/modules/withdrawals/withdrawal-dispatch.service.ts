@@ -24,7 +24,7 @@ export class WithdrawalDispatchService {
     const intent = await this.ledger.dispatchIntent(userId, reference, false);
     if (!intent.dispatchStarted) return { reference, status: intent.status, confirmation: 'not_dispatched' };
     try { return await this.consume(intent, await this.paystack.verifyTransfer(reference)); }
-    catch { return { reference, status: intent.status, confirmation: 'unconfirmed' }; }
+    catch { return { reference, status: intent.status, refund: intent.refund, confirmation: 'unconfirmed' }; }
   }
 
   private async consume(intent: Awaited<ReturnType<WithdrawalLedgerService['dispatchIntent']>>, data: unknown) {
@@ -35,12 +35,13 @@ export class WithdrawalDispatchService {
       // Same strict evidence binding as terminal events; only status classification differs.
       verifiedTransferOutcome(expected, { ...proof, status: 'success' });
       const current = await this.ledger.dispatchIntent(intent.userId, intent.reference, false);
-      if (['completed', 'failed', 'reversed'].includes(current.status)) return { reference: intent.reference, status: current.status, confirmation: 'confirmed' };
+      if (['completed', 'failed', 'reversed'].includes(current.status)) return { reference: intent.reference, status: current.status, refund: current.refund, confirmation: 'confirmed' };
       return { reference: intent.reference, status: current.status,
         confirmation: proof.status === 'otp' ? 'operator_approval_required' : 'pending' };
     }
     verifiedTransferOutcome(expected, data);
-    const result = await this.ledger.complete(intent.reference, data);
-    return { reference: intent.reference, status: result.status, confirmation: 'confirmed' };
+    await this.ledger.complete(intent.reference, data);
+    const current = await this.ledger.dispatchIntent(intent.userId, intent.reference, false);
+    return { reference: intent.reference, status: current.status, refund: current.refund, confirmation: 'confirmed' };
   }
 }

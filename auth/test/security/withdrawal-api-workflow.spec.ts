@@ -50,3 +50,20 @@ it('durable request references isolate owners and reject malformed identities',(
  expect(ledger.referenceForRequest(other,request)).not.toBe(reference);
  expect(()=>ledger.referenceForRequest(owner,'invalid')).toThrow();
 });
+
+it('refund evidence cannot be registered by forged operator identities in an owner request', async () => {
+  const service:any={registerRefundEvidence:jest.fn()};const controller=new WithdrawalsController(service);
+  await expect(controller.registerRefundEvidence({user:{sub:'owner',role:'admin'}},'wd_'+'a'.repeat(40),{
+    transferCode:'TRF_fixture',outcome:'failed',providerEvidenceId:'unverified',preparedBy:'operator-one',reviewedBy:'operator-two',retainedFeeKobo:0,retainedStampDutyKobo:0,
+  })).rejects.toThrow('authorized independent operator review');
+  expect(service.registerRefundEvidence).not.toHaveBeenCalled();
+});
+
+it('refund preparation and approval ignore body identities and use the verified subject', async () => {
+  const review:any={prepare:jest.fn(),approve:jest.fn(),read:jest.fn()};
+  const controller=new WithdrawalsController({} as any,review);
+  await controller.prepareRefund({user:{sub:'verified-preparer'}},'ref',{providerEvidenceId:'record',retainedFeeKobo:0,retainedStampDutyKobo:0,preparedBy:'forged',reviewedBy:'forged'} as any);
+  expect(review.prepare).toHaveBeenCalledWith('verified-preparer','ref',{providerEvidenceId:'record',retainedFeeKobo:0,retainedStampDutyKobo:0});
+  await controller.approveRefund({user:{sub:'verified-reviewer'}},'ref',{draftId:'draft',reviewedBy:'forged'} as any);
+  expect(review.approve).toHaveBeenCalledWith('verified-reviewer','ref','draft');
+});
