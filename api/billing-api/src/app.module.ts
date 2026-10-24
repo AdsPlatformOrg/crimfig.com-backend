@@ -12,6 +12,7 @@ import { TransactionsModule } from './modules/transactions/transactions.module';
 import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { EcosystemModule } from './modules/ecosystem/ecosystem.module';
 import { HealthModule } from './modules/health/health.module';
+import { RewardsModule } from './modules/rewards/rewards.module';
 import { APP_GUARD } from '@nestjs/core';
 import { DashboardAuthModule } from '@crimfig/shared';
 import { BillingAccessGuard } from './modules/security/billing-access.guard';
@@ -32,6 +33,7 @@ import { BillingAccessGuard } from './modules/security/billing-access.guard';
     WebhooksModule,
     EcosystemModule,
     HealthModule,
+    RewardsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: BillingAccessGuard }],
 })

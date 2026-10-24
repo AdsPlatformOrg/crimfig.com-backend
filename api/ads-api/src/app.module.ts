@@ -18,6 +18,7 @@ import { ModerationModule } from './modules/moderation/moderation.module';
 import { UploadsModule } from './modules/uploads/uploads.module';
 import { ConversionsModule } from './modules/conversions/conversions.module';
 import { DisputesModule } from './modules/disputes/disputes.module';
+import { EcosystemModule } from './modules/ecosystem/ecosystem.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { DisputesModule } from './modules/disputes/disputes.module';
     UploadsModule,
     ConversionsModule,
     DisputesModule,
+    EcosystemModule,
   ],
   providers: [AdsStaffGrants, { provide: APP_GUARD, useClass: AdsAccessGuard }],
 })

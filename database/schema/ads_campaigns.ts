@@ -68,8 +68,8 @@ export const adsCampaigns = pgTable(
     pricingVersion: smallint('pricing_version').notNull().default(1),
     pricingModel: varchar('pricing_model', { length: 20 }).notNull().default('cpm'), // 'cpm' | 'cpc' | 'cpa' | 'cpcv'
     // Version 2: legacy column name stores USD cents PER 1,000 eligible impressions.
-    costPerImpressionUsdCents: bigint('cost_per_impression_usd_cents', { mode: 'number' }).notNull().default(1), // $0.01
-    costPerClickUsdCents: bigint('cost_per_click_usd_cents', { mode: 'number' }).notNull().default(10),          // $0.10
+    costPerImpressionUsdCents: bigint('cost_per_impression_usd_cents', { mode: 'number' }).notNull().default(50), // $0.50 Base CPM Floor
+    costPerClickUsdCents: bigint('cost_per_click_usd_cents', { mode: 'number' }).notNull().default(10),          // $0.10 Base CPC Floor
     targetCpaUsdCents: bigint('target_cpa_usd_cents', { mode: 'number' }),
     targetCpcvUsdCents: bigint('target_cpcv_usd_cents', { mode: 'number' }),
     attributionClickDays: smallint('attribution_click_days').notNull().default(7),

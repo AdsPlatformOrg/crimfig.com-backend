@@ -49,5 +49,14 @@ export * from './ads_disputes';                  // includes: adsDisputes, dispu
 // ─── Shared Ecosystem Monetization ───────────────────────────────────────────
 export * from './monetization';                 // includes: monetizationProducts, monetizationTiers, monetizationRevenuePolicies, monetizationAccountTiers, monetizationEarningEvents, monetizationSettlementEntries, monetizationCommissionRules
 
-
 export * from './ads_settlement_claims';
+
+// ─── Growth, Rewards & Analytics (PLAN-0008 / PLAN-0016) ────────────────────────
+export * from './rewards_fund';
+export * from './rewards_points';
+export * from './growth_referrals';
+export * from './analytics_events';
+
+// ─── Support & Notifications (PLAN-0011) ────────────────────────────────────────
+export * from './support_tickets';
+export * from './notifications';
