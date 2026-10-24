@@ -1,8 +1,9 @@
 import allowlist from '../config/cors-origins.json';
 
 /** Exact file-defined browser origins; never publisher delivery CORS. */
-export function dashboardOrigins(production: boolean): string[] {
-  return validateDashboardOrigins(production ? allowlist.production : [...allowlist.production, ...allowlist.development], production);
+export function dashboardOrigins(production: boolean, environment = process.env.RAILWAY_ENVIRONMENT_NAME): string[] {
+  const origins = environment === 'staging' ? allowlist.staging : production ? allowlist.production : [...allowlist.production, ...allowlist.development];
+  return validateDashboardOrigins(origins, production);
 }
 
 export function validateDashboardOrigins(values: readonly string[], production: boolean): string[] {

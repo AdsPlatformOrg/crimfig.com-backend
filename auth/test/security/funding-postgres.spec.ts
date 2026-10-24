@@ -1,6 +1,8 @@
+import { AdRejectionService } from '../../../api/billing-api/src/modules/ecosystem/ad-rejection.service';
 import { AdClearanceService } from '../../../api/billing-api/src/modules/ecosystem/ad-clearance.service';
 import { AdSettlementService } from '../../../api/billing-api/src/modules/ecosystem/ad-settlement.service';
 import { SubscriptionPaymentsService } from '../../../api/billing-api/src/modules/subscriptions/subscription-payments.service';
+import { SubscriptionRenewalWorker } from '../../../api/billing-api/src/modules/subscriptions/subscription-renewal.worker';
 import { RefundReviewService } from '../../../api/billing-api/src/modules/withdrawals/refund-review.service';
 import { WebhooksService } from '../../../api/billing-api/src/modules/webhooks/webhooks.service';
 import { WithdrawalDispatchService } from '../../../api/billing-api/src/modules/withdrawals/withdrawal-dispatch.service';
@@ -14,10 +16,19 @@ import { drizzle } from 'drizzle-orm/node-postgres';
 import { getTableConfig, PgDialect } from 'drizzle-orm/pg-core';
 import { getTableName } from 'drizzle-orm';
 import { randomUUID, createHash } from 'crypto';
+import { spawn } from 'child_process';
+import { resolve } from 'path';
+import { readFileSync } from 'fs';
+import { createServer } from 'http';
+import { PaystackService } from '../../../api/billing-api/src/modules/providers/paystack.service';
+import { OAuthService } from '../../src/modules/oauth/oauth.service';
+import * as argon2 from 'argon2';
 import * as schema from '@crimfig/database/schema';
+import { PromotersService } from '../../../api/ads-api/src/modules/promoters/promoters.service';
 import { WalletService } from '../../../api/billing-api/src/modules/wallet/wallet.service';
 
-jest.mock('../../src/config/config', () => ({ config: { JWT: { ACCESS_SECRET: 'postgres-test-only-signing-secret', ACCESS_EXPIRES_IN: '2m', REFRESH_EXPIRES_DAYS: 30 } } }));
+jest.mock('../../src/config/config', () => ({ config: { JWT: { ACCESS_SECRET: 'postgres-test-only-signing-secret', ACCESS_EXPIRES_IN: '2m', REFRESH_EXPIRES_DAYS: 30 },
+  REDIS: { URL: process.env.PLAN0009_REDIS_URL || 'redis://127.0.0.1:26379' }, OAUTH: { AUTH_CODE_EXPIRES_SECONDS: 2, ISSUER: 'https://auth.example.test' }, IS_PRODUCTION: false } }));
 
 // Opt-in only. Refuse any endpoint other than the dedicated local disposable cluster/database.
 const run = process.env.PLAN0009_PG_URL ? describe : describe.skip;
@@ -36,13 +47,17 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
   beforeAll(async () => {
     const url = new URL(process.env.PLAN0009_PG_URL!);
     if (url.hostname !== '127.0.0.1' || url.port !== '25432' || url.pathname !== '/plan0009_test' || url.username !== 'plan0009test') throw Error('Refusing non-disposable database');
+    if (process.env.PLAN0009_REDIS_URL) {
+      const redisUrl = new URL(process.env.PLAN0009_REDIS_URL);
+      if (redisUrl.protocol !== 'redis:' || redisUrl.hostname !== '127.0.0.1' || redisUrl.port !== '26379' || !redisUrl.password) throw Error('Refusing non-disposable Redis');
+    }
     pool = new Pool({ connectionString: url.href, max: 12, connectionTimeoutMillis: 3000 });
     db = drizzle(pool, { schema });
-    await pool.query('create table users(id uuid primary key,email text not null,status text not null)');
+    await pool.query("create table users(id uuid primary key,email text not null,status text not null,is_email_verified boolean default false,preferred_locale text default 'en')");
     await pool.query('create table apps(id uuid primary key)');
     // Actual Drizzle columns/defaults/enums/unique constraints/FKs, not the serialized mock adapter.
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
-    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreatives, schema.adsPromoters, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries];
+    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
     const enums = new Set<string>();
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
       if (col.enum && !enums.has(col.enum.enumName)) {
@@ -66,6 +81,31 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query("insert into billing_exchange_rates(id,usd_to_ngn,source) values($1,100,'exchangerate_api')",[rateId]);
   });
   afterAll(async () => { await pool?.end(); });
+  test('parallel account initialization creates one profile and one default consent', async () => {
+    const service = new PromotersService(db);
+    const types = ['WEBSITE', 'MOBILE_APP', 'INDIVIDUAL', 'INDIVIDUAL', 'WEBSITE', 'MOBILE_APP', 'INDIVIDUAL'] as const;
+    const results = await Promise.all(types.map(type => service.getOrCreatePromoter(owner, type)));
+    expect(new Set(results.map(result => result.id)).size).toBe(1);
+    expect((await pool.query('select count(*)::int count from ads_promoters')).rows[0].count).toBe(1);
+    expect((await pool.query('select consent_given from ads_reels_consents')).rows).toEqual([{ consent_given: 0 }]);
+    await pool.query('update ads_reels_consents set consent_given=1');
+    await Promise.all(types.map(type => service.getOrCreatePromoter(owner, type, 'replacement')));
+    expect((await pool.query('select consent_given from ads_reels_consents')).rows).toEqual([{ consent_given: 1 }]);
+    expect((await pool.query('select type,display_name from ads_promoters')).rows[0]).toEqual({ type: results[0].type, display_name: 'CrimFig Promoter' });
+  });
+  test('consent initialization failure rolls back a new promoter and a retry recovers', async () => {
+    await pool.query("create function reject_consent() returns trigger language plpgsql as $$ begin raise exception 'injected consent failure'; end $$");
+    await pool.query('create trigger fail_consent before insert on ads_reels_consents for each row execute function reject_consent()');
+    try {
+      await expect(new PromotersService(db).getOrCreatePromoter(owner)).rejects.toThrow();
+      expect((await pool.query('select count(*)::int count from ads_promoters')).rows[0].count).toBe(0);
+    } finally {
+      await pool.query('drop trigger fail_consent on ads_reels_consents');
+      await pool.query('drop function reject_consent()');
+    }
+    await new PromotersService(db).getOrCreatePromoter(owner);
+    expect((await pool.query('select count(*)::int count from ads_reels_consents')).rows[0].count).toBe(1);
+  });
   const fx = () => ({getUsdToNgnRate:async()=>({rateId,rate:100}),convertUsdCentsToNgn:async(cents:number)=>({ngnKobo:cents*100})});
   const provider = () => ({paymentDomain:()=> 'test',initializeTransaction:jest.fn(async (input:any)=>({reference:input.reference,authorization_url:'https://checkout.paystack.com/fixture',access_code:'fixture'}))});
   const service = (psp:any=provider()) => new WalletService(db,fx() as any,psp);
@@ -73,6 +113,226 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     const [row]=await db.insert(schema.billingTransactions).values({userId:owner,type:'wallet_fund',status:'pending',provider:'paystack',reference:'fixture-'+randomUUID(),amountUsdCents:cents,amountNgnKobo:cents*100,exchangeRateId:rateId,metadata:JSON.stringify({fundingVersion:2,expectedEmail:'owner@example.test',saveCard:false})}).returning();return row;
   }
   const proof = (row:any) => ({reference:row.reference,status:'success',currency:'NGN',domain:'test',amount:row.amountNgnKobo,metadata:{transactionId:row.id,userId:owner},customer:{email:'owner@example.test'}});
+  (process.env.PLAN0009_REDIS_URL ? test : test.skip)('real Redis OAuth codes enforce PKCE, scopes, atomic redemption, expiry and replica shutdown', async () => {
+    const verifier = 'a'.repeat(64), challenge = createHash('sha256').update(verifier).digest('base64url');
+    const registration = { clientId: 'public-fixture', name: 'Public fixture', redirectUris: JSON.stringify(['https://app.example.test/callback']), allowedScopes: 'openid profile email' };
+    await db.insert(schema.oauthClients).values(registration);
+    const request = { client_id: registration.clientId, redirect_uri: 'https://app.example.test/callback', response_type: 'code', code_challenge: challenge, code_challenge_method: 'S256', scope: 'openid' };
+    const replicas = [new OAuthService(db, new JwtService()), new OAuthService(db, new JwtService())];
+    try {
+      for (const replica of replicas) {
+        let ready = false;
+        for (let attempt = 0; attempt < 30; attempt++) { if (await replica.pingRedis()) { ready = true; break; } await new Promise(done => setTimeout(done, 50)); }
+        expect(ready).toBe(true);
+      }
+      await expect(replicas[0].validateAuthorization({ ...request, code_challenge_method: 'plain' })).rejects.toThrow('S256');
+      await expect(replicas[0].validateAuthorization({ ...request, code_challenge: undefined })).rejects.toThrow('S256');
+      await expect(replicas[0].validateAuthorization({ ...request, scope: 'openid billing:write' })).rejects.toThrow('scope');
+      await expect(replicas[0].validateAuthorization({ ...request, redirect_uri: 'https://evil.example.test/callback' })).rejects.toThrow('redirect_uri');
+      await expect(replicas[0].validateAuthorization({ ...request, response_type: 'token' })).rejects.toThrow('response_type');
+      const code = await replicas[0].generateAuthCode(owner, request);
+      await expect(replicas[1].exchangeCodeForTokens(code, request.client_id, request.redirect_uri, 'b'.repeat(64))).rejects.toThrow('Invalid or expired');
+      const results = await Promise.allSettled(Array.from({ length: 8 }, (_, index) => replicas[index % 2].exchangeCodeForTokens(code, request.client_id, request.redirect_uri, verifier)));
+      const winners = results.filter((result): result is PromiseFulfilledResult<any> => result.status === 'fulfilled');
+      expect(winners).toHaveLength(1);
+      expect(winners[0].value).toMatchObject({ scope: 'openid', expiresIn: 300, token_type: 'Bearer' });
+      expect(winners[0].value.refreshToken).toBeUndefined();
+      const token = winners[0].value.accessToken;
+      expect(new JwtService().decode(token)).toMatchObject({ type: 'oauth_access', aud: request.client_id, scope: 'openid' });
+      expect(await replicas[1].getUserInfo('Bearer ' + token)).toEqual({ sub: owner });
+      expect((await pool.query('select count(*)::int count from apps')).rows[0].count).toBe(0);
+      expect((await pool.query('select count(*)::int count from refresh_tokens')).rows[0].count).toBe(0);
+      const fullCode = await replicas[0].generateAuthCode(owner, { ...request, scope: 'openid profile email' });
+      const full = await replicas[1].exchangeCodeForTokens(fullCode, request.client_id, request.redirect_uri, verifier);
+      expect(await replicas[0].getUserInfo('Bearer ' + full.accessToken)).toEqual({ sub: owner, email: 'owner@example.test', email_verified: false, locale: 'en' });
+      await pool.query("update users set status='SUSPENDED' where id=$1", [owner]);
+      await expect(replicas[0].getUserInfo('Bearer ' + full.accessToken)).rejects.toThrow('Account');
+      await pool.query("update users set status='ACTIVE' where id=$1", [owner]);
+      const expired = await replicas[0].generateAuthCode(owner, request);
+      await new Promise(done => setTimeout(done, 2200));
+      await expect(replicas[1].exchangeCodeForTokens(expired, request.client_id, request.redirect_uri, verifier)).rejects.toThrow('expired');
+      await pool.query("update oauth_clients set is_active=false where client_id=$1", [request.client_id]);
+      await expect(replicas[0].getUserInfo('Bearer ' + token)).rejects.toThrow('no longer available');
+    } finally { await Promise.all(replicas.map(replica => replica.onModuleDestroy())); }
+    expect(await replicas[0].pingRedis()).toBe(false);
+  }, 20000);
+  (process.env.PLAN0009_REDIS_URL ? test : test.skip)('real Redis OAuth confidential clients require their secret and PKCE before redemption', async () => {
+    const secret = 'isolated-client-secret', verifier = 'c'.repeat(64);
+    await db.insert(schema.oauthClients).values({ clientId: 'confidential-fixture', name: 'Confidential fixture', redirectUris: JSON.stringify(['https://app.example.test/callback']), clientSecretHash: await argon2.hash(secret) });
+    const replica = new OAuthService(db, new JwtService());
+    try {
+      for (let attempt = 0; attempt < 30 && !await replica.pingRedis(); attempt++) await new Promise(done => setTimeout(done, 50));
+      const request = { client_id: 'confidential-fixture', redirect_uri: 'https://app.example.test/callback', response_type: 'code', code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', scope: 'openid email' };
+      const code = await replica.generateAuthCode(owner, request);
+      await expect(replica.exchangeCodeForTokens(code, request.client_id, request.redirect_uri, verifier)).rejects.toThrow('Client authentication');
+      await expect(replica.exchangeCodeForTokens(code, request.client_id, request.redirect_uri, verifier, 'wrong')).rejects.toThrow('Client authentication');
+      expect(await replica.exchangeCodeForTokens(code, request.client_id, request.redirect_uri, verifier, secret)).toMatchObject({ scope: 'openid email' });
+    } finally { await replica.onModuleDestroy(); }
+  }, 20000);
+  (process.env.PLAN0009_PROVIDER_ENV ? test : test.skip)('real Paystack TEST hosted funding and subscription checkout with a saved-card renewal', async () => {
+    const { parse } = require('dotenv');
+    const config = parse(readFileSync(process.env.PLAN0009_PROVIDER_ENV!));
+    if (!/^sk_test_[a-zA-Z0-9]+$/.test(config.PAYSTACK_SECRET_KEY || '') || !/^pk_test_[a-zA-Z0-9]+$/.test(config.PAYSTACK_PUBLIC_KEY || '')) throw Error('TEST-only provider keys required');
+    const originalKey = process.env.PAYSTACK_SECRET_KEY, originalUrl = process.env.BILLING_WEB_URL;
+    process.env.PAYSTACK_SECRET_KEY = config.PAYSTACK_SECRET_KEY;
+    process.env.BILLING_WEB_URL = 'http://127.0.0.1:3019/';
+    const psp = new PaystackService();
+    expect(psp.paymentDomain()).toBe('test');
+    let checkout = '', phase = 'funding';
+    const server = createServer((request, response) => {
+      response.setHeader('Cache-Control', 'no-store');
+      if (request.url === '/' && checkout) { response.writeHead(302, { Location: checkout }); response.end(); }
+      else { response.writeHead(200, { 'Content-Type': 'text/plain' }); response.end(`PLAN-0009 TEST ${phase}: provider return received. Verification runs independently against Paystack. No production account is used.`); }
+    });
+    await new Promise<void>((done, reject) => { server.once('error', reject); server.listen(3019, '127.0.0.1', done); });
+    const waitPaid = async (reference: string) => {
+      for (let attempt = 0; attempt < 150; attempt++) {
+        const verified = await psp.verifyTransaction(reference);
+        if (verified.status === 'success') return verified;
+        await new Promise(done => setTimeout(done, 2000));
+      }
+      throw Error('TEST checkout was not completed within the acceptance window');
+    };
+    try {
+      const wallet = new WalletService(db, fx() as any, psp);
+      await pool.query('update users set email=$1 where id=$2', ['plan0009@example.com', owner]);
+      const initialized = await wallet.initializeFunding({ userId: owner, userEmail: 'plan0009@example.com', requestId: randomUUID(), amountUsd: 5, saveCard: true });
+      checkout = initialized.authorizationUrl!;
+      console.log('PLAN-0009 TEST funding checkout ready: http://127.0.0.1:3019/');
+      const funding = await waitPaid(initialized.reference);
+      await Promise.all([wallet.verifyFunding(initialized.reference, owner), wallet.completeSuccessfulFunding(funding.metadata.transactionId, funding)]);
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(500);
+      const card = (await pool.query('select id from billing_saved_cards where user_id=$1', [owner])).rows[0];
+      expect(card).toBeDefined();
+      const payments = new SubscriptionPaymentsService(db, fx() as any, psp);
+      const subscription = await payments.initialize({ userId: owner, requestId: randomUUID(), appSlug: 'chat', planId: 'chat_pro', interval: 'monthly' });
+      phase = 'subscription'; checkout = subscription.checkoutUrl!;
+      console.log('PLAN-0009 TEST subscription checkout ready: reopen http://127.0.0.1:3019/');
+      const paid = await waitPaid(subscription.reference);
+      await Promise.all([payments.complete(subscription.reference, paid), payments.recoverReference(owner, subscription.reference)]);
+      const sub = (await pool.query('select * from billing_subscriptions')).rows[0];
+      await payments.consent(owner, sub.id, { requestId: randomUUID(), savedCardId: card.id, maxNgnKobo: 1_000_000, expectedPeriodEnd: sub.current_period_end.toISOString() });
+      // Advance the isolated entitlement fixture, not the provider clock or production data.
+      const end = new Date(Date.now() - 1000), start = new Date(end.getTime() - 30 * 86400_000);
+      await pool.query('update billing_subscriptions set current_period_start=$1,current_period_end=$2,next_billing_date=$2 where id=$3', [start, end, sub.id]);
+      const receipt = (await pool.query('select id,metadata from billing_transactions where reference=$1', [subscription.reference])).rows[0];
+      const metadata = JSON.parse(receipt.metadata); metadata.completion = { periodStart: start.toISOString(), periodEnd: end.toISOString() };
+      await pool.query('update billing_transactions set metadata=$1 where id=$2', [JSON.stringify(metadata), receipt.id]);
+      await payments.renew(sub.id);
+      const renewal = (await pool.query("select reference from billing_transactions where type='subscription_renewal'")).rows[0];
+      await waitPaid(renewal.reference);
+      await Promise.all([payments.recoverReference(owner, renewal.reference), payments.recoverReference(owner, renewal.reference)]);
+      expect((await payments.entitlement(owner, 'chat')).entitled).toBe(true);
+      expect((await pool.query("select count(*)::int count from billing_transactions where type='subscription_renewal' and status='completed'")).rows[0].count).toBe(1);
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(500);
+      console.log('PASS: real Paystack TEST hosted funding, saved-card storage, subscription activation and one recovered authorization renewal. Actual external webhook delivery is a separate gate.');
+    } finally {
+      await new Promise<void>(done => server.close(() => done()));
+      if (originalKey === undefined) delete process.env.PAYSTACK_SECRET_KEY; else process.env.PAYSTACK_SECRET_KEY = originalKey;
+      if (originalUrl === undefined) delete process.env.BILLING_WEB_URL; else process.env.BILLING_WEB_URL = originalUrl;
+    }
+  }, 660000);
+  (process.env.PLAN0009_PROVIDER_ENV ? test : test.skip)('real Paystack TEST transfer binds the verified recipient and quoted net payout and dispatches once', async () => {
+    const config = require('dotenv').parse(readFileSync(process.env.PLAN0009_PROVIDER_ENV!));
+    if (!/^sk_test_[a-zA-Z0-9]+$/.test(config.PAYSTACK_SECRET_KEY || '')) throw Error('TEST-only provider key required');
+    const previous = process.env.PAYSTACK_SECRET_KEY; process.env.PAYSTACK_SECRET_KEY = config.PAYSTACK_SECRET_KEY;
+    try {
+      const psp = new PaystackService(); expect(psp.paymentDomain()).toBe('test');
+      // The disposable ledger can disappear while a provider request still awaits OTP.
+      // Never create a replacement payout until earlier TEST requests are resolved.
+      let historyComplete = false;
+      for (let page = 1; page <= 10; page++) {
+        const response = await fetch(`https://api.paystack.co/transfer?perPage=100&page=${page}`, {
+          headers: { Authorization: `Bearer ${config.PAYSTACK_SECRET_KEY}` }, signal: AbortSignal.timeout(10000), redirect: 'error',
+        });
+        const history = await response.json() as any;
+        if (!response.ok || history.status !== true || !Array.isArray(history.data)) throw Error('Cannot establish prior TEST transfer state; no new payout created');
+        for (const transfer of history.data) {
+          if (transfer.domain !== 'test') throw Error('Unexpected provider domain; no new payout created');
+          if (String(transfer.reference).startsWith('wd_') && transfer.reason === 'CrimFig Withdrawal' &&
+            !['success', 'failed', 'reversed', 'abandoned', 'rejected'].includes(transfer.status)) {
+            throw Error(`Earlier TEST payout remains unresolved: ${transfer.reference}. Recover that request before starting another acceptance run.`);
+          }
+        }
+        if (history.data.length < 100) { historyComplete = true; break; }
+      }
+      if (!historyComplete) throw Error('TEST transfer history exceeded audit bound; no new payout created');
+      const resolved = await psp.resolveAccount('0000000000', '057');
+      expect(resolved.account_number).toBe('0000000000'); expect(resolved.account_name).toBeTruthy();
+      const recipient = await psp.createTransferRecipient({ name: resolved.account_name, accountNumber: resolved.account_number, bankCode: '057' });
+      expect(recipient.recipient_code).toMatch(/^RCP_/);
+      const [bank] = await db.insert(schema.billingBankAccounts).values({ userId: owner, bankName: 'Paystack TEST Zenith', bankCode: '057',
+        accountNumber: resolved.account_number, accountName: resolved.account_name, isVerified: true, recipientCode: recipient.recipient_code }).returning();
+      await pool.query('update billing_exchange_rates set raw_main_response=$1,fetched_at=now()', [JSON.stringify({ result: 'success', base_code: 'USD', rates: { NGN: 100 }, time_last_update_unix: Math.floor(Date.now() / 1000) })]);
+      await db.insert(schema.billingWallets).values({ userId: owner, balanceUsdCents: 1500 }); // Disposable ledger fixture, no real-money balance.
+      const ledger = new WithdrawalLedgerService(db, psp, new ExchangeRateService(db));
+      const requestId = randomUUID(), quote = await ledger.quote(owner, requestId, bank.id, 500);
+      const reserved = await ledger.reserve(owner, requestId, bank.id, 500, quote.quoteId);
+      const sends = jest.spyOn(psp, 'initiateTransfer');
+      const dispatcher = new WithdrawalDispatchService(ledger, psp);
+      await Promise.all(Array.from({ length: 3 }, () => dispatcher.dispatch(owner, reserved.reference)));
+      let result, approvalAnnounced = false;
+      for (let attempt = 0; attempt < 120; attempt++) {
+        result = await dispatcher.recover(owner, reserved.reference);
+        if (result.status === 'completed') break;
+        if (result.confirmation === 'operator_approval_required' && !approvalAnnounced) {
+          console.log(`Paystack TEST operator approval needed: reference=${reserved.reference} netNGN=${(quote.netKobo / 100).toFixed(2)}. Approve this exact TEST transfer in Paystack; do not disable OTP.`);
+          approvalAnnounced = true;
+        }
+        await new Promise(done => setTimeout(done, 3000));
+      }
+      expect(result?.status).toBe('completed'); expect(sends).toHaveBeenCalledTimes(1);
+      expect(sends.mock.calls[0][0]).toMatchObject({ amountKobo: quote.netKobo, recipientCode: recipient.recipient_code, reference: reserved.reference });
+      await Promise.all([dispatcher.recover(owner, reserved.reference), dispatcher.recover(owner, reserved.reference)]);
+      expect((await pool.query('select balance_usd_cents,locked_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0]).toEqual({ balance_usd_cents: 1000, locked_usd_cents: 0 });
+      expect(sends).toHaveBeenCalledTimes(1);
+      console.log('PASS: real Paystack TEST recipient resolution, net-payout transfer and GET recovery completed once. Paystack TEST transfers only return success; failure/reversal logic uses separately labelled signed fixtures.');
+    } finally { if (previous === undefined) delete process.env.PAYSTACK_SECRET_KEY; else process.env.PAYSTACK_SECRET_KEY = previous; }
+  }, 420000);
+  test.each(['before-commit', 'after-commit'])('OS process termination and service restart preserve funding exactly once: %s', async phase => {
+    const row = await intent();
+    if (phase === 'before-commit') {
+      await pool.query("create function pause_crash_receipt() returns trigger language plpgsql as $$ begin perform pg_sleep(20); return new; end $$");
+      await pool.query('create trigger pause_crash_receipt before update on billing_transactions for each row execute function pause_crash_receipt()');
+    }
+    const child = spawn(process.execPath, [resolve(__dirname, '../../../scripts/plan0009-funding-crash-child.cjs')], {
+      env: { ...process.env }, stdio: ['ignore', 'ignore', 'ignore', 'ipc'], windowsHide: true,
+    });
+    const exited = new Promise<void>(done => child.once('exit', () => done()));
+    const committed = new Promise<void>((done, reject) => {
+      child.once('message', (message: any) => message.committed ? done() : reject(Error('Crash fixture child failed')));
+      child.once('error', reject);
+    });
+    // A pre-commit child is killed before it can acknowledge. Observe errors without
+    // treating absence of an acknowledgement as successful completion.
+    void committed.catch(() => {});
+    child.send!({ transactionId: row.id, proof: proof(row) });
+    try {
+      if (phase === 'before-commit') {
+        let paused = false;
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const activity = await pool.query("select 1 from pg_stat_activity where application_name='plan0009-funding-crash-child' and wait_event='PgSleep'");
+          if (activity.rowCount) { paused = true; break; }
+          await new Promise(done => setTimeout(done, 50));
+        }
+        expect(paused).toBe(true);
+      } else {
+        await Promise.race([committed, new Promise((_, reject) => setTimeout(() => reject(Error('Child commit timed out')), 6000))]);
+      }
+    } finally {
+      child.kill('SIGKILL');
+      await exited;
+      if (phase === 'before-commit') {
+        await pool.query('drop trigger pause_crash_receipt on billing_transactions');
+        await pool.query('drop function pause_crash_receipt()');
+      }
+    }
+    const stored = (await pool.query('select status from billing_transactions where id=$1', [row.id])).rows[0];
+    expect(stored.status).toBe(phase === 'before-commit' ? 'pending' : 'completed');
+    if (phase === 'before-commit') expect((await pool.query('select count(*)::int count from billing_wallets')).rows[0].count).toBe(0);
+    await Promise.all([service().completeSuccessfulFunding(row.id, proof(row)), service().completeSuccessfulFunding(row.id, proof(row))]);
+    expect((await pool.query('select balance_usd_cents,version from billing_wallets')).rows).toEqual([{ balance_usd_cents: 500, version: 1 }]);
+  }, 20000);
   test('subscription checkout race initializes once and webhook/recovery completion grants one paid period', async () => {
     const psp: any = provider();
     const payments = () => new SubscriptionPaymentsService(db, fx() as any, psp);
@@ -150,6 +410,27 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     expect((await svc.entitlement(owner,'chat')).entitled).toBe(true);
     expect(await svc.renew(sub.id)).toEqual({status:'not_due'});
   });
+  test('concurrent renewal worker replicas use one durable provider charge and recover the entitlement', async () => {
+    const psp: any = provider(); const { svc } = await renewableSubscription(psp);
+    const workers = Array.from({ length: 3 }, () => new SubscriptionRenewalWorker(db, svc));
+    await Promise.all(workers.map(worker => worker.run()));
+    await Promise.all(workers.map(worker => worker.run()));
+    expect(psp.chargeAuthorization).toHaveBeenCalledTimes(1);
+    expect((await svc.entitlement(owner, 'chat')).entitled).toBe(true);
+    expect((await pool.query("select count(*)::int count from billing_transactions where type='subscription_renewal'")).rows[0].count).toBe(1);
+    workers.forEach(worker => worker.onModuleDestroy());
+  });
+  test('renewal worker scans at most 50 pending records per cycle and advances its cursor', async () => {
+    await db.insert(schema.billingTransactions).values(Array.from({ length: 101 }, () => ({ userId: owner, type: 'subscription_renewal' as const,
+      provider: 'paystack' as const, status: 'pending' as const, reference: 'bounded-' + randomUUID(), amountUsdCents: 500 })));
+    const payments: any = { recoverReference: jest.fn(async () => ({})), renew: jest.fn() };
+    const worker = new SubscriptionRenewalWorker(db, payments);
+    await worker.run(); expect(payments.recoverReference).toHaveBeenCalledTimes(50);
+    await worker.run(); expect(payments.recoverReference).toHaveBeenCalledTimes(100);
+    await worker.run(); expect(payments.recoverReference).toHaveBeenCalledTimes(101);
+    expect(new Set(payments.recoverReference.mock.calls.map((call: any[]) => call[1])).size).toBe(101);
+    expect(payments.renew).not.toHaveBeenCalled(); worker.onModuleDestroy();
+  });
   test('renewal respects owner FX ceiling and cancellation before dispatch',async()=>{
     const psp:any=provider();const {svc,sub}=await renewableSubscription(psp,100);
     await expect(svc.renew(sub.id)).rejects.toThrow('agreed charge limit');
@@ -189,6 +470,119 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     };
     return {campaign,publisher,promoter,creative,placement,add,svc:new AdSettlementService(db)};
   }
+  test('independent rejection invalidates the fractional claim chain and rebates only its funded cents once', async () => {
+    const f = await settlementFixture(6_000_000n, 'cpm');
+    for (let n = 0; n < 3; n++) { await f.add(); await f.svc.settle(f.campaign.id, randomUUID(), new Date()); }
+    const escrow = (await pool.query('select * from ads_campaign_escrows')).rows[0];
+    const preparer = randomUUID(), reviewer = randomUUID();
+    for (const actor of [preparer, reviewer]) await pool.query("insert into users(id,email,status) values($1,'operator@example.test','ACTIVE')", [actor]);
+    const authority = new AdClearanceService(db, { get: () => JSON.stringify([preparer, reviewer, owner]) } as any);
+    const svc = new AdRejectionService(db, authority);
+    await expect(svc.prepare(owner, escrow.id, f.promoter.id, 'report')).rejects.toThrow('beneficiaries');
+    const draft = await svc.prepare(preparer, escrow.id, f.promoter.id, 'fraud-claim-chain');
+    expect(draft.rebateUsdCents).toBe(1); expect(draft.claims).toBe(3);
+    await expect(svc.prepare(reviewer, escrow.id, f.promoter.id, 'replacement')).rejects.toThrow('immutable');
+    await expect(svc.approve(preparer, escrow.id, f.promoter.id, draft.draftId)).rejects.toThrow('Independent');
+    await f.add();
+    await f.svc.settle(f.campaign.id, randomUUID(), new Date());
+    expect((await pool.query('select count(*)::int count from ads_settlement_claims')).rows[0].count).toBe(3);
+    const item = (await pool.query('select * from ads_promoter_settlement_items')).rows[0];
+    await pool.query("update ads_promoter_settlement_items set hold_expires_at=now()-interval '1 second'");
+    const clearance = await authority.prepare(preparer, item.id, 'cannot-release-quarantined-chain');
+    await expect(authority.approve(reviewer, item.id, clearance.draftId)).rejects.toThrow('rejection review');
+    await Promise.all(Array.from({ length: 4 }, () => svc.approve(reviewer, escrow.id, f.promoter.id, draft.draftId)));
+    expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(1001);
+    expect((await pool.query('select count(*)::int count from ads_settlement_rebates')).rows[0].count).toBe(1);
+    expect((await pool.query('select is_valid from ads_interactions where id in (select interaction_id from ads_settlement_claims)')).rows.every((row: any) => row.is_valid === false)).toBe(true);
+    expect((await pool.query('select carry_nanos from ads_settlement_carries')).rows[0].carry_nanos).toBe('8000000');
+    expect((await pool.query('select consumed_usd_cents from ads_campaign_escrows')).rows[0].consumed_usd_cents).toBe('1');
+    expect((await pool.query('select clearance_status from ads_promoter_settlement_items')).rows[0].clearance_status).toBe('penalized');
+  });
+  test('rejection receipt failure rolls rebate, claim invalidation and item changes back together', async () => {
+    const f = await settlementFixture(); await f.add(); await f.svc.settle(f.campaign.id, randomUUID(), new Date());
+    const escrow = (await pool.query('select * from ads_campaign_escrows')).rows[0];
+    const actors = [randomUUID(), randomUUID()];
+    for (const actor of actors) await pool.query("insert into users(id,email,status) values($1,'operator@example.test','ACTIVE')", [actor]);
+    const svc = new AdRejectionService(db, new AdClearanceService(db, { get: () => JSON.stringify(actors) } as any));
+    const draft = await svc.prepare(actors[0], escrow.id, f.promoter.id, 'fraud-proof');
+    await pool.query("create function reject_rebate() returns trigger language plpgsql as $$ begin raise exception 'injected rebate failure'; end $$");
+    await pool.query('create trigger reject_rebate before insert on ads_settlement_rebates for each row execute function reject_rebate()');
+    try {
+      await expect(svc.approve(actors[1], escrow.id, f.promoter.id, draft.draftId)).rejects.toThrow();
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(1000);
+      expect((await pool.query('select is_valid from ads_interactions')).rows[0].is_valid).toBe(true);
+      expect((await pool.query('select clearance_status from ads_promoter_settlement_items')).rows[0].clearance_status).toBe('pending');
+      expect((await pool.query('select processed from billing_provider_events where id=$1', [draft.draftId])).rows[0].processed).toBe(false);
+    } finally {
+      await pool.query('drop trigger reject_rebate on ads_settlement_rebates'); await pool.query('drop function reject_rebate()');
+    }
+    await svc.approve(actors[1], escrow.id, f.promoter.id, draft.draftId);
+    expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(1010);
+  });
+  test('released earnings become debt and recover only from future clearance, with rollback and duplicate protection', async () => {
+    const f = await settlementFixture(); await f.add(); await f.svc.settle(f.campaign.id, randomUUID(), new Date());
+    const escrow = (await pool.query('select * from ads_campaign_escrows')).rows[0];
+    const actors = [randomUUID(), randomUUID()];
+    for (const actor of actors) await pool.query("insert into users(id,email,status) values($1,'operator@example.test','ACTIVE')", [actor]);
+    const authority = new AdClearanceService(db, { get: () => JSON.stringify(actors) } as any);
+    async function clear(itemId: string) {
+      await pool.query("update ads_promoter_settlement_items set hold_expires_at=now()-interval '1 second' where id=$1", [itemId]);
+      const draft = await authority.prepare(actors[0], itemId, 'independent-clearance');
+      return { draft, approve: () => authority.approve(actors[1], itemId, draft.draftId) };
+    }
+    const oldItem = (await pool.query('select * from ads_promoter_settlement_items')).rows[0];
+    await (await clear(oldItem.id)).approve();
+    const svc = new AdRejectionService(db, authority);
+    const rejection = await svc.prepare(actors[0], escrow.id, f.promoter.id, 'retrospective-fraud');
+    expect(rejection.recoverableUsdCents).toBe(5);
+    await svc.approve(actors[1], escrow.id, f.promoter.id, rejection.draftId);
+    expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [f.publisher])).rows[0].balance_usd_cents).toBe(5);
+    expect((await pool.query('select status from billing_transactions where id=$1', [oldItem.billing_transaction_id])).rows[0].status).toBe('completed');
+    const [campaign] = await db.insert(schema.adsCampaigns).values({ advertiserId: owner, title: 'New funded generation', budgetUsdCents: 500,
+      remainingBudgetUsdCents: 500, status: 'paused', moderationStatus: 'approved', pricingVersion: 2, pricingModel: 'cpc' }).returning();
+    await new CampaignEscrowService(db).change(owner, campaign.id, 'reserve', undefined, 'active');
+    const [creative] = await db.insert(schema.adsCreatives).values({ campaignId: campaign.id, headline: 'Reviewed', destinationUrl: 'https://example.test', status: 'active', reviewStatus: 'approved' }).returning();
+    const [placement] = await db.insert(schema.adsPlacements).values({ campaignId: campaign.id, creativeId: creative.id, promoterId: f.promoter.id, placementToken: randomUUID() }).returning();
+    for (const [index, price] of [40_000_000n, 60_000_000n].entries()) {
+      const [serve] = await db.insert(schema.adsServes).values({ campaignId: campaign.id, creativeId: creative.id, promoterId: f.promoter.id,
+        placementId: placement.id, slotHandle: 'fixture', pricingModel: 'cpc', pricingVersion: 2, billingPriceNanos: price }).returning();
+      await db.insert(schema.adsInteractions).values({ placementId: placement.id, promoterId: f.promoter.id, serveId: serve.id, type: 'click', verificationVersion: 2, isValid: true });
+      await pool.query('select pg_sleep(0.01)');
+      const batch = await f.svc.settle(campaign.id, randomUUID(), new Date());
+      const item = (await pool.query('select * from ads_promoter_settlement_items where batch_id=$1', [batch.batchId])).rows[0];
+      const review = await clear(item.id);
+      if (index === 0) {
+        await pool.query("create function fail_offset() returns trigger language plpgsql as $$ begin if new.type='internal_debit' then raise exception 'injected offset failure'; end if; return new; end $$");
+        await pool.query('create trigger fail_offset before insert on billing_transactions for each row execute function fail_offset()');
+        try {
+          await expect(review.approve()).rejects.toThrow();
+          expect((await pool.query('select recovered_amount_usd_cents from ads_promoter_penalties')).rows[0].recovered_amount_usd_cents).toBe('0');
+        } finally { await pool.query('drop trigger fail_offset on billing_transactions'); await pool.query('drop function fail_offset()'); }
+      }
+      await Promise.all(Array.from({ length: 3 }, review.approve));
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [f.publisher])).rows[0].balance_usd_cents).toBe(5);
+      expect((await pool.query('select status from ads_promoter_penalties')).rows[0].status).toBe(index === 0 ? 'partially_recovered' : 'fully_recovered');
+    }
+    expect((await pool.query("select sum(amount_usd_cents)::int amount,count(*)::int count from billing_transactions where metadata::jsonb->>'kind'='funded_ad_recovery'")).rows[0]).toEqual({ amount: 5, count: 2 });
+    expect((await pool.query('select clearance_status from ads_promoter_settlement_items where id=$1', [oldItem.id])).rows[0].clearance_status).toBe('clawed_back');
+  });
+  test('independent dismissal unfreezes settlement without money movement and permits a later new review', async () => {
+    const f = await settlementFixture(); await f.add(); await f.svc.settle(f.campaign.id, randomUUID(), new Date());
+    const escrow = (await pool.query('select * from ads_campaign_escrows')).rows[0];
+    const actors = [randomUUID(), randomUUID()];
+    for (const actor of actors) await pool.query("insert into users(id,email,status) values($1,'operator@example.test','ACTIVE')", [actor]);
+    const svc = new AdRejectionService(db, new AdClearanceService(db, { get: () => JSON.stringify(actors) } as any));
+    const draft = await svc.prepare(actors[0], escrow.id, f.promoter.id, 'suspected-fraud');
+    await expect(svc.dismiss(actors[0], escrow.id, f.promoter.id, draft.draftId, 'self')).rejects.toThrow('Independent');
+    await svc.dismiss(actors[1], escrow.id, f.promoter.id, draft.draftId, 'false-positive-investigation');
+    await expect(svc.approve(actors[1], escrow.id, f.promoter.id, draft.draftId)).rejects.toThrow('dismissed');
+    await f.add(); await f.svc.settle(f.campaign.id, randomUUID(), new Date());
+    expect((await pool.query('select count(*)::int count from ads_settlement_claims')).rows[0].count).toBe(2);
+    const next = await svc.prepare(actors[0], escrow.id, f.promoter.id, 'new-evidence');
+    expect(next.draftId).not.toBe(draft.draftId);
+    expect(await svc.read(actors[1], escrow.id, f.promoter.id)).toHaveLength(2);
+    expect((await pool.query('select count(*)::int count from ads_settlement_rebates')).rows[0].count).toBe(0);
+  });
   test('funded settlement races claim a serve once and hold publisher earnings outside available balance',async()=>{
     const f=await settlementFixture();const {serve}=await f.add();
     await db.insert(schema.adsInteractions).values({placementId:f.placement.id,promoterId:f.promoter.id,serveId:serve.id,type:'click',verificationVersion:2,isValid:true});

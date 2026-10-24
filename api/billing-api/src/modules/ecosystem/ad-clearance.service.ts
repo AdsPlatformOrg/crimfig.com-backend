@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { and, eq, lte, sql } from 'drizzle-orm';
+import { and, asc, eq, inArray, lte, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as s from '@crimfig/database/schema';
 import { DATABASE_TOKEN } from '../database/database.module';
@@ -15,7 +15,7 @@ export class AdClearanceService {
     if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(id))) throw new Error('Invalid settlement operator configuration');
     this.operators = new Set(ids.map(id => id.toLowerCase()));
   }
-  private async authorize(actor: string, tx: any) {
+  async authorize(actor: string, tx: any) {
     if (typeof actor !== 'string' || !this.operators.has(actor.toLowerCase())) throw new ForbiddenException('Settlement operator access required');
     const [owner] = await tx.select({ status: s.users.status }).from(s.users).where(eq(s.users.id, actor)).for('share');
     if (owner?.status !== 'ACTIVE') throw new ForbiddenException('Active settlement operator required');
@@ -83,6 +83,12 @@ export class AdClearanceService {
     itemId = itemId.toLowerCase();
     return this.db.transaction(async tx => {
       const { item, receipt, meta, promoter, campaign } = await this.context(tx, itemId, actor);
+      const [rejection] = await tx.select().from(s.billingProviderEvents).where(and(
+        eq(s.billingProviderEvents.provider, 'paystack'),
+        eq(s.billingProviderEvents.eventType, 'internal.ad.rejection'),
+        sql`${s.billingProviderEvents.errorMessage} is distinct from 'review_dismissed'`,
+        sql`${s.billingProviderEvents.reference} like ${'internal.ad.rejection:' + meta.escrowId + ':' + promoter.id + ':%'}`));
+      if (rejection) throw new ConflictException('Settlement generation is under rejection review');
       const [draft] = await tx.select().from(s.billingProviderEvents).where(and(eq(s.billingProviderEvents.id, draftId),
         eq(s.billingProviderEvents.provider, 'paystack'), eq(s.billingProviderEvents.reference, `internal.ad.clearance:${itemId}`))).for('update');
       const proof = draft?.rawPayload as any;
@@ -113,9 +119,44 @@ export class AdClearanceService {
       const balance = wallet.balanceUsdCents + item.earnedUsdCents;
       if (!Number.isSafeInteger(balance) || wallet.balanceUsdCents < 0 || balance > 2147483647) throw new ConflictException('Publisher wallet limit exceeded');
       const now = new Date();
-      await tx.update(s.billingWallets).set({ balanceUsdCents: balance, version: sql`${s.billingWallets.version} + 1`, updatedAt: now }).where(eq(s.billingWallets.id, wallet.id));
+      let finalBalance = balance, availableEarnings = item.earnedUsdCents;
+      const offsets: { penaltyId: string; amountUsdCents: number }[] = [];
+      const penalties = await tx.select().from(s.adsPromoterPenalties).where(and(
+        eq(s.adsPromoterPenalties.promoterId, promoter.id), eq(s.adsPromoterPenalties.reasonCode, 'funded_claim_chain_rejected'),
+        sql`${s.adsPromoterPenalties.status} in ('outstanding','partially_recovered')`))
+        .orderBy(asc(s.adsPromoterPenalties.createdAt), asc(s.adsPromoterPenalties.id)).for('update');
+      for (const penalty of penalties) {
+        if (!availableEarnings) break;
+        const [rejection] = await tx.select().from(s.billingProviderEvents).where(and(
+          eq(s.billingProviderEvents.id, penalty.id), eq(s.billingProviderEvents.provider, 'paystack'),
+          eq(s.billingProviderEvents.eventType, 'internal.ad.rejection'), eq(s.billingProviderEvents.processed, true)));
+        const evidence = rejection?.rawPayload as any;
+        const debt = evidence?.snapshot?.items?.filter((row: any) => row.released).reduce((sum: number, row: any) => sum + row.earned, 0);
+        if (!evidence || evidence.version !== 1 || evidence.promoterId !== promoter.id || !evidence.evidenceId ||
+          debt !== penalty.penaltyAmountUsdCents || !Number.isSafeInteger(debt) || debt < 0 ||
+          !Number.isSafeInteger(penalty.recoveredAmountUsdCents) || penalty.recoveredAmountUsdCents < 0 || penalty.recoveredAmountUsdCents > debt) {
+          throw new ConflictException('Recovery debt requires reconciliation');
+        }
+        const amount = Math.min(availableEarnings, debt - penalty.recoveredAmountUsdCents);
+        if (!amount) throw new ConflictException('Recovery status requires reconciliation');
+        const recovered = penalty.recoveredAmountUsdCents + amount;
+        await tx.insert(s.billingTransactions).values({ userId: promoter.userId, provider: 'internal', type: 'internal_debit', status: 'completed',
+          amountUsdCents: amount, balanceBeforeUsdCents: finalBalance, balanceAfterUsdCents: finalBalance - amount,
+          reference: `ads-recovery-v1-${penalty.id}-${item.id}`, idempotencyKey: `ads-recovery:v1:${penalty.id}:${item.id}`,
+          metadata: JSON.stringify({ version: 1, kind: 'funded_ad_recovery', penaltyId: penalty.id, itemId: item.id, promoterId: promoter.id }) });
+        await tx.update(s.adsPromoterPenalties).set({ recoveredAmountUsdCents: recovered,
+          status: recovered === debt ? 'fully_recovered' : 'partially_recovered', updatedAt: now }).where(eq(s.adsPromoterPenalties.id, penalty.id));
+        if (recovered === debt) {
+          const recoveredIds = evidence.snapshot.items.filter((row: any) => row.released).map((row: any) => row.id);
+          if (recoveredIds.length) await tx.update(s.adsPromoterSettlementItems).set({ clearanceStatus: 'clawed_back' })
+            .where(and(inArray(s.adsPromoterSettlementItems.id, recoveredIds), eq(s.adsPromoterSettlementItems.clearanceStatus, 'recovery_pending')));
+        }
+        availableEarnings -= amount; finalBalance -= amount; offsets.push({ penaltyId: penalty.id, amountUsdCents: amount });
+      }
+      await tx.update(s.billingWallets).set({ balanceUsdCents: finalBalance, version: sql`${s.billingWallets.version} + 1`, updatedAt: now }).where(eq(s.billingWallets.id, wallet.id));
       await tx.update(s.billingTransactions).set({ status: 'completed', balanceBeforeUsdCents: wallet.balanceUsdCents, balanceAfterUsdCents: balance,
-        metadata: JSON.stringify({ ...meta, clearance: { draftId, preparedBy: proof.preparedBy, reviewedBy: actor, evidenceId: proof.evidenceId, clearedAt: now.toISOString() } }), updatedAt: now })
+        metadata: JSON.stringify({ ...meta, clearance: { draftId, preparedBy: proof.preparedBy, reviewedBy: actor, evidenceId: proof.evidenceId,
+          clearedAt: now.toISOString(), recoveryOffsets: offsets, availableEarningsUsdCents: availableEarnings } }), updatedAt: now })
         .where(eq(s.billingTransactions.id, receipt.id));
       await tx.update(s.adsPromoterSettlementItems).set({ status: 'credited', clearanceStatus: 'cleared', clearedAt: now }).where(eq(s.adsPromoterSettlementItems.id, itemId));
       await tx.update(s.adsSettlementBatches).set({ totalCreditedUsdCents: sql`${s.adsSettlementBatches.totalCreditedUsdCents} + ${item.earnedUsdCents}` }).where(eq(s.adsSettlementBatches.id, item.batchId));

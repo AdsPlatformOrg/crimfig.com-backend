@@ -68,7 +68,9 @@ export class PaystackService {
 
   paymentDomain(): 'test' | 'live' {
     const mode = this.secretKey.startsWith('sk_live_') ? 'live' : this.secretKey.startsWith('sk_test_') ? 'test' : null;
-    if (!mode || (process.env.NODE_ENV === 'production' && mode !== 'live')) {
+    const staging = process.env.RAILWAY_ENVIRONMENT_NAME === 'staging';
+    const expected = process.env.PAYSTACK_MODE || (staging ? 'test' : process.env.NODE_ENV === 'production' ? 'live' : mode);
+    if (!mode || mode !== expected || (staging && mode !== 'test') || (process.env.NODE_ENV === 'production' && !staging && mode !== 'live')) {
       throw new ServiceUnavailableException('Payment provider key/mode is not configured for funding');
     }
     return mode;
@@ -230,15 +232,18 @@ export class PaystackService {
    * Get list of Nigerian banks supported by Paystack
    */
   async listBanks(): Promise<Array<{ name: string; code: string; slug: string; id: number }>> {
+    this.paymentDomain();
     try {
       const res = await fetch(`${this.baseUrl}/bank?country=nigeria&perPage=100`, {
         headers: { Authorization: `Bearer ${this.secretKey}` },
+        redirect: 'error', signal: AbortSignal.timeout(10000),
       });
       const json: any = await res.json();
-      return json.data || [];
+      if (!res.ok || json.status !== true || !Array.isArray(json.data)) throw new Error('Bank directory unavailable');
+      return json.data;
     } catch (err: any) {
       this.logger.error(`listBanks error: ${err.message}`);
-      return [];
+      throw new ServiceUnavailableException('Bank directory is temporarily unavailable');
     }
   }
 
@@ -250,15 +255,19 @@ export class PaystackService {
     account_name: string;
     bank_id: number;
   }> {
+    this.paymentDomain();
+    if (!/^\d{10}$/.test(accountNumber) || !/^\d{3,10}$/.test(bankCode)) throw new ServiceUnavailableException('Invalid bank account details');
     try {
       const res = await fetch(
         `${this.baseUrl}/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
         {
           headers: { Authorization: `Bearer ${this.secretKey}` },
+          redirect: 'error', signal: AbortSignal.timeout(10000),
         },
       );
       const json: any = await res.json();
-      if (!json.status) {
+      if (!res.ok || json.status !== true || json.data?.account_number !== accountNumber ||
+        typeof json.data?.account_name !== 'string' || !json.data.account_name.trim()) {
         throw new Error(json.message || 'Could not resolve bank account details');
       }
       return json.data;
@@ -276,9 +285,12 @@ export class PaystackService {
     accountNumber: string;
     bankCode: string;
   }): Promise<PaystackRecipientResponse> {
+    this.paymentDomain();
+    if (!/^\d{10}$/.test(params.accountNumber) || !/^\d{3,10}$/.test(params.bankCode) || !params.name.trim() || params.name.length > 255) throw new ServiceUnavailableException('Invalid transfer recipient');
     try {
       const res = await fetch(`${this.baseUrl}/transferrecipient`, {
         method: 'POST',
+        redirect: 'error', signal: AbortSignal.timeout(10000),
         headers: {
           Authorization: `Bearer ${this.secretKey}`,
           'Content-Type': 'application/json',
@@ -292,7 +304,8 @@ export class PaystackService {
         }),
       });
       const json: any = await res.json();
-      if (!json.status) {
+      if (!res.ok || json.status !== true || !/^RCP_[A-Za-z0-9]+$/.test(json.data?.recipient_code || '') ||
+        json.data?.details?.account_number !== params.accountNumber || String(json.data?.details?.bank_code) !== params.bankCode) {
         throw new Error(json.message || 'Failed to create transfer recipient');
       }
       return json.data;

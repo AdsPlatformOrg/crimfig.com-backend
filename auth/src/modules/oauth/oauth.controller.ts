@@ -1,13 +1,14 @@
-import { Controller, Get, Post, Query, Body, UseGuards, Res, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, UseGuards, Res, HttpCode, HttpStatus, Headers, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { OAuthService, AuthorizeDto } from './oauth.service';
 import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { CurrentUser } from '../../decorators/current-user.decorator';
 import type { JwtPayload } from '../tokens/tokens.service';
-import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { config } from '../../config/config';
+import { ThrottlerGuard } from '@nestjs/throttler';
 
 class TokenExchangeDto {
   @ApiProperty() @IsString() @IsNotEmpty() grant_type!: string;
@@ -15,9 +16,11 @@ class TokenExchangeDto {
   @ApiProperty() @IsString() @IsNotEmpty() redirect_uri!: string;
   @ApiProperty() @IsString() @IsNotEmpty() code!: string;
   @ApiProperty({ required: false }) @IsOptional() @IsString() code_verifier?: string;
+  @ApiProperty({ required: false }) @IsOptional() @IsString() @MaxLength(512) client_secret?: string;
 }
 
 @ApiTags('OAuth 2.0 / OIDC')
+@UseGuards(ThrottlerGuard)
 @Controller({ path: 'oauth', version: '1' })
 export class OAuthController {
   constructor(private readonly oauthService: OAuthService) {}
@@ -29,7 +32,7 @@ export class OAuthController {
   @Get('authorize')
   @ApiOperation({ summary: 'OAuth2 authorization endpoint — validates client & redirects to login' })
   async authorize(@Query() dto: AuthorizeDto, @Res() res: Response) {
-    await this.oauthService.validateClient(dto.client_id, dto.redirect_uri);
+    await this.oauthService.validateAuthorization(dto);
     // Redirect to the login page, passing OAuth params as query string
     const params = new URLSearchParams({
       client_id: dto.client_id,
@@ -56,8 +59,7 @@ export class OAuthController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: AuthorizeDto,
   ) {
-    await this.oauthService.validateClient(dto.client_id, dto.redirect_uri);
-    const code = await this.oauthService.generateAuthCode(user.sub, dto.client_id, dto.redirect_uri, dto.code_challenge);
+    const code = await this.oauthService.generateAuthCode(user.sub, dto);
     return { code, state: dto.state };
   }
 
@@ -69,19 +71,18 @@ export class OAuthController {
   @ApiOperation({ summary: 'Exchange authorization code for access & refresh tokens' })
   async token(@Body() dto: TokenExchangeDto) {
     if (dto.grant_type !== 'authorization_code') {
-      return { error: 'unsupported_grant_type' };
+      throw new BadRequestException('unsupported_grant_type');
     }
-    return this.oauthService.exchangeCodeForTokens(dto.code, dto.client_id, dto.redirect_uri, dto.code_verifier);
+    return this.oauthService.exchangeCodeForTokens(dto.code, dto.client_id, dto.redirect_uri, dto.code_verifier, dto.client_secret);
   }
 
   /**
    * OIDC UserInfo endpoint — returns claims about the authenticated user.
    */
   @Get('userinfo')
-  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'OIDC userinfo endpoint' })
-  userInfo(@CurrentUser() user: JwtPayload) {
-    return this.oauthService.getUserInfo(user.sub);
+  userInfo(@Headers('authorization') authorization: string | undefined) {
+    return this.oauthService.getUserInfo(authorization);
   }
 }

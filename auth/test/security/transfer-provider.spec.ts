@@ -33,4 +33,18 @@ describe('Transfer provider request boundary (no network)', () => {
     expect(fetch).toHaveBeenCalledTimes(1);expect(fetch.mock.calls[0][0]).toBe('https://api.paystack.co/transfer/verify/'+reference);
     expect(fetch.mock.calls[0][1]?.method).toBeUndefined();
   });
+  it('bank directory failure stays unavailable rather than becoming a confirmed empty list', async () => {
+    jest.spyOn(global, 'fetch').mockResolvedValue(Response.json({ status: false, data: [] }, { status: 503 }));
+    await expect(new PaystackService().listBanks()).rejects.toThrow('temporarily unavailable');
+  });
+  it('account resolution is bounded and rejects a provider response for a different account', async () => {
+    const fetch = jest.spyOn(global, 'fetch').mockResolvedValue(Response.json({ status: true, data: { account_number: '1111111111', account_name: 'Different account' } }));
+    await expect(new PaystackService().resolveAccount('0000000000', '057')).rejects.toThrow();
+    expect(fetch.mock.calls[0][1]).toMatchObject({ redirect: 'error' }); expect(fetch.mock.calls[0][1]?.signal).toBeDefined();
+  });
+  it.each([{ account_number: '1111111111', bank_code: '057' }, { account_number: '0000000000', bank_code: '044' }])('recipient response cannot change the verified bank binding %j', async details => {
+    const fetch = jest.spyOn(global, 'fetch').mockResolvedValue(Response.json({ status: true, data: { recipient_code: 'RCP_fixture', details } }));
+    await expect(new PaystackService().createTransferRecipient({ name: 'TEST recipient', accountNumber: '0000000000', bankCode: '057' })).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1); expect(fetch.mock.calls[0][1]?.signal).toBeDefined();
+  });
 });
