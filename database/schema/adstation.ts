@@ -116,7 +116,48 @@ export const adstationDirectCampaigns = pgTable(
   ],
 );
 
+/**
+ * adstation_ad_events
+ *
+ * Immutable, deduplicated event beacons for AdStation direct deals.
+ * Enforces zero financial billing leakage and idempotency key uniqueness.
+ */
+export const adstationAdEvents = pgTable(
+  'adstation_ad_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    directCampaignId: uuid('direct_campaign_id')
+      .notNull()
+      .references(() => adstationDirectCampaigns.id, { onDelete: 'cascade' }),
+    slotId: uuid('slot_id')
+      .references(() => adstationSlots.id, { onDelete: 'set null' }),
+    websiteId: uuid('website_id')
+      .notNull()
+      .references(() => adsPromoterWebsites.id, { onDelete: 'cascade' }),
+
+    eventType: varchar('event_type', { length: 32 }).notNull(), // impression, viewable_impression, click, hover
+    idempotencyKey: varchar('idempotency_key', { length: 128 }).notNull().unique(),
+
+    isViewable: boolean('is_viewable').notNull().default(false),
+    viewDurationMs: bigint('view_duration_ms', { mode: 'number' }).notNull().default(0),
+
+    ipHash: varchar('ip_hash', { length: 64 }),
+    userAgent: text('user_agent'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index('adstation_ad_events_campaign_idx').on(t.directCampaignId),
+    index('adstation_ad_events_slot_idx').on(t.slotId),
+    index('adstation_ad_events_website_idx').on(t.websiteId),
+    index('adstation_ad_events_type_idx').on(t.eventType),
+    index('adstation_ad_events_created_idx').on(t.createdAt),
+  ],
+);
+
 export type AdstationSlot = typeof adstationSlots.$inferSelect;
 export type NewAdstationSlot = typeof adstationSlots.$inferInsert;
 export type AdstationDirectCampaign = typeof adstationDirectCampaigns.$inferSelect;
 export type NewAdstationDirectCampaign = typeof adstationDirectCampaigns.$inferInsert;
+export type AdstationAdEvent = typeof adstationAdEvents.$inferSelect;
+export type NewAdstationAdEvent = typeof adstationAdEvents.$inferInsert;

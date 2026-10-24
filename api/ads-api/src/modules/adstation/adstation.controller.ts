@@ -127,4 +127,47 @@ export class AdstationController {
     const campaign = await this.adstationService.createDirectCampaign(promoter.id, dto);
     return { status: 'success', data: campaign };
   }
+
+  @Post('direct-events')
+  @ApiOperation({ summary: 'Record direct deal impression/click event with idempotency' })
+  async recordDirectEvent(
+    @Body()
+    dto: {
+      directCampaignId: string;
+      websiteId: string;
+      slotId?: string;
+      eventType: 'impression' | 'viewable_impression' | 'click' | 'hover';
+      idempotencyKey: string;
+      isViewable?: boolean;
+      viewDurationMs?: number;
+    },
+  ) {
+    const result = await this.adstationService.recordDirectEvent(dto);
+    return { status: 'success', data: result };
+  }
+
+  @Get('websites/:websiteId/health')
+  @ApiOperation({ summary: 'Audit consideration slot health and 48h grace status' })
+  async getWebsiteHealth(@Param('websiteId') websiteId: string) {
+    const result = await this.adstationService.checkConsiderationSlotHealth(websiteId);
+    return { status: 'success', data: result };
+  }
+
+  @Post('admin/websites/:websiteId/suspend')
+  @ApiOperation({ summary: 'Super Admin: Suspend website direct deal serving' })
+  async suspendWebsite(
+    @Param('websiteId') websiteId: string,
+    @Body() dto: { reason: string },
+  ) {
+    const result = await this.adstationService.updateWebsiteAdstationStatus(websiteId, true, dto.reason);
+    return { status: 'success', data: result };
+  }
+
+  @Post('admin/websites/:websiteId/reinstate')
+  @ApiOperation({ summary: 'Super Admin: Reinstate website direct deal serving' })
+  async reinstateWebsite(@Param('websiteId') websiteId: string) {
+    const result = await this.adstationService.updateWebsiteAdstationStatus(websiteId, false);
+    return { status: 'success', data: result };
+  }
 }
+

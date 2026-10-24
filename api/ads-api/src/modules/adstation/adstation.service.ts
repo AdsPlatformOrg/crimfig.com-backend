@@ -218,4 +218,185 @@ export class AdstationService {
 
     return campaign;
   }
+
+  /**
+   * Record Direct Deal Ad Event with Idempotency Deduplication (PLAN-0018 Phase 3)
+   * Ensures 0% platform fee and zero leak to promoter cash balance.
+   */
+  async recordDirectEvent(dto: {
+    directCampaignId: string;
+    websiteId: string;
+    slotId?: string;
+    eventType: 'impression' | 'viewable_impression' | 'click' | 'hover';
+    idempotencyKey: string;
+    isViewable?: boolean;
+    viewDurationMs?: number;
+    ipHash?: string;
+    userAgent?: string;
+  }) {
+    // Deduplication check via unique idempotencyKey
+    const existing = await this.db
+      .select({ id: schema.adstationAdEvents.id })
+      .from(schema.adstationAdEvents)
+      .where(eq(schema.adstationAdEvents.idempotencyKey, dto.idempotencyKey))
+      .limit(1);
+
+    if (existing.length > 0) {
+      return { status: 'duplicate_ignored', eventId: existing[0].id };
+    }
+
+    const [event] = await this.db
+      .insert(schema.adstationAdEvents)
+      .values({
+        directCampaignId: dto.directCampaignId,
+        websiteId: dto.websiteId,
+        slotId: dto.slotId || null,
+        eventType: dto.eventType,
+        idempotencyKey: dto.idempotencyKey,
+        isViewable: dto.isViewable ?? false,
+        viewDurationMs: dto.viewDurationMs ?? 0,
+        ipHash: dto.ipHash || null,
+        userAgent: dto.userAgent || null,
+      })
+      .returning();
+
+    // Increment aggregate counter on direct campaign
+    if (dto.eventType === 'impression' || dto.eventType === 'viewable_impression') {
+      const [camp] = await this.db
+        .select({ delivered: adstationDirectCampaigns.deliveredImpressions })
+        .from(adstationDirectCampaigns)
+        .where(eq(adstationDirectCampaigns.id, dto.directCampaignId))
+        .limit(1);
+
+      if (camp) {
+        await this.db
+          .update(adstationDirectCampaigns)
+          .set({
+            deliveredImpressions: (camp.delivered || 0) + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(adstationDirectCampaigns.id, dto.directCampaignId));
+      }
+    } else if (dto.eventType === 'click') {
+      const [camp] = await this.db
+        .select({ clicks: adstationDirectCampaigns.deliveredClicks })
+        .from(adstationDirectCampaigns)
+        .where(eq(adstationDirectCampaigns.id, dto.directCampaignId))
+        .limit(1);
+
+      if (camp) {
+        await this.db
+          .update(adstationDirectCampaigns)
+          .set({
+            deliveredClicks: (camp.clicks || 0) + 1,
+            updatedAt: new Date(),
+          })
+          .where(eq(adstationDirectCampaigns.id, dto.directCampaignId));
+      }
+    }
+
+    return { status: 'recorded', eventId: event.id };
+  }
+
+  /**
+   * Consideration Slot 48-Hour Grace State Machine (PLAN-0018 Phase 6)
+   * Audits presence of verified consideration slot. If missing or broken,
+   * starts/checks 48-hour grace period before automated suspension of direct deals.
+   */
+  async checkConsiderationSlotHealth(websiteId: string) {
+    const [website] = await this.db
+      .select()
+      .from(adsPromoterWebsites)
+      .where(eq(adsPromoterWebsites.id, websiteId))
+      .limit(1);
+
+    if (!website) {
+      throw new NotFoundException('Website not found');
+    }
+
+    const considerationSlots = await this.db
+      .select()
+      .from(adstationSlots)
+      .where(and(eq(adstationSlots.websiteId, websiteId), eq(adstationSlots.isConsiderationSlot, true), eq(adstationSlots.isActive, true)));
+
+    const hasHealthyConsideration = considerationSlots.some(s => s.isConsiderationVerified);
+
+    if (hasHealthyConsideration) {
+      // Clear any past suspension warning
+      if (website.considerationSlotActive === false) {
+        await this.db
+          .update(adsPromoterWebsites)
+          .set({
+            considerationSlotActive: true,
+            suspensionReason: null,
+            updatedAt: new Date(),
+          })
+          .where(eq(adsPromoterWebsites.id, websiteId));
+      }
+      return { status: 'healthy', considerationVerified: true, graceActive: false };
+    }
+
+    // Unhealthy: Consideration slot is absent or unverified
+    // Evaluate 48-hour grace window based on verifiedAt or lastVerificationAttemptAt
+    const referenceTime = website.considerationSlotVerifiedAt || website.lastVerificationAttemptAt || website.createdAt;
+    const gracePeriodMs = 48 * 60 * 60 * 1000;
+    const elapsedMs = Date.now() - new Date(referenceTime).getTime();
+    const graceRemainingHours = Math.max(0, Math.round((gracePeriodMs - elapsedMs) / (60 * 60 * 1000)));
+
+    if (elapsedMs > gracePeriodMs) {
+      // Grace period expired: automatically suspend direct deal serving
+      await this.db
+        .update(adsPromoterWebsites)
+        .set({
+          considerationSlotActive: false,
+          isSuspended: true,
+          suspensionReason: 'Consideration slot requirement unfulfilled past 48-hour grace window.',
+          updatedAt: new Date(),
+        })
+        .where(eq(adsPromoterWebsites.id, websiteId));
+
+      return {
+        status: 'suspended',
+        considerationVerified: false,
+        graceActive: false,
+        graceRemainingHours: 0,
+        reason: 'Consideration slot requirement unfulfilled past 48-hour grace window.',
+      };
+    }
+
+    return {
+      status: 'pending_review_grace',
+      considerationVerified: false,
+      graceActive: true,
+      graceRemainingHours,
+      reason: `Consideration slot unverified. Please configure tag within ${graceRemainingHours} hours to avoid suspension.`,
+    };
+  }
+
+  /**
+   * Super Admin Enforcement: Suspend or Reinstate Website Direct Deals (PLAN-0018 Phase 6)
+   */
+  async updateWebsiteAdstationStatus(websiteId: string, isSuspended: boolean, reason?: string) {
+    const [updated] = await this.db
+      .update(adsPromoterWebsites)
+      .set({
+        isSuspended,
+        suspensionReason: isSuspended ? (reason || 'Super Admin moderation action') : null,
+        updatedAt: new Date(),
+      })
+      .where(eq(adsPromoterWebsites.id, websiteId))
+      .returning();
+
+    if (!updated) {
+      throw new NotFoundException('Website not found');
+    }
+
+    return {
+      status: isSuspended ? 'suspended' : 'active',
+      websiteId: updated.id,
+      domain: updated.domain,
+      isSuspended: updated.isSuspended,
+      suspensionReason: updated.suspensionReason,
+    };
+  }
 }
