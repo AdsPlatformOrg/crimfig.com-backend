@@ -1,0 +1,467 @@
+{
+  "_comment": "CRIMFIG CANONICAL FINANCIAL & PRICING CONSTANTS",
+  "_warning": "DO NOT MODIFY THIS FILE WITHOUT DOUBLE CHECKING AND EXPLICIT DIRECTIVE FROM JED. These figures establish core mathematical solvency, database constraints, auction score floors, and immutable revenue split contracts across the entire ecosystem.",
+  "version": "1.0.0",
+  "updatedAt": "2026-10-24",
+  "pricingFloors": {
+    "baseCpmUsd": 0.5,
+    "baseCpmUsdCents": 50,
+    "baseCpcUsd": 0.1,
+    "baseCpcUsdCents": 10,
+    "minCampaignBudgetUsd": 5,
+    "minCampaignBudgetUsdCents": 500,
+    "viewableImpressionStandard": {
+      "desktopViewportRatio": 0.5,
+      "mobileViewportRatio": 0.5,
+      "minContinuousDurationSeconds": 1,
+      "isPrimaryBillableEvent": true
+    }
+  },
+  "revenueSplit": {
+    "promotersPerformancePoolPercent": 55,
+    "crimfigBaseRevenuePercent": 30,
+    "dynamicEcosystemPoolPercent": 15,
+    "rewardsFundDefaultSeedFromDynamicPoolPercent": 10,
+    "bonusPromoterIncentiveDefaultFromDynamicPoolPercent": 5,
+    "clearanceHoldHours": 72
+  },
+  "rewardsValuation": {
+    "pointsPerUsd": 100,
+    "centsPerPoint": 1,
+    "minRedemptionPoints": 1000
+  },
+  "temporalTrackingAndSolvency": {
+    "solvencyInvariant": "rewards_fund.cash_balance_usd_cents == (rewards_fund.allocated_usd_cents + rewards_fund.available_usd_cents + rewards_fund.funded_pending_usd_cents) AND rewards_fund.allocated_usd_cents == SUM(user_outstanding_points * point_valuation_cents) AND rewards_fund.available_usd_cents >= 0 AND campaign_bonus_reserves.allocated_microusd == (campaign_bonus_reserves.consumed_microusd + campaign_bonus_reserves.released_microusd + campaign_bonus_reserves.remaining_microusd)",
+    "fractionalCentAccounting": {
+      "strategy": "INTEGER_MICROUSD_ACCUMULATOR",
+      "subCentUnitUsd": 0.000001,
+      "microusdPerIntegerCent": 10000,
+      "description": "One integer accumulator unit represents $0.000001 USD (1 microdollar; 0.0001 USD cents). 10,000 microdollars equal 1 integer USD cent. Calculations use exact integer arithmetic; whole cents are swept into available cash only when accumulated microdollars >= 10,000. Residual microdollars carry forward without rounding."
+    },
+    "milestoneFundingProtection": {
+      "strategy": "FUNDED_LAUNCH_RESERVE_THEN_ERA_ADAPTATION",
+      "requireAvailableCashBacking": true,
+      "allowDeferredMilestoneIssuance": true,
+      "disallowSyntheticPointsDeficit": true,
+      "description": "Milestones are permanent prestige badges. Cash-convertible points are awarded only when backed 1:1 by real unallocated Rewards Fund cash (or dedicated seed reserve). If cash is insufficient, badge status is unlocked and point issuance is queued under pending_liability_usd_cents until funded."
+    },
+    "requireEarnedAtMicrosecondPrecision": true,
+    "rateVersion": 1,
+    "eraSchedule": [
+      {
+        "era": 1,
+        "name": "Genesis Foundation",
+        "description": "Full baseline emission rates to bootstrap promoter participation",
+        "rateMultiplier": 1,
+        "effectiveFrom": "2026-10-24"
+      },
+      {
+        "era": 2,
+        "name": "Scale Adaptation",
+        "description": "Controlled 25% rate reduction preserving 100% solvency across high network volume",
+        "rateMultiplier": 0.75,
+        "effectiveFrom": "TBD_AT_SCALE"
+      }
+    ],
+    "rewardsFundLedgerSchema": {
+      "balances": [
+        "cash_balance_usd_cents",
+        "allocated_usd_cents",
+        "available_usd_cents",
+        "funded_pending_usd_cents",
+        "fractional_residual_microusd"
+      ],
+      "reconciliationRule": "cash_balance_usd_cents == allocated_usd_cents + available_usd_cents + funded_pending_usd_cents"
+    },
+    "rewardLifecycleStates": {
+      "states": [
+        {
+          "state": "ACHIEVED_UNFUNDED",
+          "description": "Milestone prestige badge unlocked permanently; cash-convertible point grant is deferred and held in deferred_reward_entitlements outside cash liability until backed."
+        },
+        {
+          "state": "FUNDED_PENDING",
+          "description": "Real cash is reserved 1:1 in the Rewards Fund; points are queued during clearance or processing and counted in funded_pending_usd_cents."
+        },
+        {
+          "state": "ISSUED_AVAILABLE",
+          "description": "Whole points minted and fully backed 1:1 by real cash, available for withdrawal/redemption under normal clearance rules."
+        }
+      ],
+      "entitlementsLedger": "deferred_reward_entitlements",
+      "idempotencyConstraint": "UNIQUE(user_id, reward_key)"
+    },
+    "fractionalRewardValueAccrual": {
+      "strategy": "PER_USER_MICROUSD_VALUE_ACCUMULATOR",
+      "microusdPerPoint": 10000,
+      "era1NominalLoopValueMicrousd": 100000,
+      "era2NominalLoopValueMicrousd": 75000,
+      "description": "Era multiplier applies to monetary value (e.g. Era 2 10-point loop = 75,000 microdollars = $0.075). Users accrue microdollar reward value; whole points are minted only when accumulated funded value >= 10,000 microdollars (1 point). Residual microdollars carry forward across events and era boundaries without rounding inflation."
+    }
+  },
+  "categoryAMilestones": [
+    {
+      "tier": 1,
+      "key": "promo_impressions_100",
+      "metric": "viewable_impressions",
+      "threshold": 100,
+      "badgeTitle": "Bronze Pioneer",
+      "badgeIcon": "🥉",
+      "pointsAwarded": 50,
+      "usdEquivalent": 0.5
+    },
+    {
+      "tier": 2,
+      "key": "promo_impressions_500",
+      "metric": "viewable_impressions",
+      "threshold": 500,
+      "badgeTitle": "Silver Scout",
+      "badgeIcon": "🥈",
+      "pointsAwarded": 100,
+      "usdEquivalent": 1
+    },
+    {
+      "tier": 3,
+      "key": "promo_impressions_1k",
+      "metric": "viewable_impressions",
+      "threshold": 1000,
+      "badgeTitle": "Gold Beacon",
+      "badgeIcon": "🥇",
+      "pointsAwarded": 200,
+      "usdEquivalent": 2
+    },
+    {
+      "tier": 4,
+      "key": "promo_impressions_10k",
+      "metric": "viewable_impressions",
+      "threshold": 10000,
+      "badgeTitle": "Platinum Pillar",
+      "badgeIcon": "💎",
+      "pointsAwarded": 500,
+      "usdEquivalent": 5
+    },
+    {
+      "tier": 5,
+      "key": "promo_impressions_100k",
+      "metric": "viewable_impressions",
+      "threshold": 100000,
+      "badgeTitle": "Master Publisher",
+      "badgeIcon": "👑",
+      "pointsAwarded": 1500,
+      "usdEquivalent": 15
+    },
+    {
+      "tier": 6,
+      "key": "promo_impressions_1m",
+      "metric": "viewable_impressions",
+      "threshold": 1000000,
+      "badgeTitle": "Grand Luminary",
+      "badgeIcon": "🌟",
+      "pointsAwarded": 5000,
+      "usdEquivalent": 50
+    },
+    {
+      "tier": 7,
+      "key": "promo_impressions_10m",
+      "metric": "viewable_impressions",
+      "threshold": 10000000,
+      "badgeTitle": "Vanguard Elite",
+      "badgeIcon": "🚀",
+      "pointsAwarded": 15000,
+      "usdEquivalent": 150
+    },
+    {
+      "tier": 8,
+      "key": "promo_impressions_50m",
+      "metric": "viewable_impressions",
+      "threshold": 50000000,
+      "badgeTitle": "Sovereign Network",
+      "badgeIcon": "🛡️",
+      "pointsAwarded": 50000,
+      "usdEquivalent": 500
+    },
+    {
+      "tier": 9,
+      "key": "promo_impressions_100m",
+      "metric": "viewable_impressions",
+      "threshold": 100000000,
+      "badgeTitle": "Centurion Giant",
+      "badgeIcon": "⚡",
+      "pointsAwarded": 100000,
+      "usdEquivalent": 1000
+    },
+    {
+      "tier": 10,
+      "key": "promo_impressions_1b",
+      "metric": "viewable_impressions",
+      "threshold": 1000000000,
+      "badgeTitle": "Galactic Publisher",
+      "badgeIcon": "🌌",
+      "pointsAwarded": 500000,
+      "usdEquivalent": 5000
+    },
+    {
+      "tier": 11,
+      "key": "promo_impressions_10b",
+      "metric": "viewable_impressions",
+      "threshold": 10000000000,
+      "badgeTitle": "Continental Pillar",
+      "badgeIcon": "🏛️",
+      "pointsAwarded": 1500000,
+      "usdEquivalent": 15000
+    },
+    {
+      "tier": 12,
+      "key": "promo_impressions_50b",
+      "metric": "viewable_impressions",
+      "threshold": 50000000000,
+      "badgeTitle": "Global Network Titan",
+      "badgeIcon": "🌍",
+      "pointsAwarded": 5000000,
+      "usdEquivalent": 50000
+    },
+    {
+      "tier": 13,
+      "key": "promo_impressions_100b",
+      "metric": "viewable_impressions",
+      "threshold": 100000000000,
+      "badgeTitle": "Solar Epoch Icon",
+      "badgeIcon": "☀️",
+      "pointsAwarded": 10000000,
+      "usdEquivalent": 100000
+    },
+    {
+      "tier": 14,
+      "key": "promo_impressions_1t",
+      "metric": "viewable_impressions",
+      "threshold": 1000000000000,
+      "badgeTitle": "Universal Titan",
+      "badgeIcon": "♾️",
+      "pointsAwarded": 50000000,
+      "usdEquivalent": 500000
+    }
+  ],
+  "categoryBPerpetualLoops": [
+    {
+      "key": "loop_clicks_100",
+      "title": "Click Loop",
+      "metric": "verified_clicks",
+      "interval": 100,
+      "pointsAwarded": 10,
+      "usdEquivalent": 0.1,
+      "description": "Awarded every 100 verified clicks"
+    },
+    {
+      "key": "loop_viewable_impressions_20k",
+      "title": "Viewable Impression Loop",
+      "metric": "viewable_impressions",
+      "interval": 20000,
+      "pointsAwarded": 10,
+      "usdEquivalent": 0.1,
+      "description": "Awarded every 20,000 verified viewable impressions"
+    },
+    {
+      "key": "loop_streak_7d",
+      "title": "Weekly Consistency Streak",
+      "metric": "consecutive_active_days",
+      "interval": 7,
+      "pointsAwarded": 15,
+      "usdEquivalent": 0.15,
+      "description": "Awarded for 7 consecutive active days with verified impressions"
+    },
+    {
+      "key": "loop_reliability_30d",
+      "title": "Monthly Reliability",
+      "metric": "consecutive_active_days",
+      "interval": 30,
+      "pointsAwarded": 100,
+      "usdEquivalent": 1,
+      "description": "Awarded for 30 consecutive active days with at least 98% ad slot availability and no qualifying spam flags"
+    }
+  ],
+  "bonusReachPolicy": {
+    "defaultMode": "LEVEL_1_DEFAULT_SLOT_REACH",
+    "deliveryTypes": [
+      "PAID",
+      "BONUS",
+      "DEFAULT"
+    ],
+    "level1DefaultSlot": {
+      "advertiserCostUsdCents": 0,
+      "promoterCashShareUsdCents": 0,
+      "rewardsPointsEligible": false,
+      "onlyWhenUnsoldFallback": true
+    },
+    "level2FundedReserve": {
+      "fundingSource": "DYNAMIC_ECOSYSTEM_POOL_15_PERCENT",
+      "allocationPercentOfNetDynamicPool": 5,
+      "requirePreFundedReserve": true,
+      "atomicReservationLock": true,
+      "isolatedLedgerTable": "campaign_bonus_reserves",
+      "stopWhenReserveDepleted": true,
+      "dilutePromoterPaidShare": false,
+      "accountingUnit": "MICROUSD",
+      "microdollarPrecision": 0.000001,
+      "reconciliationRule": "allocated_microusd == consumed_microusd + released_microusd + remaining_microusd",
+      "ledgerFields": [
+        "allocated_microusd",
+        "consumed_microusd",
+        "released_microusd",
+        "remaining_microusd"
+      ]
+    },
+    "level3PaidPrimacy": {
+      "paidDemandAlwaysWins": true,
+      "neverDisplacePaidWinner": true
+    },
+    "rewardsInvariants": {
+      "excludeBonusFromMilestones": true,
+      "excludeBonusFromPerpetualLoops": true,
+      "excludeDefaultFromMilestones": true,
+      "excludeDefaultFromPerpetualLoops": true
+    }
+  },
+  "suspensionControls": {
+    "rolesAuthorized": [
+      "SUPER_ADMIN"
+    ],
+    "globalPause": {
+      "statusKey": "ads_rewards_global_paused",
+      "reasonKey": "ads_rewards_global_pause_reason",
+      "pausedByKey": "ads_rewards_global_paused_by",
+      "pausedAtKey": "ads_rewards_global_paused_at",
+      "defaultState": false,
+      "blocksPointIssuance": true,
+      "blocksBonusIncentives": true,
+      "blocksQueuedReleases": true,
+      "freezesRedemptionsAndPayouts": true,
+      "affectsAdDeliveryAndBilling": false
+    },
+    "individualUserPause": {
+      "userStatusEnum": [
+        "ACTIVE",
+        "PAUSED",
+        "UNDER_REVIEW"
+      ],
+      "blocksUserPointIssuance": true,
+      "blocksUserBonusIncentives": true,
+      "freezesUserRedemptions": true,
+      "affectsUserAdDelivery": false
+    },
+    "auditAndSafeguards": {
+      "auditLogTable": "ads_rewards_suspension_audit",
+      "requireReason": true,
+      "atomicWithIssuanceWorkers": true,
+      "noRetroactiveUnpauseCredit": true,
+      "disallowSilentlyDeletingPoints": true
+    }
+  },
+  "advertiserAchievements": {
+    "version": "1.0.0",
+    "requireSeparatePromoBudget": true,
+    "promoBudgetLedgerTable": "advertiser_promo_budget",
+    "bonusCreditsLedgerTable": "advertiser_bonus_credit_ledger",
+    "disallowCashRedemption": true,
+    "disallowAccountTransfers": true,
+    "deliveryInventory": "UNSOLD_ONLY",
+    "displacePaidAds": false,
+    "categoryAMilestones": [
+      {
+        "tier": "A1",
+        "key": "adv_first_campaign",
+        "title": "First Campaign",
+        "badgeIcon": "🛡️",
+        "description": "Successfully launch and complete 1st approved campaign (min $5 spend, cleared billing)",
+        "bonusAdCreditUsd": 5.0,
+        "bonusAdCreditCents": 500,
+        "validityDays": 90
+      },
+      {
+        "tier": "A2",
+        "key": "adv_consistent",
+        "title": "Consistent Advertiser",
+        "badgeIcon": "🥈",
+        "description": "Complete >= 5 distinct approved campaigns, 0 policy violations, 0 chargebacks",
+        "bonusAdCreditUsd": 15.0,
+        "bonusAdCreditCents": 1500,
+        "validityDays": 180
+      },
+      {
+        "tier": "A3",
+        "key": "adv_growth",
+        "title": "Growth Advertiser",
+        "badgeIcon": "💎",
+        "description": "Cumulative cleared spend >= $500 across >= 10 compliant campaigns",
+        "bonusAdCreditUsd": 50.0,
+        "bonusAdCreditCents": 5000,
+        "validityDays": 365
+      },
+      {
+        "tier": "A4",
+        "key": "adv_trusted",
+        "title": "Trusted Advertiser",
+        "badgeIcon": "👑",
+        "description": ">= 12 months account age, >= $2,500 cleared spend, clean compliance audit",
+        "bonusAdCreditUsd": 150.0,
+        "bonusAdCreditCents": 15000,
+        "validityDays": 365
+      }
+    ],
+    "categoryBLegacyBadges": [
+      {
+        "tier": "B1",
+        "key": "adv_legacy_5yr",
+        "title": "Established Advertiser",
+        "badgeIcon": "🛡️",
+        "qualifyingYears": 5,
+        "rarity": "Rare",
+        "description": "Recognizes five years of qualifying advertising history on CrimFig Ads with sustained compliance"
+      },
+      {
+        "tier": "B2",
+        "key": "adv_legacy_10yr",
+        "title": "Advertising Veteran",
+        "badgeIcon": "⚔️",
+        "qualifyingYears": 10,
+        "rarity": "Very Rare",
+        "description": "For advertisers with a decade of qualifying history and a consistent record of responsible advertising"
+      },
+      {
+        "tier": "B3",
+        "key": "adv_legacy_15yr",
+        "title": "Advertising Institution",
+        "badgeIcon": "🏛️",
+        "qualifyingYears": 15,
+        "rarity": "Exceptional",
+        "description": "Recognizes advertisers who have remained active on the platform through fifteen years of change"
+      },
+      {
+        "tier": "B4",
+        "key": "adv_legacy_20yr",
+        "title": "Legacy Advertiser",
+        "badgeIcon": "💎",
+        "qualifyingYears": 20,
+        "rarity": "Extremely Rare",
+        "description": "A major milestone reserved for advertisers with two decades of qualifying platform history"
+      },
+      {
+        "tier": "B5",
+        "key": "adv_legacy_25yr",
+        "title": "CrimFig Advertising Legend",
+        "badgeIcon": "👑",
+        "qualifyingYears": 25,
+        "rarity": "Legendary",
+        "description": "The highest standard longevity badge: a quarter-century of qualifying advertising history"
+      },
+      {
+        "tier": "B6",
+        "key": "adv_legacy_30yr",
+        "title": "Founding-Era Legend",
+        "badgeIcon": "🔱",
+        "qualifyingYears": 30,
+        "rarity": "Mythic",
+        "description": "An exceptionally rare, long-term legacy recognition for advertisers who reach thirty qualifying years"
+      }
+    ]
+  }
+}

@@ -42,8 +42,13 @@ export class CampaignsService {
       throw new BadRequestException('Minimum campaign budget is $5.00 USD');
     }
 
-    for (const bid of [params.costPerImpressionCents ?? 1, params.costPerClickCents ?? 10]) {
-      if (!Number.isSafeInteger(bid) || bid < 1 || bid > 2147483647) throw new BadRequestException('Bids require integer cents from 1 to 2147483647');
+    const cpmBid = params.costPerImpressionCents ?? 50; // $0.50 Base CPM Floor
+    const cpcBid = params.costPerClickCents ?? 10;        // $0.10 Base CPC Floor
+    if (!Number.isSafeInteger(cpmBid) || cpmBid < 50 || cpmBid > 2147483647) {
+      throw new BadRequestException('Minimum CPM bid is 50 integer USD cents ($0.50 per 1,000 viewable impressions)');
+    }
+    if (!Number.isSafeInteger(cpcBid) || cpcBid < 10 || cpcBid > 2147483647) {
+      throw new BadRequestException('Minimum CPC bid is 10 integer USD cents ($0.10 per click)');
     }
     const budgetCents = Math.round(params.budgetUsd * 100);
     const dailyBudgetCents = params.dailyBudgetUsd ? Math.round(params.dailyBudgetUsd * 100) : null;
@@ -61,8 +66,8 @@ export class CampaignsService {
         remainingBudgetUsdCents: budgetCents,
         pricingVersion: 2,
         pricingModel: params.pricingModel || 'cpm',
-        costPerImpressionUsdCents: params.costPerImpressionCents ?? 1, // $0.01 per 1,000 eligible impressions
-        costPerClickUsdCents: params.costPerClickCents ?? 10,         // $0.10
+        costPerImpressionUsdCents: cpmBid, // $0.50 per 1,000 viewable impressions floor
+        costPerClickUsdCents: cpcBid,         // $0.10 per click floor
         format: params.format || 'card',
         status: 'paused',
         moderationStatus: 'pending_primary_review',
