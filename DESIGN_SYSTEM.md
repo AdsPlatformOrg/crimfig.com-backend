@@ -685,3 +685,31 @@ export function EmptyState({
   );
 }
 ```
+
+---
+
+## 16. Modern UI Patterns & Replacement Component Standards
+
+To guarantee that all CrimFig interfaces feel modern, fluid, responsive, and state-of-the-art, engineering workflows should adhere to modern UI patterns. Older web interface idioms have modern equivalents that improve progressive disclosure, mobile responsiveness, accessibility, and cognitive load.
+
+### Component Evolution & Equivalents Reference
+
+| Legacy / Older UI Feature | Modern Equivalent Component / Pattern | CrimFig Design Directive & Use Case |
+|---|---|---|
+| **Wizards** | **Step-by-step flows, guided journeys** | Multi-stage onboarding or creation (e.g. ad campaign builder, publication review). Keep users oriented with clear milestone indicators, linear progress, and contextual recovery. |
+| **Modal dialogs** | **Dialogs, drawers, bottom sheets** | Responsive interaction: use centered accessible dialogs on desktop, sliding bottom sheets / side drawers on mobile viewports (<= 375px) for natural thumb interaction. |
+| **Tabs** | **Segmented controls, navigation rails** | High-level views and filtering: use pill segmented controls for sub-view toggling and vertical navigation rails on tablet/desktop dashboards. |
+| **Dropdown menus** | **Popovers, command menus** | Rich contextual actions: replace rigid native `<select>` and bare drop menus with search-enabled command palettes (`Cmd+K`) and structured popovers with keyboard navigation. |
+| **Tooltips** | **Contextual hints** | Help text & onboarding: use subtle inline contextual hints, info badges, and micro-cards with persistent focus access rather than finicky mouse-hover-only tooltips. |
+| **Multi-page forms** | **Stepper forms, progressive disclosure** | Complex inputs: divide long forms into step-based progressive disclosure cards that validate per section, minimizing visual clutter and user fatigue. |
+| **Sidebars** | **Navigation drawers, side navigation** | App navigation: fixed compact side navigation on desktop with collapsible labels, transitioning to sliding navigation drawers behind accessible hamburger triggers on mobile. |
+| **Desktop notifications** | **Toasts, snackbars** | Feedback loop: transient non-blocking toast notifications in the top/bottom corner with clear semantic status colors (`success`, `error`, `info`), automatic timeout, and undo actions. |
+| **Settings screens** | **Preference panels** | Configuration & account: grouped interactive preference panels with toggle switches, inline saves, and categorized segmented sections instead of dense tabular settings forms. |
+| **File upload dialogs** | **Drag-and-drop upload zones** | Media intake: interactive drag-and-drop dropzones featuring active drop highlighting, real-time file previews, format validation chips, and progressive upload progress bars. |
+| **Tree views** | **Expandable lists, hierarchical navigation** | Nested structures: clean accordion expandable rows and breadcrumb-assisted hierarchical lists with subtle indentations and smooth height transitions. |
+
+### Key Principles for Modern Patterns:
+1. **Progressive Disclosure:** Never overwhelm the user with all inputs and states at once. Surface information as it becomes relevant.
+2. **Mobile Ergonomics (<= 375px):** Prioritize thumb zones. Sheets and drawers anchor to the bottom on mobile viewports; avoid wide desktop modals that exceed screen width or require horizontal panning.
+3. **Semantic Status & Feedback:** Pair every action with immediate feedback (subtle inline spinners, toasts, clear validation hints). Never leave the user wondering if an action succeeded.
+
