@@ -17,11 +17,11 @@
     "https://tetris-frontend-production-723c.up.railway.app"
   ],
   "staging": [
-    "https://auth.staging.crimfig.com",
-    "https://ads.staging.crimfig.com",
-    "https://billing.staging.crimfig.com",
-    "https://chat.staging.crimfig.com",
-    "https://tetris.staging.crimfig.com",
+    "https://staging-auth.crimfig.com",
+    "https://staging-ads.crimfig.com",
+    "https://staging-billing.crimfig.com",
+    "https://staging-chat.crimfig.com",
+    "https://staging-tetris.crimfig.com",
     "https://auth-frontend-staging.up.railway.app",
     "https://ads-frontend-staging.up.railway.app",
     "https://billing-frontend-staging.up.railway.app",
