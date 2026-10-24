@@ -173,11 +173,19 @@ export class AdstationService {
   /**
    * List Direct Campaigns (100% revenue to site owner; 0% CF commission)
    */
-  async getDirectCampaigns(promoterId: string, websiteId: string) {
+  async getDirectCampaigns(promoterId: string, websiteId?: string) {
+    if (websiteId) {
+      return this.db
+        .select()
+        .from(adstationDirectCampaigns)
+        .where(and(eq(adstationDirectCampaigns.promoterId, promoterId), eq(adstationDirectCampaigns.websiteId, websiteId)))
+        .orderBy(desc(adstationDirectCampaigns.createdAt));
+    }
+
     return this.db
       .select()
       .from(adstationDirectCampaigns)
-      .where(and(eq(adstationDirectCampaigns.promoterId, promoterId), eq(adstationDirectCampaigns.websiteId, websiteId)))
+      .where(eq(adstationDirectCampaigns.promoterId, promoterId))
       .orderBy(desc(adstationDirectCampaigns.createdAt));
   }
 

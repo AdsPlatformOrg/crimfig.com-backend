@@ -183,4 +183,18 @@ export class DeliveryController {
   verifyReward(@Body() dto: { impToken?: string; sessionKey?: string; userId?: string }) {
     throw new ServiceUnavailableException('Reward issuance is unavailable pending verified playback and funded reward eligibility');
   }
+
+  @Public()
+  @Get('adstation/health')
+  @ApiOperation({ summary: 'Public delivery route probe and CORS health check for AdStation' })
+  getAdstationDeliveryHealth() {
+    return {
+      status: 'success',
+      data: {
+        service: 'adstation-delivery',
+        deliveryMode: 'wildcard-cors',
+        timestamp: new Date().toISOString(),
+      },
+    };
+  }
 }
