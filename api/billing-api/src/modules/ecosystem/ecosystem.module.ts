@@ -7,10 +7,19 @@ import { AdClearanceController } from './ad-clearance.controller';
 import { AdSettlementService } from './ad-settlement.service';
 import { AdRejectionService } from './ad-rejection.service';
 import { AdRejectionController } from './ad-rejection.controller';
+import { BillingStaffGrants } from '../security/billing-staff-grants';
 
 @Module({
   imports: [WalletModule],
   controllers: [EcosystemController, AdClearanceController, AdRejectionController],
-  providers: [CampaignEscrowService, AdClearanceService, AdSettlementService, AdRejectionService],
+  providers: [
+    CampaignEscrowService,
+    AdClearanceService,
+    AdSettlementService,
+    AdRejectionService,
+    BillingStaffGrants,
+  ],
+  exports: [BillingStaffGrants],
 })
 export class EcosystemModule {}
+

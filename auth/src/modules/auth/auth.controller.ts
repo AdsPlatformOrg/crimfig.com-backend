@@ -14,11 +14,43 @@ import { CurrentUser } from '../../decorators/current-user.decorator';
 import { config } from '../../config/config';
 import type { JwtPayload } from '../tokens/tokens.service';
 
+import { AuthStaffGrants } from '../../security/auth-staff-grants';
+
 @ApiTags('Auth')
 @UseGuards(ThrottlerGuard)
 @Controller({ path: 'auth', version: '1' })
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly staffGrants: AuthStaffGrants,
+  ) {}
+
+  @Get('staff-status')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Check auth staff privilege status and assigned roles for current authenticated session' })
+  getStaffStatus(@CurrentUser() user: JwtPayload) {
+    const userId = user?.sub;
+    if (!userId) {
+      return {
+        status: 'success',
+        data: {
+          userId: null,
+          isStaff: false,
+          roles: [],
+        },
+      };
+    }
+    const roles = this.staffGrants.rolesFor(userId);
+    return {
+      status: 'success',
+      data: {
+        userId,
+        isStaff: roles.length > 0,
+        roles: [...roles],
+      },
+    };
+  }
 
   // ── Registration & Login ─────────────────────────────────────────────────
 
