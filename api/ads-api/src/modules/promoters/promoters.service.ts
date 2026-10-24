@@ -25,6 +25,14 @@ export class PromotersService {
    * Get or create a promoter profile for a user
    */
   async getOrCreatePromoter(userId: string, type: 'WEBSITE' | 'INDIVIDUAL' | 'MOBILE_APP' = 'INDIVIDUAL', displayName?: string) {
+    if (!userId) throw new BadRequestException('User ID is required');
+
+    // Confirm that the user exists in database to prevent foreign key constraint violations
+    const [userExists] = await this.db.select({ id: schema.users.id }).from(schema.users).where(eq(schema.users.id, userId)).limit(1);
+    if (!userExists) {
+      throw new NotFoundException(`User record not found for ID ${userId}. Ensure session is authenticated.`);
+    }
+
     return this.db.transaction(async tx => {
       await tx.execute(sql`set local lock_timeout = '5s'`);
       await tx.execute(sql`set local statement_timeout = '10s'`);

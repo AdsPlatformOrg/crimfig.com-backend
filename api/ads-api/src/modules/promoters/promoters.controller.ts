@@ -71,7 +71,7 @@ export class PromotersController {
     const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'WEBSITE');
     const websites = await this.promotersService.getWebsites(promoter.id);
-    return { status: 'success', data: websites };
+    return { status: 'success', data: Array.isArray(websites) ? websites : [] };
   }
 
   @Post('websites')
