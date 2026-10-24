@@ -1,4 +1,16 @@
-import { Controller, Get, Post, Body, Param, Headers, UnauthorizedException, ServiceUnavailableException, Optional, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  Param,
+  Headers,
+  Req,
+  UnauthorizedException,
+  ServiceUnavailableException,
+  Optional,
+  ParseUUIDPipe,
+} from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { CampaignEscrowService } from './campaign-escrow.service';
 import { WalletService } from '../wallet/wallet.service';
@@ -6,6 +18,7 @@ import { IsNumber, IsString, Min, IsIn, IsUUID, IsISO8601 } from 'class-validato
 import { AdSettlementService } from './ad-settlement.service';
 import { Public } from '@crimfig/shared';
 import { timingSafeEqual } from 'crypto';
+import { BillingStaffGrants } from '../security/billing-staff-grants';
 
 export class LockBudgetDto {
   @IsNumber()
@@ -53,11 +66,9 @@ export class FundedSettlementDto {
   periodEnd: string;
 }
 
-import { BillingStaffGrants } from '../security/billing-staff-grants';
-import { Req } from '@nestjs/common';
-
 @ApiTags('Internal Ecosystem')
 @Controller('ecosystem')
+
 export class EcosystemController {
   private readonly internalApiKey = process.env.INTERNAL_ECOSYSTEM_KEY;
 
