@@ -194,9 +194,9 @@ export class AnalyticsService {
       }
     }
 
-    const totalBudgetCents = campaigns.reduce((acc, c) => acc + c.budgetUsdCents, 0);
-    const totalRemainingCents = campaigns.reduce((acc, c) => acc + c.remainingBudgetUsdCents, 0);
-    const totalSpentCents = totalBudgetCents - totalRemainingCents;
+    const totalBudgetCents = campaigns.reduce((acc, c) => acc + (Number(c.budgetUsdCents) || 0), 0);
+    const totalRemainingCents = campaigns.reduce((acc, c) => acc + (Number(c.remainingBudgetUsdCents) || 0), 0);
+    const totalSpentCents = Math.max(0, totalBudgetCents - totalRemainingCents);
     const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
     const avgCpmUsd = totalImpressions > 0 ? ((totalSpentCents / 100) / totalImpressions) * 1000 : 0;
     const avgCpcUsd = totalClicks > 0 ? (totalSpentCents / 100) / totalClicks : 0;
@@ -226,9 +226,9 @@ export class AnalyticsService {
         clicks: totalClicks,
         hovers: totalHovers,
         touches: totalTouches,
-        ctr: parseFloat(ctr.toFixed(2)),
-        avgCpmUsd: parseFloat(avgCpmUsd.toFixed(2)),
-        avgCpcUsd: parseFloat(avgCpcUsd.toFixed(2)),
+        ctr: Number.isFinite(ctr) ? parseFloat(ctr.toFixed(2)) : 0,
+        avgCpmUsd: Number.isFinite(avgCpmUsd) ? parseFloat(avgCpmUsd.toFixed(2)) : 0,
+        avgCpcUsd: Number.isFinite(avgCpcUsd) ? parseFloat(avgCpcUsd.toFixed(2)) : 0,
       },
     };
   }
@@ -423,13 +423,16 @@ export class AnalyticsService {
       .where(eq(adsCampaigns.advertiserId, advertiserId));
 
     for (const c of campaigns) {
+      const budget = Number(c.budgetUsdCents) || 0;
+      const remaining = Number(c.remainingBudgetUsdCents) || 0;
+
       // Low balance alert (< 10% remaining)
-      if (c.status === 'active' && c.remainingBudgetUsdCents <= c.budgetUsdCents * 0.1) {
+      if (c.status === 'active' && budget > 0 && remaining <= budget * 0.1) {
         alerts.push({
           id: `low_balance_${c.id}`,
           type: 'warning',
           title: `Low Campaign Budget: ${c.title}`,
-          message: `Only $${(c.remainingBudgetUsdCents / 100).toFixed(2)} remaining of $${(c.budgetUsdCents / 100).toFixed(2)} total budget. Consider increasing budget to prevent pause.`,
+          message: `Only $${(remaining / 100).toFixed(2)} remaining of $${(budget / 100).toFixed(2)} total budget. Consider increasing budget to prevent pause.`,
           severity: 'high',
           actionLabel: 'Manage Budget',
           actionUrl: `/ads/campaigns/${c.id}`,
@@ -451,7 +454,7 @@ export class AnalyticsService {
         alerts.push({
           id: `rejected_creative_${cr.id}`,
           type: 'error',
-          title: `Creative Asset Rejected: "${cr.headline}"`,
+          title: `Creative Asset Rejected: "${cr.headline || 'Untitled Asset'}"`,
           message: cr.rejectionReason || 'Asset flagged by moderation policy. Inline replacement required before ad can run.',
           severity: 'high',
           actionLabel: 'Replace Asset',

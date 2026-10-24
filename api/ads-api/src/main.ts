@@ -3,6 +3,7 @@ import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+import { AdsGlobalExceptionFilter } from './modules/security/ads-exception.filter';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType, Logger, ShutdownSignal } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
@@ -20,6 +21,8 @@ async function bootstrap() {
   app.use(helmet());
 
   app.enableCors(adsCorsOptions(process.env.NODE_ENV === 'production'));
+
+  app.useGlobalFilters(new AdsGlobalExceptionFilter());
 
   app.useGlobalPipes(
     new ValidationPipe({
