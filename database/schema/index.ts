@@ -60,3 +60,7 @@ export * from './analytics_events';
 // ─── Support & Notifications (PLAN-0011) ────────────────────────────────────────
 export * from './support_tickets';
 export * from './notifications';
+
+// ─── AdStation & Advertiser Milestones (PLAN-0017 / PLAN-0018) ───────────────────
+export * from './adstation';
+export * from './advertiser_achievements';
