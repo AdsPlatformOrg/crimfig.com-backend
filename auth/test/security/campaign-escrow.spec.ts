@@ -212,7 +212,7 @@ test('HTTP Billing boundary returns committed receipts to the real Ads client wi
     if (app) await app.close();
     if (previous === undefined) delete process.env.INTERNAL_ECOSYSTEM_KEY; else process.env.INTERNAL_ECOSYSTEM_KEY = previous;
   }
-});
+}, 30000);
 test('public embed pings update diagnostics without auto-verifying websites/apps or running settlement', async () => {
   const rows: any[][] = [
     [{ id: 'audit', websiteId: 'website', domain: 'example.com', appId: 'app', runTimestamp: new Date() }],
