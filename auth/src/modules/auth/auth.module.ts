@@ -7,6 +7,8 @@ import { TokensModule } from '../tokens/tokens.module';
 import { JwtStrategy } from '../../strategies/jwt.strategy';
 import { config } from '../../config/config';
 
+import { AuthStaffGrants } from '../../security/auth-staff-grants';
+
 @Module({
   imports: [
     PassportModule.register({ defaultStrategy: 'jwt' }),
@@ -15,7 +17,8 @@ import { config } from '../../config/config';
     JwtModule.register({ secret: config.JWT.ACCESS_SECRET }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService],
+  providers: [AuthService, JwtStrategy, AuthStaffGrants],
+  exports: [AuthService, AuthStaffGrants],
 })
 export class AuthModule {}
+

@@ -53,13 +53,45 @@ export class FundedSettlementDto {
   periodEnd: string;
 }
 
+import { BillingStaffGrants } from '../security/billing-staff-grants';
+import { Req } from '@nestjs/common';
+
 @ApiTags('Internal Ecosystem')
 @Controller('ecosystem')
 export class EcosystemController {
   private readonly internalApiKey = process.env.INTERNAL_ECOSYSTEM_KEY;
 
-  constructor(private readonly walletService: WalletService, private readonly campaignEscrow: CampaignEscrowService,
-    @Optional() private readonly settlement?: AdSettlementService) {}
+  constructor(
+    private readonly walletService: WalletService,
+    private readonly campaignEscrow: CampaignEscrowService,
+    private readonly staffGrants: BillingStaffGrants,
+    @Optional() private readonly settlement?: AdSettlementService,
+  ) {}
+
+  @Get('staff-status')
+  @ApiOperation({ summary: 'Check billing staff privilege status and assigned roles for current authenticated session' })
+  getStaffStatus(@Req() req: any) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return {
+        status: 'success',
+        data: {
+          userId: null,
+          isStaff: false,
+          roles: [],
+        },
+      };
+    }
+    const roles = this.staffGrants.rolesFor(userId);
+    return {
+      status: 'success',
+      data: {
+        userId,
+        isStaff: roles.length > 0,
+        roles: [...roles],
+      },
+    };
+  }
 
   @Public()
   @Post('campaigns/:campaignId/settlements')
