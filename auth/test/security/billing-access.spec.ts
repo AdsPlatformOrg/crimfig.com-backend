@@ -194,10 +194,10 @@ describe('private API browser origin policy', () => {
   });
   it('isolates staging browser origins from production while retaining exact file entries', () => {
     const origins = dashboardOrigins(true, 'staging');
-    expect(origins).toContain('https://auth.staging.crimfig.com');
-    expect(origins).toContain('https://ads.staging.crimfig.com');
+    expect(origins).toContain('https://staging-auth.crimfig.com');
+    expect(origins).toContain('https://staging-ads.crimfig.com');
     expect(origins).not.toContain('https://auth.crimfig.com');
     expect(origins).not.toContain('http://localhost:3000');
-    expect(dashboardOrigins(true, 'production')).not.toContain('https://auth.staging.crimfig.com');
+    expect(dashboardOrigins(true, 'production')).not.toContain('https://staging-auth.crimfig.com');
   });
 });
