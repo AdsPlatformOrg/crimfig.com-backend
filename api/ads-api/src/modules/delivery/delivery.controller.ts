@@ -132,12 +132,14 @@ export class DeliveryController {
   async getAd(
     @Param('placementToken') token: string,
     @Query('domain') domain: string,
-    @Req() req: Request,
+    @Query('mode') mode?: string,
+    @Query('fill') fill?: string,
+    @Req() req?: Request,
   ) {
-    const clientIp = extractClientIp(req);
-    const userAgent = req.headers['user-agent'];
+    const clientIp = req ? extractClientIp(req) : undefined;
+    const userAgent = req?.headers['user-agent'];
 
-    const ad = await this.deliveryService.getAdForPlacement(token, clientIp, userAgent, domain);
+    const ad = await this.deliveryService.getAdForPlacement(token, clientIp, userAgent, domain, mode, fill === 'true');
     return { status: 'success', data: ad };
   }
 

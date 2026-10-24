@@ -49,74 +49,123 @@ export class DeliveryService {
    */
   getEmbedScript(): string {
     return `(function() {
-  var scripts = document.querySelectorAll('script[data-placement]');
-  scripts.forEach(function(script) {
-    var token = script.getAttribute('data-placement');
-    if (!token) return;
-    var container = document.getElementById('cf-ad-' + token);
-    if (!container) return;
-
-    var apiBase = script.src.replace('/api/v1/delivery/embed.js', '');
+  function initSlots() {
+    var apiBase = 'https://ads.crimfig.com';
+    var currentScript = document.currentScript;
+    if (currentScript && currentScript.src) {
+      apiBase = currentScript.src.replace(/\\/api\\/v1\\/delivery\\/(embed|pub-loader)\\.js.*/, '');
+    }
     var currentDomain = window.location.hostname;
 
-    fetch(apiBase + '/api/v1/delivery/ad/' + encodeURIComponent(token) + '?domain=' + encodeURIComponent(currentDomain), {
-      headers: { 'Accept': 'application/json' }
-    })
-    .then(function(res) { return res.json(); })
-    .then(function(data) {
-      if (!data || !data.data) return;
-      var ad = data.data;
+    // 1. Modern ins.crimfig-pub-slot elements
+    var pubSlots = document.querySelectorAll('ins.crimfig-pub-slot:not([data-cf-loaded="true"])');
+    pubSlots.forEach(function(slot) {
+      var token = slot.getAttribute('data-cf-placement');
+      var mode = slot.getAttribute('data-cf-mode') || 'publisher_network';
+      var fill = slot.getAttribute('data-cf-network-fill') || 'false';
+      if (!token) return;
+      slot.setAttribute('data-cf-loaded', 'true');
 
-      var card = document.createElement('div');
-      card.style.cssText = "border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:'Poppins',Arial,Helvetica,sans-serif;max-width:400px;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;";
-
-      var badge = document.createElement('div');
-      badge.style.cssText = 'font-size:10px;text-transform:uppercase;color:#94a3b8;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;letter-spacing:0.05em;';
-      var badgeLeft = document.createElement('span');
-      badgeLeft.textContent = 'Promoted';
-      var badgeRight = document.createElement('span');
-      badgeRight.textContent = 'CrimFig Ads';
-      badgeRight.style.cssText = 'font-weight:700;color:#D4143A;';
-      badge.appendChild(badgeLeft);
-      badge.appendChild(badgeRight);
-      card.appendChild(badge);
-
-      if (ad.imageUrl && /^https?:\\/\\//i.test(ad.imageUrl)) {
-        var img = document.createElement('img');
-        img.src = ad.imageUrl;
-        img.alt = ad.headline || 'Advertisement';
-        img.style.cssText = 'width:100%;height:180px;object-fit:cover;border-radius:8px;margin-bottom:12px;display:block;';
-        card.appendChild(img);
-      }
-
-      var headline = document.createElement('h4');
-      headline.style.cssText = 'margin:0 0 6px 0;font-size:16px;font-weight:700;color:#FFFFFF;line-height:1.3;';
-      headline.textContent = ad.headline || '';
-      card.appendChild(headline);
-
-      if (ad.bodyText) {
-        var body = document.createElement('p');
-        body.style.cssText = 'margin:0 0 14px 0;font-size:13px;color:#F5F6F8;line-height:1.4;opacity:0.85;';
-        body.textContent = ad.bodyText;
-        card.appendChild(body);
-      }
-
-      if (ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
-        var button = document.createElement('a');
-        button.href = ad.clickUrl;
-        button.target = '_blank';
-        button.rel = 'noopener noreferrer';
-        button.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#D4143A,#A80F32);color:#FFFFFF;text-decoration:none;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;transition:opacity 0.2s;box-shadow:0 4px 12px rgba(212,20,58,0.25);';
-        button.textContent = (ad.ctaText || 'Learn More') + ' \u2192';
-        card.appendChild(button);
-      }
-
-      container.appendChild(card);
-    })
-    .catch(function(err) {
-      console.warn('CrimFig Ads failed to render:', err);
+      var query = '?domain=' + encodeURIComponent(currentDomain) + '&mode=' + encodeURIComponent(mode) + '&fill=' + encodeURIComponent(fill);
+      fetch(apiBase + '/api/v1/delivery/ad/' + encodeURIComponent(token) + query, {
+        headers: { 'Accept': 'application/json' }
+      })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (!data || !data.data) return;
+        renderAdCard(slot, data.data, mode);
+      })
+      .catch(function(err) {
+        console.warn('CrimFig Ads failed to render:', err);
+      });
     });
-  });
+
+    // 2. Legacy script[data-placement] elements
+    var legacyScripts = document.querySelectorAll('script[data-placement]:not([data-cf-processed="true"])');
+    legacyScripts.forEach(function(script) {
+      var token = script.getAttribute('data-placement');
+      if (!token) return;
+      script.setAttribute('data-cf-processed', 'true');
+      var container = document.getElementById('cf-ad-' + token);
+      if (!container) return;
+
+      var scriptApiBase = script.src.replace(/\\/api\\/v1\\/delivery\\/embed\\.js.*/, '') || apiBase;
+      fetch(scriptApiBase + '/api/v1/delivery/ad/' + encodeURIComponent(token) + '?domain=' + encodeURIComponent(currentDomain), {
+        headers: { 'Accept': 'application/json' }
+      })
+      .then(function(res) { return res.json(); })
+      .then(function(data) {
+        if (!data || !data.data) return;
+        renderAdCard(container, data.data, 'publisher_network');
+      })
+      .catch(function(err) {
+        console.warn('CrimFig Ads failed to render legacy slot:', err);
+      });
+    });
+  }
+
+  function renderAdCard(container, ad, mode) {
+    var card = document.createElement('div');
+    card.style.cssText = "border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:'Poppins',Arial,Helvetica,sans-serif;max-width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;";
+
+    var badge = document.createElement('div');
+    badge.style.cssText = 'font-size:10px;text-transform:uppercase;color:#94a3b8;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;letter-spacing:0.05em;';
+    var badgeLeft = document.createElement('span');
+    badgeLeft.textContent = mode === 'owned_site_direct' ? 'Direct Partner' : 'Promoted';
+    var badgeRight = document.createElement('span');
+    badgeRight.textContent = 'CrimFig Ads';
+    badgeRight.style.cssText = 'font-weight:700;color:#D4143A;';
+    badge.appendChild(badgeLeft);
+    badge.appendChild(badgeRight);
+    card.appendChild(badge);
+
+    if (ad.imageUrl && /^https?:\\/\\//i.test(ad.imageUrl)) {
+      var img = document.createElement('img');
+      img.src = ad.imageUrl;
+      img.alt = ad.headline || 'Advertisement';
+      img.style.cssText = 'width:100%;height:180px;object-fit:cover;border-radius:8px;margin-bottom:12px;display:block;';
+      card.appendChild(img);
+    }
+
+    var headline = document.createElement('h4');
+    headline.style.cssText = 'margin:0 0 6px 0;font-size:16px;font-weight:700;color:#FFFFFF;line-height:1.3;';
+    headline.textContent = ad.headline || '';
+    card.appendChild(headline);
+
+    if (ad.bodyText) {
+      var body = document.createElement('p');
+      body.style.cssText = 'margin:0 0 14px 0;font-size:13px;color:#F5F6F8;line-height:1.4;opacity:0.85;';
+      body.textContent = ad.bodyText;
+      card.appendChild(body);
+    }
+
+    if (ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
+      var button = document.createElement('a');
+      button.href = ad.clickUrl;
+      button.target = '_blank';
+      button.rel = 'noopener noreferrer';
+      button.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#D4143A,#A80F32);color:#FFFFFF;text-decoration:none;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;transition:opacity 0.2s;box-shadow:0 4px 12px rgba(212,20,58,0.25);';
+      button.textContent = (ad.ctaText || 'Learn More') + ' \\u2192';
+      card.appendChild(button);
+    }
+
+    container.innerHTML = '';
+    container.appendChild(card);
+  }
+
+  // Queue runner and immediate execution
+  window.cfPubQ = window.cfPubQ || [];
+  var origPush = window.cfPubQ.push;
+  window.cfPubQ.push = function() {
+    var res = origPush.apply(window.cfPubQ, arguments);
+    initSlots();
+    return res;
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initSlots);
+  } else {
+    initSlots();
+  }
 })();`;
   }
 
@@ -125,8 +174,20 @@ export class DeliveryService {
    * Single Money Authority Directive: Does NOT debit escrow or credit promoter earnings here.
    * Interaction telemetry is recorded cleanly for the 30-min settlement cron.
    */
-  async getAdForPlacement(token: string, clientIp?: string, userAgent?: string, referrerDomain?: string) {
+  async getAdForPlacement(
+    token: string,
+    clientIp?: string,
+    userAgent?: string,
+    referrerDomain?: string,
+    mode?: string,
+    allowHomeNetworkFill?: boolean,
+  ) {
     this.tokenService.assertConfigured();
+
+    // Check if token matches standard slot catalog handles (e.g. cf_slot_0001) or placementToken
+    const isDirectBarterMode = mode === 'owned_site_direct';
+    const isSlotCatalog = token.startsWith('cf_slot_');
+
     const [placement] = await this.db
       .select({
         id: adsPlacements.id,
@@ -149,12 +210,18 @@ export class DeliveryService {
       .where(eq(adsPlacements.placementToken, token))
       .limit(1);
 
-    if (!placement || placement.status !== 'active' || placement.campaignStatus !== 'active' || placement.remainingBudget <= 0) {
+    if (!placement && !isDirectBarterMode && !isSlotCatalog) {
       throw new NotFoundException('Ad placement unavailable or budget exhausted');
     }
 
+    if (placement && (placement.status !== 'active' || placement.campaignStatus !== 'active' || placement.remainingBudget <= 0)) {
+      if (!isDirectBarterMode) {
+        throw new NotFoundException('Ad placement unavailable or budget exhausted');
+      }
+    }
+
     // Update website embed ping heartbeat timestamp
-    if (placement.websiteId) {
+    if (placement?.websiteId) {
       await this.db
         .update(adsPromoterWebsites)
         .set({ embedPingLastAt: new Date() })
@@ -208,17 +275,21 @@ export class DeliveryService {
     }));
 
     const auctionResult = this.auctionEngine.resolveAuction(formattedCandidates, {
-      slotHandle: 'cf_slot_auto',
+      slotHandle: isSlotCatalog ? token : 'cf_slot_auto',
       clientIp,
     });
 
-    if (!auctionResult) throw new NotFoundException('No eligible versioned auction candidate');
+    if (!auctionResult && !placement) {
+      throw new NotFoundException('No eligible ad creative available');
+    }
 
-    // Select the eligible auction winner; legacy/unpriced fallback cannot create billable serves.
-    const winningCreative = auctionResult ? auctionResult.winner : placement;
-    const clearingPriceMicros = auctionResult ? auctionResult.clearingPriceMicros : 0;
-    const finalCampaignId = auctionResult ? auctionResult.winner.campaignId : placement.campaignId;
-    const finalCreativeId = auctionResult ? auctionResult.winner.creativeId : placement.creativeId;
+    // Select the winning creative
+    const winningCreative = auctionResult ? auctionResult.winner : placement!;
+    const clearingPriceMicros = isDirectBarterMode && !allowHomeNetworkFill ? 0 : (auctionResult ? auctionResult.clearingPriceMicros : 0);
+    const finalCampaignId = auctionResult ? auctionResult.winner.campaignId : placement!.campaignId;
+    const finalCreativeId = auctionResult ? auctionResult.winner.creativeId : placement!.creativeId;
+    const promoterId = placement?.promoterId || '00000000-0000-0000-0000-000000000000';
+    const placementId = placement?.id || '00000000-0000-0000-0000-000000000000';
 
     const ipHash = this.tokenService.hashIp(clientIp);
 
@@ -226,15 +297,15 @@ export class DeliveryService {
     const [serve] = await this.db
       .insert(adsServes)
       .values({
-        placementId: placement.id,
+        placementId: placement ? placement.id : null,
         campaignId: finalCampaignId,
         creativeId: finalCreativeId,
-        promoterId: placement.promoterId,
-        slotHandle: 'cf_slot_auto',
+        promoterId: placement ? placement.promoterId : null,
+        slotHandle: isSlotCatalog ? token : 'cf_slot_auto',
         clearingPriceMicros,
         pricingVersion: 2,
-        billingPriceNanos: auctionResult.billingPriceNanos,
-        pricingModel: auctionResult ? auctionResult.winner.pricingModel : 'cpm',
+        billingPriceNanos: isDirectBarterMode && !allowHomeNetworkFill ? BigInt(0) : BigInt(auctionResult?.billingPriceNanos || 0),
+        pricingModel: isDirectBarterMode && !allowHomeNetworkFill ? 'cpm' : (auctionResult ? auctionResult.winner.pricingModel : 'cpm'),
         ipHash,
         userAgentHash: userAgent ? this.tokenService.hashIp(userAgent) : null,
       })
@@ -243,10 +314,10 @@ export class DeliveryService {
     // Generate cryptographic signed impression token binding this serve
     const impToken = this.tokenService.generateToken({
       servedId: serve.id,
-      placementId: placement.id,
+      placementId,
       campaignId: finalCampaignId,
       creativeId: finalCreativeId,
-      promoterId: placement.promoterId,
+      promoterId,
       ipHash,
     });
 
@@ -254,11 +325,11 @@ export class DeliveryService {
     await this.db
       .insert(adsInteractions)
       .values({
-        placementId: placement.id,
-        promoterId: placement.promoterId,
+        placementId,
+        promoterId,
         serveId: serve.id,
         type: 'impression',
-        source: placement.websiteId ? 'embed' : 'share_link',
+        source: placement?.websiteId ? 'embed' : 'share_link',
         actorIp: clientIp,
         userAgent,
         referrer: referrerDomain,
@@ -266,7 +337,7 @@ export class DeliveryService {
       });
 
     const baseUrl = process.env.ADS_PUBLIC_URL || 'https://ads.crimfig.com';
-    const clickUrl = `${baseUrl}/api/v1/delivery/go/${impToken}?pid=${placement.promoterId}`;
+    const clickUrl = `${baseUrl}/api/v1/delivery/go/${impToken}?pid=${promoterId}`;
 
     return {
       headline: winningCreative.headline,
