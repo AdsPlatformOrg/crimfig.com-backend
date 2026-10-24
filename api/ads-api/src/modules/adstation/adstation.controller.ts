@@ -110,6 +110,15 @@ export class AdstationController {
     return { status: 'success', data: result };
   }
 
+  @Get('direct-campaigns')
+  @ApiOperation({ summary: 'List direct campaigns across promoter websites' })
+  async getAllDirectCampaigns(@Req() req: any) {
+    const userId = req.user.sub;
+    const promoter = await this.promotersService.getOrCreatePromoter(userId, 'WEBSITE');
+    const campaigns = await this.adstationService.getDirectCampaigns(promoter.id, '');
+    return { status: 'success', data: campaigns };
+  }
+
   @Get('websites/:websiteId/direct-campaigns')
   @ApiOperation({ summary: 'List direct campaigns for website' })
   async getDirectCampaigns(@Req() req: any, @Param('websiteId') websiteId: string) {
