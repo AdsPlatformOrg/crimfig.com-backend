@@ -89,6 +89,14 @@ export const adsPromoterWebsites = pgTable(
     isSuspended: boolean('is_suspended').notNull().default(false),
     suspensionReason: text('suspension_reason'),
     verificationFailures: smallint('verification_failures').notNull().default(0),
+
+    // AdStation Configuration (PLAN-0018)
+    // Global CrimFig network ad delivery preference: 'high' | 'medium' | 'low'
+    deliveryPreference: varchar('delivery_preference', { length: 20 }).notNull().default('medium'),
+    // Consideration slot status (required for AdStation access)
+    considerationSlotActive: boolean('consideration_slot_active').notNull().default(false),
+    considerationSlotVerifiedAt: timestamp('consideration_slot_verified_at', { withTimezone: true }),
+
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

@@ -19,6 +19,8 @@ import { UploadsModule } from './modules/uploads/uploads.module';
 import { ConversionsModule } from './modules/conversions/conversions.module';
 import { DisputesModule } from './modules/disputes/disputes.module';
 import { EcosystemModule } from './modules/ecosystem/ecosystem.module';
+import { AdstationModule } from './modules/adstation/adstation.module';
+import { AdvertiserMilestonesModule } from './modules/advertiser-milestones/advertiser-milestones.module';
 
 @Module({
   imports: [
@@ -39,6 +41,8 @@ import { EcosystemModule } from './modules/ecosystem/ecosystem.module';
     ConversionsModule,
     DisputesModule,
     EcosystemModule,
+    AdstationModule,
+    AdvertiserMilestonesModule,
   ],
   providers: [AdsStaffGrants, { provide: APP_GUARD, useClass: AdsAccessGuard }],
 })
