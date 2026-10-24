@@ -3,6 +3,8 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Public } from '@crimfig/shared';
 import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
 
+import { AdsStaffGrants } from '../security/ads-staff-grants';
+
 export class SubmitFeedbackDto {
   @IsString()
   @IsNotEmpty()
@@ -21,6 +23,33 @@ export class SubmitFeedbackDto {
 @ApiTags('Ecosystem & Relational Architecture')
 @Controller('ecosystem')
 export class EcosystemController {
+  constructor(private readonly staffGrants: AdsStaffGrants) {}
+
+  @Get('staff-status')
+  @ApiOperation({ summary: 'Check staff privilege status and assigned roles for current authenticated session' })
+  getStaffStatus(@Req() req: any) {
+    const userId = req.user?.sub;
+    if (!userId) {
+      return {
+        status: 'success',
+        data: {
+          userId: null,
+          isStaff: false,
+          roles: [],
+        },
+      };
+    }
+    const roles = this.staffGrants.rolesFor(userId);
+    return {
+      status: 'success',
+      data: {
+        userId,
+        isStaff: roles.length > 0,
+        roles: [...roles],
+      },
+    };
+  }
+
   @Public()
   @Get('ethics-manifesto')
   @ApiOperation({ summary: 'Public platform values, creator dignity, and relational ethics manifesto' })

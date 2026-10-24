@@ -8,9 +8,11 @@ import * as argon2 from 'argon2';
 import { JwtService } from '@nestjs/jwt';
 
 jest.mock('argon2');
-jest.mock('../../config/config', () => ({ config: {
-  JWT: { ACCESS_SECRET: 'auth-service-test-secret' },
-} }));
+jest.mock('../../config/config', () => ({
+  config: {
+    JWT: { ACCESS_SECRET: 'auth-service-test-secret' },
+  }
+}));
 
 describe('AuthService', () => {
   let service: AuthService;
