@@ -458,7 +458,8 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await new CampaignEscrowService(db).change(owner,campaign.id,'reserve',undefined,'active');
     const publisher=randomUUID();await pool.query("insert into users(id,email,status) values($1,'publisher@example.test','ACTIVE')",[publisher]);
     const [promoter]=await db.insert(schema.adsPromoters).values({userId:publisher,type:'INDIVIDUAL'}).returning();
-    const [creative]=await db.insert(schema.adsCreatives).values({campaignId:campaign.id,headline:'Reviewed',destinationUrl:'https://example.test',status:'active',reviewStatus:'approved'}).returning();
+    const [stack]=await db.insert(schema.adsCreativeStacks).values({campaignId:campaign.id,name:'Ad Stack #1',position:1}).returning();
+    const [creative]=await db.insert(schema.adsCreatives).values({campaignId:campaign.id,adStackId:stack.id,headline:'Reviewed',destinationUrl:'https://example.test',status:'active',reviewStatus:'approved'}).returning();
     const [placement]=await db.insert(schema.adsPlacements).values({campaignId:campaign.id,creativeId:creative.id,promoterId:promoter.id,placementToken:randomUUID()}).returning();
     const add=async(version=2)=>{
       const [serve]=await db.insert(schema.adsServes).values({campaignId:campaign.id,creativeId:creative.id,promoterId:promoter.id,
@@ -541,7 +542,8 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     const [campaign] = await db.insert(schema.adsCampaigns).values({ advertiserId: owner, title: 'New funded generation', budgetUsdCents: 500,
       remainingBudgetUsdCents: 500, status: 'paused', moderationStatus: 'approved', pricingVersion: 2, pricingModel: 'cpc' }).returning();
     await new CampaignEscrowService(db).change(owner, campaign.id, 'reserve', undefined, 'active');
-    const [creative] = await db.insert(schema.adsCreatives).values({ campaignId: campaign.id, headline: 'Reviewed', destinationUrl: 'https://example.test', status: 'active', reviewStatus: 'approved' }).returning();
+    const [stack] = await db.insert(schema.adsCreativeStacks).values({ campaignId: campaign.id, name: 'Ad Stack #1', position: 1 }).returning();
+    const [creative] = await db.insert(schema.adsCreatives).values({ campaignId: campaign.id, adStackId: stack.id, headline: 'Reviewed', destinationUrl: 'https://example.test', status: 'active', reviewStatus: 'approved' }).returning();
     const [placement] = await db.insert(schema.adsPlacements).values({ campaignId: campaign.id, creativeId: creative.id, promoterId: f.promoter.id, placementToken: randomUUID() }).returning();
     for (const [index, price] of [40_000_000n, 60_000_000n].entries()) {
       const [serve] = await db.insert(schema.adsServes).values({ campaignId: campaign.id, creativeId: creative.id, promoterId: f.promoter.id,

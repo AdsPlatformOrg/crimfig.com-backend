@@ -17,6 +17,7 @@ export interface AuctionCandidate {
   hourlyPacingUsdCents?: number | null;
   targetCountries?: string[] | null;
   targetStates?: string[] | null;
+  targetCities?: string[] | null;
   targetDevices?: string[] | null;
   targetHours?: number[] | null;
   format: string;
@@ -28,6 +29,7 @@ export interface AuctionResolutionContext {
   clientIp?: string;
   clientGeoCountry?: string;
   clientGeoRegion?: string;
+  clientGeoCity?: string;
   clientDevice?: 'desktop' | 'android' | 'ios' | 'tablet';
   requestedAt?: Date;
 }
@@ -80,7 +82,17 @@ export class AuctionEngineService {
 
       // Geo-state targeting filter (e.g. Lagos, Abuja)
       if (cand.targetStates && cand.targetStates.length > 0) {
-        if (!context.clientGeoRegion || !cand.targetStates.includes(context.clientGeoRegion)) {
+        if (!context.clientGeoRegion || !cand.targetStates.some((state) =>
+          state.toUpperCase() === context.clientGeoRegion!.toUpperCase() ||
+          state.toUpperCase().endsWith(`-${context.clientGeoRegion!.toUpperCase()}`) ||
+          context.clientGeoRegion!.toUpperCase().endsWith(`-${state.toUpperCase()}`))) {
+          return false;
+        }
+      }
+
+      // City targeting requires a trusted canonical city from the edge.
+      if (cand.targetCities && cand.targetCities.length > 0) {
+        if (!context.clientGeoCity || !cand.targetCities.includes(context.clientGeoCity)) {
           return false;
         }
       }

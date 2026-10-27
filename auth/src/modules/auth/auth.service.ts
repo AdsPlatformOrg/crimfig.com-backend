@@ -2,7 +2,7 @@ import {
   Injectable, ConflictException, UnauthorizedException, BadRequestException, Inject,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -15,6 +15,12 @@ import { LoginDto } from './dto/login.dto';
 import { CrimfigLogger } from '@crimfig/shared';
 import { IsString, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
+import {
+  AVATAR_ATTRIBUTION,
+  AVATAR_PRESETS,
+  DEFAULT_AVATAR_PRESET_ID,
+  getAvatarPreset,
+} from './avatar-presets';
 
 // ── DTOs ──────────────────────────────────────────────────────────────────────
 
@@ -218,6 +224,62 @@ export class AuthService {
 
     this.logger.audit('AUTH_PASSWORD_RESET_SUCCESS', { userId: payload.sub });
     return { message: 'Password reset successfully. Please log in with your new password.' };
+  }
+
+  // ── Profile avatar ───────────────────────────────────────────────────────────
+
+  avatarCatalog() {
+    return {
+      defaultId: DEFAULT_AVATAR_PRESET_ID,
+      presets: AVATAR_PRESETS,
+      attribution: AVATAR_ATTRIBUTION,
+    };
+  }
+
+  async getProfile(userId: string) {
+    const [user] = await this.db
+      .select({
+        id: schema.users.id,
+        email: schema.users.email,
+        avatarPresetId: schema.users.avatarPresetId,
+        avatarVersion: schema.users.avatarVersion,
+      })
+      .from(schema.users)
+      .where(eq(schema.users.id, userId))
+      .limit(1);
+    if (!user) throw new UnauthorizedException('Account is not available');
+
+    const stored = getAvatarPreset(user.avatarPresetId);
+    const preset = stored || getAvatarPreset(DEFAULT_AVATAR_PRESET_ID)!;
+    return {
+      userId: user.id,
+      email: user.email,
+      avatar: {
+        kind: stored ? 'preset' : 'default',
+        presetId: preset.id,
+        label: preset.label,
+        alt: preset.alt,
+        url: `${config.APP.AUTH_WEB_URL}/avatars/chibi/${preset.file}?v=${user.avatarVersion}`,
+        version: user.avatarVersion,
+      },
+    };
+  }
+
+  async updateAvatarPreset(userId: string, presetId: string | null) {
+    const preset = presetId === null ? undefined : getAvatarPreset(presetId);
+    if (presetId !== null && !preset) throw new BadRequestException('Choose a valid avatar preset.');
+    const [updated] = await this.db
+      .update(schema.users)
+      .set({
+        avatarPresetId: preset ? preset.id : null,
+        avatarVersion: sql`${schema.users.avatarVersion} + 1`,
+        avatarUpdatedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(schema.users.id, userId))
+      .returning({ id: schema.users.id });
+    if (!updated) throw new UnauthorizedException('Account is not available');
+    return this.getProfile(userId);
   }
 
   // ── Internal: Email-purpose JWTs ─────────────────────────────────────────

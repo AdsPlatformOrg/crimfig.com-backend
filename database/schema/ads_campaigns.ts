@@ -96,6 +96,14 @@ export const adsCampaigns = pgTable(
     targetHours: text('target_hours'),         // JSON stringified array of 0-23 hours
     frequencyCapPerDay: smallint('frequency_cap_per_day').notNull().default(5),
 
+    // Canonical geographic targeting mode: global | targeted. Rows live in
+    // crimfig_geo_targets(ownerType='campaign'); a targeted mode with no rows is invalid.
+    geoMode: varchar('geo_mode', { length: 16 }).notNull().default('global'),
+
+    // Campaign metadata. Channel does not participate in delivery eligibility in v1.
+    category: varchar('category', { length: 80 }),
+    channels: text('channels'), // JSON stringified string[] (metadata; not a delivery filter)
+
     // Legacy targeting metadata retained for backwards compatibility
     targeting: text('targeting'),
 

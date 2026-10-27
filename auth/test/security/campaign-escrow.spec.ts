@@ -9,6 +9,7 @@ import { CampaignEscrowService } from '../../../api/billing-api/src/modules/ecos
 import { AdsSettlementService } from '../../../api/ads-api/src/modules/billing/ads-settlement.service';
 import { DeferredAuditService } from '../../../api/ads-api/src/modules/billing/deferred-audit.service';
 import { EcosystemController } from '../../../api/billing-api/src/modules/ecosystem/ecosystem.controller';
+import { BillingStaffGrants } from '../../../api/billing-api/src/modules/security/billing-staff-grants';
 
 const owner = '12345678-1234-4234-8234-123456789001';
 const campaignId = '12345678-1234-4234-8234-123456789002';
@@ -161,7 +162,7 @@ test('internal key is required for new escrow routes and legacy generic writes r
   try {
     process.env.INTERNAL_ECOSYSTEM_KEY = 'fixture-key';
     const money = { change: jest.fn(async () => ({ receipt: 'confirmed' })) };
-    const controller = new EcosystemController({} as any, money as any);
+    const controller = new EcosystemController({} as any, money as any, {} as any);
     await expect(controller.reserveCampaign(owner, campaignId, 'wrong', { amountUsdCents: 1000, reason: 'test' })).rejects.toThrow('authorization');
     expect(money.change).not.toHaveBeenCalled();
     await expect(controller.reserveCampaign(owner, campaignId, 'fixture-key', { amountUsdCents: 1000, reason: 'test' })).resolves.toMatchObject({ status: 'success' });
@@ -196,6 +197,7 @@ test('HTTP Billing boundary returns committed receipts to the real Ads client wi
     const module = await Test.createTestingModule({ controllers: [EcosystemController], providers: [
       { provide: WalletService, useValue: {} },
       { provide: CampaignEscrowService, useValue: new CampaignEscrowService(store.db) },
+      { provide: BillingStaffGrants, useValue: { rolesFor: () => [] } },
     ] }).compile();
     app = module.createNestApplication(); app.setGlobalPrefix('api/v1');
     await app.listen(0, '127.0.0.1');

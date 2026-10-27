@@ -1,16 +1,43 @@
-import { Controller, Get, Post, Put, Body, Param, Query, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
+import {
+  ArrayMaxSize,
+  IsArray,
+  IsIn,
+  IsInt,
+  IsNumber,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Max,
+  MaxLength,
+  Min,
+  MinLength,
+} from 'class-validator';
 import { CampaignsService } from './campaigns.service';
-import { IsString, IsNumber, IsOptional, Min, IsIn } from 'class-validator';
 import { Public } from '@crimfig/shared';
 
 export class CreateCampaignDto {
   @IsString()
+  @MinLength(1)
+  @MaxLength(255)
   title: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(5000)
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  category?: string;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(3)
+  @IsIn(['websites', 'individuals', 'mobile_apps'], { each: true })
+  channels?: string[];
 
   @IsNumber()
   @Min(5)
@@ -23,10 +50,12 @@ export class CreateCampaignDto {
 
   @IsOptional()
   @IsNumber()
+  @Min(50)
   costPerImpressionCents?: number;
 
   @IsOptional()
   @IsNumber()
+  @Min(10)
   costPerClickCents?: number;
 
   @IsOptional()
@@ -38,43 +67,84 @@ export class CreateCampaignDto {
   pricingModel?: 'cpm' | 'cpc';
 
   @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(250)
+  @IsString({ each: true })
   targetCountries?: string[];
 
   @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(250)
+  @IsString({ each: true })
   targetStates?: string[];
 
   @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
   targetDevices?: string[];
 
   @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(24)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(23, { each: true })
   targetHours?: number[];
 
   @IsOptional()
   @IsNumber()
+  @Min(1)
+  @Max(100)
   frequencyCapPerDay?: number;
+
+  @IsOptional()
+  @IsIn(['global', 'targeted'])
+  geoMode?: 'global' | 'targeted';
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  locations?: string[];
 }
 
 export class AddCreativeDto {
+  @IsOptional()
+  @IsUUID()
+  adStackId?: string;
+
+  @IsOptional()
+  @IsIn(['text', 'image', 'video'])
+  adType?: 'text' | 'image' | 'video';
+
   @IsString()
+  @MinLength(1)
+  @MaxLength(100)
   headline: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
   bodyText?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   ctaText?: string;
 
   @IsString()
+  @MaxLength(2048)
   destinationUrl: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
   imageUrl?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
   videoUrl?: string;
 
   @IsOptional()
@@ -84,31 +154,49 @@ export class AddCreativeDto {
   @IsOptional()
   @IsIn(['image', 'gif', 'video'])
   mediaFormat?: 'image' | 'gif' | 'video';
+
+  @IsOptional()
+  @IsUUID()
+  mediaAssetId?: string;
 }
 
 export class ReplaceCreativeDto {
   @IsOptional()
+  @IsUUID()
+  adStackId?: string;
+
+  @IsOptional()
+  @IsIn(['text', 'image', 'video'])
+  adType?: 'text' | 'image' | 'video';
+
+  @IsOptional()
   @IsString()
+  @MaxLength(100)
   headline?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(2000)
   bodyText?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(50)
   ctaText?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
   destinationUrl?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
   imageUrl?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(2048)
   videoUrl?: string;
 
   @IsOptional()
@@ -118,6 +206,49 @@ export class ReplaceCreativeDto {
   @IsOptional()
   @IsIn(['image', 'gif', 'video'])
   mediaFormat?: 'image' | 'gif' | 'video';
+
+  @IsOptional()
+  @IsUUID()
+  mediaAssetId?: string;
+}
+
+export class CreateStackDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  name?: string;
+}
+
+export class UpdateStackDto {
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(100)
+  name?: string;
+
+  @IsOptional()
+  @IsIn(['inherit', 'global', 'targeted'])
+  geoMode?: 'inherit' | 'global' | 'targeted';
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsString({ each: true })
+  locations?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(10)
+  @IsString({ each: true })
+  targetDevices?: string[] | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(24)
+  @IsInt({ each: true })
+  @Min(0, { each: true })
+  @Max(23, { each: true })
+  targetHours?: number[] | null;
 }
 
 @ApiTags('Campaigns')
@@ -130,27 +261,31 @@ export class CampaignsController {
   @ApiOperation({ summary: 'Browse active campaigns available for promoters to display' })
   @ApiQuery({ name: 'category', required: false })
   async getCatalog(@Query('category') category?: string) {
-    const catalog = await this.campaignsService.getPublicCatalog(category);
-    return { status: 'success', data: catalog };
+    return { status: 'success', data: await this.campaignsService.getPublicCatalog(category) };
+  }
+
+  @Get('creation-capabilities')
+  @ApiOperation({ summary: 'Server-owned creative capabilities for the campaign wizard' })
+  getCreationCapabilities() {
+    return { status: 'success', data: this.campaignsService.creationCapabilities() };
   }
 
   @Get()
   @ApiOperation({ summary: 'List advertiser campaigns with optional status filter' })
   @ApiQuery({ name: 'status', required: false })
   async getAdvertiserCampaigns(@Req() req: any, @Query('status') status?: string) {
-    const userId = req.user.sub;
-    const campaigns = await this.campaignsService.getAdvertiserCampaigns(userId, status);
-    return { status: 'success', data: campaigns };
+    return { status: 'success', data: await this.campaignsService.getAdvertiserCampaigns(req.user.sub, status) };
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create new ad campaign' })
+  @ApiOperation({ summary: 'Create new ad campaign with its default ad stack' })
   async createCampaign(@Req() req: any, @Body() dto: CreateCampaignDto) {
-    const userId = req.user.sub;
     const campaign = await this.campaignsService.createCampaign({
-      advertiserId: userId,
+      advertiserId: req.user.sub,
       title: dto.title,
       description: dto.description,
+      category: dto.category,
+      channels: dto.channels,
       budgetUsd: dto.budgetUsd,
       dailyBudgetUsd: dto.dailyBudgetUsd,
       costPerImpressionCents: dto.costPerImpressionCents,
@@ -162,60 +297,81 @@ export class CampaignsController {
       targetDevices: dto.targetDevices,
       targetHours: dto.targetHours,
       frequencyCapPerDay: dto.frequencyCapPerDay,
+      geoMode: dto.geoMode,
+      locations: dto.locations,
     });
     return { status: 'success', data: campaign };
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get campaign details with creatives' })
+  @ApiOperation({ summary: 'Get campaign details with ordered ad stacks and creatives' })
   async getCampaignDetails(@Param('id') id: string, @Req() req: any) {
-    const userId = req.user.sub;
-    const details = await this.campaignsService.getCampaignDetails(id, userId);
-    return { status: 'success', data: details };
+    return { status: 'success', data: await this.campaignsService.getCampaignDetails(id, req.user.sub) };
+  }
+
+  @Post(':id/ad-stacks')
+  @ApiOperation({ summary: 'Create an additional ad stack' })
+  async createStack(@Param('id') campaignId: string, @Req() req: any, @Body() dto: CreateStackDto) {
+    return { status: 'success', data: await this.campaignsService.createStack(campaignId, req.user.sub, dto.name) };
+  }
+
+  @Patch(':id/ad-stacks/:stackId')
+  @ApiOperation({ summary: 'Rename a stack or update its non-financial overrides' })
+  async updateStack(
+    @Param('id') campaignId: string,
+    @Param('stackId') stackId: string,
+    @Req() req: any,
+    @Body() dto: UpdateStackDto,
+  ) {
+    return {
+      status: 'success',
+      data: await this.campaignsService.updateStack(campaignId, stackId, req.user.sub, {
+        name: dto.name,
+        geoMode: dto.geoMode,
+        locations: dto.locations,
+        targetDevices: dto.targetDevices,
+        targetHours: dto.targetHours,
+      }),
+    };
+  }
+
+  @Delete(':id/ad-stacks/:stackId')
+  @ApiOperation({ summary: 'Remove an additional ad stack and its draft ads' })
+  async deleteStack(@Param('id') campaignId: string, @Param('stackId') stackId: string, @Req() req: any) {
+    return { status: 'success', data: await this.campaignsService.deleteStack(campaignId, stackId, req.user.sub) };
   }
 
   @Post(':id/creatives')
-  @ApiOperation({ summary: 'Add creative asset to campaign' })
+  @ApiOperation({ summary: 'Add a typed creative to an ad stack' })
   async addCreative(@Param('id') campaignId: string, @Req() req: any, @Body() dto: AddCreativeDto) {
-    const userId = req.user.sub;
-    const creative = await this.campaignsService.addCreative({
-      campaignId,
-      advertiserId: userId,
-      headline: dto.headline,
-      bodyText: dto.bodyText,
-      ctaText: dto.ctaText,
-      destinationUrl: dto.destinationUrl,
-      imageUrl: dto.imageUrl,
-      videoUrl: dto.videoUrl,
-      mediaFormat: dto.mediaFormat,
-    });
-    return { status: 'success', data: creative };
+    return {
+      status: 'success',
+      data: await this.campaignsService.addCreative(campaignId, req.user.sub, {
+        adStackId: dto.adStackId,
+        adType: dto.adType,
+        headline: dto.headline,
+        bodyText: dto.bodyText,
+        ctaText: dto.ctaText,
+        destinationUrl: dto.destinationUrl,
+        imageUrl: dto.imageUrl,
+        videoUrl: dto.videoUrl,
+        adFormat: dto.adFormat,
+        mediaFormat: dto.mediaFormat,
+        mediaAssetId: dto.mediaAssetId,
+      }),
+    };
   }
 
   @Put('creatives/:id/replace')
-  @ApiOperation({ summary: 'Replace/update rejected creative asset and re-submit for review' })
+  @ApiOperation({ summary: 'Replace or update a creative and re-submit it for review' })
   async replaceCreative(@Param('id') creativeId: string, @Req() req: any, @Body() dto: ReplaceCreativeDto) {
-    const userId = req.user.sub;
-    const creative = await this.campaignsService.replaceCreative({
-      creativeId,
-      advertiserId: userId,
-      headline: dto.headline,
-      bodyText: dto.bodyText,
-      ctaText: dto.ctaText,
-      destinationUrl: dto.destinationUrl,
-      imageUrl: dto.imageUrl,
-      videoUrl: dto.videoUrl,
-      mediaFormat: dto.mediaFormat,
-    });
-    return { status: 'success', data: creative };
+    return { status: 'success', data: await this.campaignsService.replaceCreative(creativeId, req.user.sub, dto) };
   }
 
   @Post(':id/submit-review')
-  @ApiOperation({ summary: 'Submit draft campaign for moderation review' })
+  @ApiOperation({ summary: 'Validate stacks and submit the campaign for moderation review' })
   async submitForReview(@Param('id') id: string, @Req() req: any) {
-    const userId = req.user.sub;
-    const updated = await this.campaignsService.submitForReview(id, userId);
-    return { status: 'success', data: updated };
+    return { status: 'success', data: await this.campaignsService.submitForReview(id, req.user.sub) };
   }
 
   @Put(':id/status')
@@ -225,8 +381,6 @@ export class CampaignsController {
     @Req() req: any,
     @Body('status') status: 'active' | 'paused' | 'under_review' | 'draft' | 'rejected' | 'suspended' | 'trash',
   ) {
-    const userId = req.user.sub;
-    const updated = await this.campaignsService.updateStatus(id, userId, status);
-    return { status: 'success', data: updated };
+    return { status: 'success', data: await this.campaignsService.updateStatus(id, req.user.sub, status) };
   }
 }

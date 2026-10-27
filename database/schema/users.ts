@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, boolean, timestamp, pgEnum } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, boolean, timestamp, pgEnum, integer } from 'drizzle-orm/pg-core';
 
 export const userStatusEnum = pgEnum('user_status', ['ACTIVE', 'SUSPENDED', 'PENDING_VERIFICATION', 'DELETED']);
 
@@ -12,6 +12,9 @@ export const users = pgTable('users', {
   isPhoneVerified: boolean('is_phone_verified').notNull().default(false),
   mfaEnabled: boolean('mfa_enabled').notNull().default(false),
   preferredLocale: varchar('preferred_locale', { length: 10 }).notNull().default('en'),
+  avatarPresetId: varchar('avatar_preset_id', { length: 50 }),
+  avatarVersion: integer('avatar_version').notNull().default(1),
+  avatarUpdatedAt: timestamp('avatar_updated_at', { withTimezone: true }),
   lastLoginAt: timestamp('last_login_at', { withTimezone: true }),
   lastActivityAt: timestamp('last_activity_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

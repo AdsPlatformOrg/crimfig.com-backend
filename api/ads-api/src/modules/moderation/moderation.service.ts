@@ -63,6 +63,8 @@ export class ModerationService {
         destinationUrl: adsCreatives.destinationUrl,
         mediaFormat: adsCreatives.mediaFormat,
         adFormat: adsCreatives.adFormat,
+        adType: adsCreatives.adType,
+        adStackId: adsCreatives.adStackId,
         reviewStatus: adsCreatives.reviewStatus,
         createdAt: adsCreatives.createdAt,
       })
