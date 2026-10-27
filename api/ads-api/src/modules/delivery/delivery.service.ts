@@ -278,13 +278,25 @@ export class DeliveryService {
       img.src = resolvedMedia(ad.imageUrl);
       img.alt = ad.headline || 'Advertisement';
       img.style.cssText = 'width:100%;height:180px;object-fit:cover;border-radius:8px;margin-bottom:12px;display:block;';
-      card.appendChild(img);
+      if (ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
+        var imgLink = document.createElement('a');
+        imgLink.href = ad.clickUrl;
+        imgLink.target = '_blank';
+        imgLink.rel = 'noopener noreferrer';
+        imgLink.setAttribute('aria-label', ad.headline || 'Open advertisement');
+        imgLink.appendChild(img);
+        card.appendChild(imgLink);
+      } else {
+        card.appendChild(img);
+      }
     }
 
-    var headline = document.createElement('h4');
-    headline.style.cssText = 'margin:0 0 6px 0;font-size:16px;font-weight:700;color:#FFFFFF;line-height:1.3;';
-    headline.textContent = ad.headline || '';
-    card.appendChild(headline);
+    if (ad.headline) {
+      var headline = document.createElement('h4');
+      headline.style.cssText = 'margin:0 0 6px 0;font-size:16px;font-weight:700;color:#FFFFFF;line-height:1.3;';
+      headline.textContent = ad.headline;
+      card.appendChild(headline);
+    }
 
     if (ad.bodyText) {
       var body = document.createElement('p');
@@ -293,13 +305,13 @@ export class DeliveryService {
       card.appendChild(body);
     }
 
-    if (ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
+    if (ad.ctaText && ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
       var button = document.createElement('a');
       button.href = ad.clickUrl;
       button.target = '_blank';
       button.rel = 'noopener noreferrer';
       button.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#D4143A,#A80F32);color:#FFFFFF;text-decoration:none;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;transition:opacity 0.2s;box-shadow:0 4px 12px rgba(212,20,58,0.25);';
-      button.textContent = (ad.ctaText || 'Learn More') + ' \\u2192';
+      button.textContent = ad.ctaText + ' \\u2192';
       card.appendChild(button);
     }
 

@@ -45,9 +45,9 @@ export interface StackSettingsInput {
 export interface CreativeInput {
   adStackId?: string;
   adType?: AdType;
-  headline: string;
-  bodyText?: string;
-  ctaText?: string;
+  headline?: string | null;
+  bodyText?: string | null;
+  ctaText?: string | null;
   destinationUrl: string;
   imageUrl?: string;
   videoUrl?: string;
@@ -365,9 +365,9 @@ export class CampaignsService {
     input: CreativeInput,
   ): Promise<{
     adType: AdType;
-    headline: string;
+    headline: string | null;
     bodyText: string | null;
-    ctaText: string;
+    ctaText: string | null;
     destinationUrl: string;
     adFormat: AdFormat;
     imageUrl: string | null;
@@ -376,9 +376,6 @@ export class CampaignsService {
     mediaAssetId: string | null;
     mediaFormat: 'image' | 'gif' | 'video';
   }> {
-    const headline = cleanString(input.headline, 'Headline', 100, true);
-    const bodyText = input.bodyText ? cleanString(input.bodyText, 'Body text', 2000) : null;
-    const ctaText = cleanString(input.ctaText || 'Learn More', 'Call to action', 50, true);
     const destinationUrl = assertHttpUrl(input.destinationUrl);
     const adFormat = (input.adFormat || 'card') as AdFormat;
     if (!AD_FORMATS.includes(adFormat)) throw new BadRequestException('Unsupported display format.');
@@ -391,6 +388,16 @@ export class CampaignsService {
     if (adType === 'video' && !videoAuthoringEnabled()) {
       throw new BadRequestException('Video authoring is not available yet.');
     }
+
+    // Image/video artwork may contain the entire advertising message. Text ads are
+    // the only type that must carry a discrete headline.
+    const headline = input.headline?.trim() ? cleanString(input.headline, 'Headline', 100) : null;
+    if (adType === 'text' && !headline) {
+      throw new BadRequestException('A headline is required for text ads.');
+    }
+    const bodyText = input.bodyText?.trim() ? cleanString(input.bodyText, 'Body text', 2000) : null;
+    const configuredCta = input.ctaText?.trim() ? cleanString(input.ctaText, 'Call to action', 50) : null;
+    const ctaText = adType === 'text' ? configuredCta || 'Learn More' : configuredCta;
 
     let asset: typeof adsMediaAssets.$inferSelect | undefined;
     if (input.mediaAssetId) {

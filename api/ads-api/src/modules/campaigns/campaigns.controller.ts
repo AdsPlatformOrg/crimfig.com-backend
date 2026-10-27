@@ -118,10 +118,10 @@ export class AddCreativeDto {
   @IsIn(['text', 'image', 'video'])
   adType?: 'text' | 'image' | 'video';
 
+  @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(100)
-  headline: string;
+  headline?: string;
 
   @IsOptional()
   @IsString()

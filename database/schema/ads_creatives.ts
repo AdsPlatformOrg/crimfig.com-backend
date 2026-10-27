@@ -50,10 +50,11 @@ export const adsCreatives = pgTable(
     adStackId: uuid('ad_stack_id').notNull().references(() => adsCreativeStacks.id, { onDelete: 'restrict' }),
     adType: creativeAdTypeEnum('ad_type').notNull().default('text'),
 
-    // Ad copy
-    headline: varchar('headline', { length: 100 }).notNull(),
+    // Ad copy. Image/video ads may carry their message in the artwork, so these
+    // are optional; text ads are required by service validation to have a headline.
+    headline: varchar('headline', { length: 100 }),
     bodyText: text('body_text'),
-    ctaText: varchar('cta_text', { length: 50 }).notNull().default('Learn More'),
+    ctaText: varchar('cta_text', { length: 50 }),
 
     // Asset URLs and format (Images, GIFs, Videos)
     mediaFormat: creativeMediaFormatEnum('media_format').notNull().default('image'),
