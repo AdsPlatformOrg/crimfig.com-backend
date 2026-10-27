@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiConsumes } from '@nestjs/swagger';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { UploadsService } from './uploads.service';
 import { IsString, IsNumber, IsOptional, Min } from 'class-validator';
 import { ADS_MEDIA_UPLOAD_SETTINGS } from '../../config/ads-settings.constants';
@@ -90,41 +90,71 @@ export class UploadsController {
     return { status: 'success', data: result };
   }
 
+  private parseRange(header: string | undefined): { start: number; end?: number } | undefined {
+    if (!header) return undefined;
+    const match = /^bytes=(\d+)-(\d*)$/.exec(header.trim());
+    if (!match) return undefined;
+    const start = Number(match[1]);
+    const end = match[2] ? Number(match[2]) : undefined;
+    if (!Number.isSafeInteger(start) || (end !== undefined && !Number.isSafeInteger(end))) return undefined;
+    return { start, end };
+  }
+
+  private async sendMedia(
+    req: Request,
+    res: Response,
+    storageKey: string,
+    cacheControl: string,
+    ownerId?: string,
+    staffReview = false,
+  ) {
+    const range = this.parseRange(req.headers.range);
+    const result = range
+      ? await this.uploadsService.getMediaStream(storageKey, ownerId, staffReview, range)
+      : ownerId
+        ? await this.uploadsService.getMediaStream(storageKey, ownerId)
+        : staffReview
+          ? await this.uploadsService.getMediaStream(storageKey, undefined, true)
+          : await this.uploadsService.getMediaStream(storageKey);
+    if ('rangeInvalid' in result) {
+      res.status(416);
+      res.setHeader('Content-Range', `bytes */${result.totalSize}`);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.end();
+      return;
+    }
+    res.status(result.partial ? 206 : 200);
+    res.setHeader('Content-Type', result.contentType);
+    res.setHeader('Content-Length', String(result.contentLength));
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Cache-Control', cacheControl);
+    if (result.partial) res.setHeader('Content-Range', result.contentRange);
+    result.stream.pipe(res);
+  }
+
   @Public()
   @Get('media/:storageKey')
-  @ApiOperation({ summary: 'Stream approved active public ad media' })
+  @ApiOperation({ summary: 'Stream approved active public ad media with byte-range support' })
   async getMedia(
     @Param('storageKey') storageKey: string,
+    @Req() req: Request,
     @Res() res: Response,
   ) {
-    const { stream, contentType, contentLength } = await this.uploadsService.getMediaStream(storageKey);
-    res.setHeader('Content-Type', contentType);
-    if (contentLength) {
-      res.setHeader('Content-Length', contentLength);
-    }
-    res.setHeader('Cache-Control', 'no-store');
-    stream.pipe(res);
+    await this.sendMedia(req, res, storageKey, 'public, max-age=31536000, immutable');
   }
 
   @Get('private-media/:storageKey')
   @ApiOperation({ summary: 'Authenticated owner preview of a ready media asset' })
   async previewMedia(@Param('storageKey') storageKey: string, @Req() req: any, @Res() res: Response) {
-    const { stream, contentType, contentLength } = await this.uploadsService.getMediaStream(storageKey, req.user.sub);
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'no-store');
-    if (contentLength) res.setHeader('Content-Length', contentLength);
-    stream.pipe(res);
+    await this.sendMedia(req, res, storageKey, 'no-store', req.user.sub);
   }
 
   @AdsRoles('ads_reviewer', 'ads_manager', 'ads_admin', 'ads_support', 'super_admin')
   @Get('review-media/:storageKey')
   @ApiOperation({ summary: 'Ready asset preview for explicitly assigned moderation staff' })
-  async reviewMedia(@Param('storageKey') storageKey: string, @Res() res: Response) {
-    const { stream, contentType, contentLength } = await this.uploadsService.getMediaStream(storageKey, undefined, true);
-    res.setHeader('Content-Type', contentType);
-    res.setHeader('Cache-Control', 'no-store');
-    if (contentLength) res.setHeader('Content-Length', contentLength);
-    stream.pipe(res);
+  async reviewMedia(@Param('storageKey') storageKey: string, @Req() req: Request, @Res() res: Response) {
+    await this.sendMedia(req, res, storageKey, 'no-store', undefined, true);
   }
 
   @Post('presign')

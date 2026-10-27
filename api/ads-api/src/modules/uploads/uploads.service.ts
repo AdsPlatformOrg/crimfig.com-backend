@@ -283,7 +283,12 @@ export class UploadsService {
   /**
    * Streams a private file securely from Firebase Storage bucket
    */
-  async getMediaStream(storageKey: string, ownerId?: string, staffReview = false) {
+  async getMediaStream(
+    storageKey: string,
+    ownerId?: string,
+    staffReview = false,
+    range?: { start: number; end?: number },
+  ) {
     // Validate storageKey format to prevent directory traversal
     if (storageKey.includes('/') || storageKey.includes('\\') || storageKey.includes('..')) {
       throw new BadRequestException('Invalid media key format. Subdirectories not permitted.');
@@ -317,12 +322,30 @@ export class UploadsService {
     }
 
     const [metadata] = await fileRef.getMetadata();
-    const stream = fileRef.createReadStream();
+    const totalSize = Number(metadata.size || asset.bytes || 0);
+    let start = 0;
+    let end = Math.max(0, totalSize - 1);
+    let partial = false;
+    if (range) {
+      if (!Number.isSafeInteger(range.start) || range.start < 0 || range.start >= totalSize) {
+        return { rangeInvalid: true as const, totalSize };
+      }
+      start = range.start;
+      end = range.end !== undefined ? Math.min(range.end, totalSize - 1) : totalSize - 1;
+      if (!Number.isSafeInteger(end) || end < start) return { rangeInvalid: true as const, totalSize };
+      partial = true;
+    }
+    const stream = fileRef.createReadStream({ start, end });
 
     return {
       stream,
       contentType: (metadata.contentType as string) || 'application/octet-stream',
-      contentLength: metadata.size,
+      contentLength: end - start + 1,
+      totalSize,
+      start,
+      end,
+      partial,
+      contentRange: `bytes ${start}-${end}/${totalSize}`,
     };
   }
 

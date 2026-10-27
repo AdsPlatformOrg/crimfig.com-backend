@@ -35,7 +35,9 @@ export * from './billing_withdrawal_requests';
 
 // ─── Ads Platform ─────────────────────────────────────────────────────────────
 export * from './ads_campaigns';
+export * from './ads_creative_stacks';
 export * from './ads_creatives';
+export * from './crimfig_geo';
 export * from './ads_promoters';                // includes: adsPromoters, adsPromoterWebsites, adsPromoterApps, adsPlacements
 export * from './ads_interactions';             // includes: adsInteractions, adsPromoterEarnings, adsReelsConsents, adsEmbedRunAudits
 export * from './ads_user_table_preferences';   // includes: adsUserTablePreferences

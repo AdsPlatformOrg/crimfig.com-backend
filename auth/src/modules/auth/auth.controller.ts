@@ -1,8 +1,9 @@
 import {
-  Controller, Post, Get, Body, Query, Req, Res, HttpCode, HttpStatus,
+  Controller, Post, Get, Patch, Body, Query, Req, Res, HttpCode, HttpStatus,
   UseGuards, UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { IsOptional, IsString, MaxLength } from 'class-validator';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService, ForgotPasswordDto, ResetPasswordDto } from './auth.service';
@@ -15,6 +16,13 @@ import { config } from '../../config/config';
 import type { JwtPayload } from '../tokens/tokens.service';
 
 import { AuthStaffGrants } from '../../security/auth-staff-grants';
+
+export class UpdateAvatarDto {
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  presetId?: string | null;
+}
 
 @ApiTags('Auth')
 @UseGuards(ThrottlerGuard)
@@ -126,9 +134,25 @@ export class AuthController {
   @Get('me')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get current authenticated user' })
+  @ApiOperation({ summary: 'Get current authenticated user and avatar' })
   getMe(@CurrentUser() user: JwtPayload) {
-    return { userId: user.sub, email: user.email };
+    return this.authService.getProfile(user.sub);
+  }
+
+  @Get('avatar-presets')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List curated avatar presets and attribution' })
+  getAvatarPresets() {
+    return this.authService.avatarCatalog();
+  }
+
+  @Patch('profile/avatar')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Select or reset the current user avatar preset' })
+  updateAvatar(@CurrentUser() user: JwtPayload, @Body() dto: UpdateAvatarDto) {
+    return this.authService.updateAvatarPreset(user.sub, dto.presetId ?? null);
   }
 
   // ── Email Verification ───────────────────────────────────────────────────

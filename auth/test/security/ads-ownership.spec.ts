@@ -31,10 +31,10 @@ function database(rows: any[][]) {
 describe('Ads object ownership and workflow boundaries', () => {
   it('campaign detail always queries the authenticated owner before creatives', async () => {
     const { db, predicates } = database([[]]);
-    await expect(new CampaignsService(db, {} as any).getCampaignDetails('campaign', 'intruder')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(new CampaignsService(db, {} as any, {} as any).getCampaignDetails('campaign', 'intruder')).rejects.toBeInstanceOf(NotFoundException);
     expect(predicates[0].params).toEqual(expect.arrayContaining(['campaign', 'intruder']));
     expect(db.select).toHaveBeenCalledTimes(1);
-    await expect(new CampaignsService(db, {} as any).getCampaignDetails('campaign', '')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(new CampaignsService(db, {} as any, {} as any).getCampaignDetails('campaign', '')).rejects.toBeInstanceOf(NotFoundException);
     expect(db.select).toHaveBeenCalledTimes(1);
   });
 
@@ -55,7 +55,7 @@ describe('Ads object ownership and workflow boundaries', () => {
       ['rejected', { status: 'paused', moderationStatus: 'approved' }],
     ] as const) {
       const { db } = database([[campaign]]);
-      await expect(new CampaignsService(db, {} as any).updateStatus('campaign', 'owner', status)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(new CampaignsService(db, {} as any, {} as any).updateStatus('campaign', 'owner', status)).rejects.toBeInstanceOf(BadRequestException);
       expect(db.update).not.toHaveBeenCalled();
     }
   });
@@ -63,7 +63,7 @@ describe('Ads object ownership and workflow boundaries', () => {
   it('does not activate an approved campaign if funding fails', async () => {
     const { db } = database([[{ id: 'campaign', status: 'paused', moderationStatus: 'approved', remainingBudgetUsdCents: 500 }]]);
     const escrow = { changeCampaignStatus: jest.fn(async () => { throw new Error('Billing unavailable'); }) };
-    await expect(new CampaignsService(db, escrow as any).updateStatus('campaign', 'owner', 'active')).rejects.toThrow('Billing unavailable');
+    await expect(new CampaignsService(db, escrow as any, {} as any).updateStatus('campaign', 'owner', 'active')).rejects.toThrow('Billing unavailable');
     expect(db.update).not.toHaveBeenCalled();
   });
 

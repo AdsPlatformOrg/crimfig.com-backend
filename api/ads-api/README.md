@@ -1,4 +1,25 @@
-# Ads dashboard security rollout
+# CrimFig Ads API
+
+## Local environment
+
+Copy `api/ads-api/.env.example` to `api/ads-api/.env` and fill the server-side values.
+`dotenv` reads the file when the process runs from this package directory, for example:
+
+```powershell
+pnpm --filter @crimfig/ads-api dev
+```
+
+The `.env` file is gitignored. Put `GOOGLE_PLACES_API_KEY` and `GEOAPIFY_API_KEY` there
+(never in a frontend/`NEXT_PUBLIC_*` variable). Firebase Admin values (`GSA_*`) are required
+for real media upload/preview. `CREATIVE_VIDEO_AUTHORING_ENABLED` stays `false` until the
+PLAN-0035 Video enablement gates pass.
+
+Auth/Ads signing secrets, staff grants, and the Billing boundary are supplied by the
+host/deployment environment rather than this file.
+
+Railway/production uses service variables; do not commit a real `.env`.
+
+## Ads dashboard security rollout
 
 Ads installs a default-deny global bearer guard. Configure `JWT_ACCESS_SECRET` to match
 Auth's access-token signer. Only access JWTs with valid signatures, expiry and user identity

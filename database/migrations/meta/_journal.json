@@ -120,6 +120,20 @@
       "when": 1792749600000,
       "tag": "0017_register_dispute_schema",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793059940382,
+      "tag": "0018_plan0035_ad_stacks_geo",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793066241315,
+      "tag": "0019_user_avatar_preset",
+      "breakpoints": true
     }
   ]
 }

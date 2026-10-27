@@ -7,6 +7,7 @@ import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { DatabaseModule } from './modules/database/database.module';
 import { CampaignsModule } from './modules/campaigns/campaigns.module';
+import { LocationsModule } from './modules/locations/locations.module';
 import { PromotersModule } from './modules/promoters/promoters.module';
 import { VerificationModule } from './modules/verification/verification.module';
 import { PlacementsModule } from './modules/placements/placements.module';
@@ -29,6 +30,7 @@ import { AdvertiserMilestonesModule } from './modules/advertiser-milestones/adve
     DatabaseModule,
     DashboardAuthModule,
     CampaignsModule,
+    LocationsModule,
     PromotersModule,
     VerificationModule,
     PlacementsModule,

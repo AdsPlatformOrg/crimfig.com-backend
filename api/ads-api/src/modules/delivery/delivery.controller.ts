@@ -10,6 +10,23 @@ function extractClientIp(req: Request): string {
   return req.ip || req.socket.remoteAddress || '';
 }
 
+/**
+ * Read geography only from a header explicitly configured as trusted-edge
+ * output. Without TRUST_PROXY_GEO=true, geo-targeted ads fail closed.
+ */
+function trustedClientGeo(req: Request): { country?: string; region?: string; city?: string } | undefined {
+  if ((process.env.TRUST_PROXY_GEO || 'false').toLowerCase() !== 'true') return undefined;
+  const header = (value: string | undefined) => (value && value !== 'unknown' ? value : undefined);
+  const countryHeader = (process.env.TRUSTED_GEO_COUNTRY_HEADER || 'cf-ipcountry').toLowerCase();
+  const regionHeader = (process.env.TRUSTED_GEO_REGION_HEADER || 'cf-region-code').toLowerCase();
+  const cityHeader = (process.env.TRUSTED_GEO_CITY_HEADER || '').toLowerCase();
+  const country = header(req.headers[countryHeader] as string | undefined)?.toUpperCase();
+  const region = header(req.headers[regionHeader] as string | undefined)?.toUpperCase();
+  const city = cityHeader ? header(req.headers[cityHeader] as string | undefined) : undefined;
+  if (!country && !region && !city) return undefined;
+  return { country, region, city };
+}
+
 export class AuditPingDto {
   @IsOptional() @IsString() @MaxLength(200)
   placementToken?: string;
@@ -139,7 +156,15 @@ export class DeliveryController {
     const clientIp = req ? extractClientIp(req) : undefined;
     const userAgent = req?.headers['user-agent'];
 
-    const ad = await this.deliveryService.getAdForPlacement(token, clientIp, userAgent, domain, mode, fill === 'true');
+    const ad = await this.deliveryService.getAdForPlacement(
+      token,
+      clientIp,
+      userAgent,
+      domain,
+      mode,
+      fill === 'true',
+      req ? trustedClientGeo(req) : undefined,
+    );
     return { status: 'success', data: ad };
   }
 

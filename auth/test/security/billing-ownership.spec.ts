@@ -24,10 +24,10 @@ describe('Billing owner and internal service boundaries', () => {
     const wallet = { getBalance: jest.fn(async () => ({ usd: 0 })) };
     try {
       delete process.env.INTERNAL_ECOSYSTEM_KEY;
-      const missing = new EcosystemController(wallet as any, {} as any);
+      const missing = new EcosystemController(wallet as any, {} as any, {} as any);
       await expect(missing.getBalance('victim', 'anything')).rejects.toBeInstanceOf(UnauthorizedException);
       process.env.INTERNAL_ECOSYSTEM_KEY = 'test-only-internal-service-key';
-      const guarded = new EcosystemController(wallet as any, {} as any);
+      const guarded = new EcosystemController(wallet as any, {} as any, {} as any);
       for (const value of ['', 'wrong', 'crimfig-internal-eco-key-2026']) {
         await expect(guarded.getBalance('victim', value)).rejects.toBeInstanceOf(UnauthorizedException);
       }
