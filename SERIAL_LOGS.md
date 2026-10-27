@@ -517,3 +517,7 @@ Verification: all ten backend package builds PASS, compiled runtime smoke PASS, 
 ## ACT-20261027-016 â€” Chibi ninja avatar presets
 
 Added PLAN-0037 avatar preset storage (`avatar_preset_id`, `avatar_version`, `avatar_updated_at`) and migration 0019. Extended Auth `/me`, added authenticated preset catalog and PATCH selection/reset routes with server-side preset validation and version increments. Fresh disposable DB migration and local additive migration PASS; Auth API endpoint checks PASS (default, 12 presets, select/reset, invalid 400); Auth build and 426-test backend suite PASS. Custom upload/re-encode remains unimplemented; no production migration or deployment.
+
+## ACT-20261027-017 â€” Dev/production synchronization
+
+Committed and pushed PLAN-0035/PLAN-0037 work. Backend: `ac85e54` on dev, merged to production as `076fc07`. Frontend: `a6171c3` on dev, merged to production as `408704c`. GitHub CLI active account `jed-chela`, admin/push confirmed. Both repos clean; local and origin dev/production at 0/0 divergence; dev/production trees identical. No `.env` committed. No production migration or deployment verification.
