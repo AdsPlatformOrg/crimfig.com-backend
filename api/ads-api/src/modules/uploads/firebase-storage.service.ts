@@ -50,7 +50,7 @@ export class FirebaseStorageService implements OnModuleInit {
 
       if (!projectId || !clientEmail || !privateKey) {
         this.logger.warn(
-          'Firebase service account credentials missing in environment. File uploads will be mocked or require configuration.',
+          'Firebase service account credentials missing in environment. Media uploads are unavailable until storage is configured.',
         );
         return;
       }

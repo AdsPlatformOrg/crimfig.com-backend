@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, Inject } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, NotFoundException, ServiceUnavailableException, Inject } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -182,22 +182,19 @@ export class UploadsService {
 
     const bucket = this.firebaseStorageService.getBucket();
 
-    if (bucket) {
-      const firebaseFile = bucket.file(storageKey);
-      await firebaseFile.save(file.buffer, {
+    if (!bucket) throw new ServiceUnavailableException('Media storage is unavailable. Your file was not uploaded; please try again later.');
+    const firebaseFile = bucket.file(storageKey);
+    await firebaseFile.save(file.buffer, {
+      metadata: {
+        contentType: file.mimetype,
         metadata: {
-          contentType: file.mimetype,
-          metadata: {
-            ownerId,
-            originalName: file.originalname,
-            sha256,
-            isPrivate: 'true',
-          },
+          ownerId,
+          originalName: file.originalname,
+          sha256,
+          isPrivate: 'true',
         },
-      });
-    } else {
-      this.logger.warn(`Firebase bucket not connected; saved mock private asset record: ${storageKey}`);
-    }
+      },
+    });
 
     // Server-managed private access URL
     const cdnUrl = `/api/v1/uploads/media/${storageKey}`;
@@ -243,17 +240,14 @@ export class UploadsService {
       Date.now() + ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60 * 1000,
     ).toISOString();
 
-    if (bucket) {
-      const fileRef = bucket.file(storageKey);
-      const [signedUrl] = await fileRef.getSignedUrl({
-        action: 'write',
-        expires: Date.now() + ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60 * 1000,
-        contentType: params.contentType,
-      });
-      uploadUrl = signedUrl;
-    } else {
-      uploadUrl = `https://storage.googleapis.com/crimfig-mock/${storageKey}?mock=signed`;
-    }
+    if (!bucket) throw new ServiceUnavailableException('Media storage is unavailable. No upload URL was created; please try again later.');
+    const fileRef = bucket.file(storageKey);
+    const [signedUrl] = await fileRef.getSignedUrl({
+      action: 'write',
+      expires: Date.now() + ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60 * 1000,
+      contentType: params.contentType,
+    });
+    uploadUrl = signedUrl;
 
     const cdnUrl = `/api/v1/uploads/media/${storageKey}`;
 
@@ -361,6 +355,16 @@ export class UploadsService {
 
     if (!asset) {
       throw new NotFoundException('Media asset not found or unauthorized');
+    }
+
+    const bucket = this.firebaseStorageService.getBucket();
+    if (!bucket) throw new ServiceUnavailableException('Media storage is unavailable. Upload completion could not be verified.');
+    const object = bucket.file(asset.storageKey);
+    const [exists] = await object.exists();
+    if (!exists) throw new BadRequestException('Upload is incomplete. Upload the file before marking it complete.');
+    const [metadata] = await object.getMetadata();
+    if (Number(metadata.size) !== asset.bytes || metadata.contentType !== asset.mimeType) {
+      throw new BadRequestException('Uploaded file does not match the expected size or type. Please upload it again.');
     }
 
     const [updated] = await this.db

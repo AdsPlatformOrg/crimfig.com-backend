@@ -125,6 +125,7 @@ export class CampaignsService {
   creationCapabilities() {
     const enabled = videoAuthoringEnabled();
     return {
+      geoTargetingEnabled: process.env.GEO_TARGETING_ENABLED === 'true',
       videoAuthoringEnabled: enabled,
       allowedVideoPlacements: enabled ? ALLOWED_VIDEO_PLACEMENTS : [],
       supportedAdTypes: enabled ? [...AD_TYPES] : ['text', 'image'],
@@ -167,6 +168,7 @@ export class CampaignsService {
       if (locations && locations.length > 0) throw new BadRequestException('Global targeting cannot include locations.');
       return { mode: 'global', targets: [] };
     }
+    if (process.env.GEO_TARGETING_ENABLED !== 'true') throw new BadRequestException('Location targeting is not available yet. Select Global targeting.');
     if (!locations || locations.length === 0) throw new BadRequestException('Choose at least one location, or select Global.');
     return { mode: 'targeted', targets: await this.locations.resolveTargetsByIds(locations) };
   }
@@ -561,6 +563,9 @@ export class CampaignsService {
       .where(and(eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, advertiserId)))
       .limit(1);
     if (!preflight) throw new NotFoundException('Campaign not found or unauthorized.');
+    if (preflight.geoMode === 'targeted' && process.env.GEO_TARGETING_ENABLED !== 'true') {
+      throw new BadRequestException('Location targeting is not available yet. Change this campaign to Global before submitting.');
+    }
     if (preflight.moderationStatus !== 'draft' && preflight.moderationStatus !== 'rejected') {
       throw new BadRequestException('This campaign has already been submitted or approved.');
     }
@@ -610,6 +615,7 @@ export class CampaignsService {
           }
         }
         if (stack.geoMode === 'targeted') {
+          if (process.env.GEO_TARGETING_ENABLED !== 'true') throw new BadRequestException('Location targeting is not available yet. Change stack geography to Global or inherit the campaign.');
           const targets = await tx
             .select({ id: crimfigGeoTargets.id })
             .from(crimfigGeoTargets)

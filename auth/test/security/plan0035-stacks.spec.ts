@@ -45,7 +45,9 @@ function locationsService(): LocationsService {
 }
 
 describe('PLAN-0035 ad stacks and geography', () => {
+  beforeEach(() => { process.env.GEO_TARGETING_ENABLED = 'true'; });
   afterEach(() => {
+    delete process.env.GEO_TARGETING_ENABLED;
     delete process.env.CREATIVE_VIDEO_AUTHORING_ENABLED;
     jest.restoreAllMocks();
   });
@@ -90,6 +92,7 @@ describe('PLAN-0035 ad stacks and geography', () => {
     const service = new CampaignsService({} as any, {} as any, locationsService());
     process.env.CREATIVE_VIDEO_AUTHORING_ENABLED = 'false';
     expect(service.creationCapabilities()).toEqual({
+      geoTargetingEnabled: true,
       videoAuthoringEnabled: false,
       allowedVideoPlacements: [],
       supportedAdTypes: ['text', 'image'],
