@@ -141,6 +141,13 @@
       "when": 1793069333634,
       "tag": "0020_type_aware_creative_copy",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793304000000,
+      "tag": "0021_campaign_schedule_prepared_images",
+      "breakpoints": true
     }
   ]
 }

@@ -1,14 +1,22 @@
-import { Injectable, Logger, BadRequestException, NotFoundException, ServiceUnavailableException, Inject } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { DATABASE_TOKEN } from '../database/database.module';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '@crimfig/database/schema';
-import { adsMediaAssets } from '@crimfig/database/schema';
-import { eq, and, or } from 'drizzle-orm';
-import * as crypto from 'crypto';
-import * as path from 'path';
-import { FirebaseStorageService } from './firebase-storage.service';
-import { ADS_MEDIA_UPLOAD_SETTINGS } from '../../config/ads-settings.constants';
+import { validatePreparedImages } from "./prepared-image";
+import {
+  Injectable,
+  Logger,
+  BadRequestException,
+  NotFoundException,
+  ServiceUnavailableException,
+  Inject,
+} from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { DATABASE_TOKEN } from "../database/database.module";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import * as schema from "@crimfig/database/schema";
+import { adsMediaAssets } from "@crimfig/database/schema";
+import { eq, and, or } from "drizzle-orm";
+import * as crypto from "crypto";
+import * as path from "path";
+import { FirebaseStorageService } from "./firebase-storage.service";
+import { ADS_MEDIA_UPLOAD_SETTINGS } from "../../config/ads-settings.constants";
 
 export interface PresignRequest {
   ownerId: string;
@@ -53,8 +61,14 @@ export class UploadsService {
   /**
    * Generates a flat bucket key without subfolders using "photo-" or "file-" prefix.
    */
-  private generateStorageKey(mimeType: string, ownerId: string, ext: string, sha256: string): string {
-    const isImage = ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.images.includes(mimeType);
+  private generateStorageKey(
+    mimeType: string,
+    ownerId: string,
+    ext: string,
+    sha256: string,
+  ): string {
+    const isImage =
+      ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.images.includes(mimeType);
     const prefix = isImage
       ? ADS_MEDIA_UPLOAD_SETTINGS.storage.imagePrefix
       : ADS_MEDIA_UPLOAD_SETTINGS.storage.filePrefix;
@@ -67,30 +81,37 @@ export class UploadsService {
    * A GIF is animated if it contains more than one Graphic Control Extension block (0x21 0xF9 0x04)
    * or a Netscape Application Extension block (NETSCAPE2.0).
    */
-   private isAnimatedGif(buffer: Buffer): boolean {
-     if (!buffer || buffer.length < 14) return false;
-     // Check GIF magic header ('GIF87a' or 'GIF89a')
-     const magic = buffer.toString('ascii', 0, 6);
-     if (magic !== 'GIF87a' && magic !== 'GIF89a') return false;
+  private isAnimatedGif(buffer: Buffer): boolean {
+    if (!buffer || buffer.length < 14) return false;
+    // Check GIF magic header ('GIF87a' or 'GIF89a')
+    const magic = buffer.toString("ascii", 0, 6);
+    if (magic !== "GIF87a" && magic !== "GIF89a") return false;
 
-     let framesCount = 0;
-     for (let i = 0; i < buffer.length - 4; i++) {
-       // Look for Graphic Control Extension block: 0x21 0xF9 0x04
-       if (buffer[i] === 0x21 && buffer[i + 1] === 0xf9 && buffer[i + 2] === 0x04) {
-         framesCount++;
-         if (framesCount > 1) {
-           return true;
-         }
-       }
-     }
+    let framesCount = 0;
+    for (let i = 0; i < buffer.length - 4; i++) {
+      // Look for Graphic Control Extension block: 0x21 0xF9 0x04
+      if (
+        buffer[i] === 0x21 &&
+        buffer[i + 1] === 0xf9 &&
+        buffer[i + 2] === 0x04
+      ) {
+        framesCount++;
+        if (framesCount > 1) {
+          return true;
+        }
+      }
+    }
 
-     // Secondary check: look for Netscape application extension (looping metadata)
-     if (buffer.indexOf('NETSCAPE2.0') !== -1 || buffer.indexOf('ANIMEXTS1.0') !== -1) {
-       return true;
-     }
+    // Secondary check: look for Netscape application extension (looping metadata)
+    if (
+      buffer.indexOf("NETSCAPE2.0") !== -1 ||
+      buffer.indexOf("ANIMEXTS1.0") !== -1
+    ) {
+      return true;
+    }
 
-     return false;
-   }
+    return false;
+  }
 
   /**
    * Validates MIME type and strict file size restrictions.
@@ -101,56 +122,68 @@ export class UploadsService {
   private validateRestrictions(
     mimeType: string,
     byteLength: number,
-    options?: { buffer?: Buffer; targetSlot?: 'photo' | 'video' },
-  ): { resolvedType: 'image' | 'video'; isAnimatedGif: boolean } {
-    let isImage = ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.images.includes(mimeType);
-    let isVideo = ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.videos.includes(mimeType);
+    options?: { buffer?: Buffer; targetSlot?: "photo" | "video" },
+  ): { resolvedType: "image" | "video"; isAnimatedGif: boolean } {
+    let isImage =
+      ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.images.includes(mimeType);
+    let isVideo =
+      ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.videos.includes(mimeType);
     let isAnimated = false;
 
     if (!isImage && !isVideo) {
       throw new BadRequestException(
         `Invalid file type '${mimeType}'. Allowed formats: ` +
-          `Images (${ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.images.join(', ')}), ` +
-          `Videos (${ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.videos.join(', ')}).`,
+          `Images (${ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.images.join(", ")}), ` +
+          `Videos (${ADS_MEDIA_UPLOAD_SETTINGS.allowedMimes.videos.join(", ")}).`,
       );
     }
 
     // Inspect GIF animation if buffer is available
-    if (mimeType === 'image/gif' && options?.buffer) {
+    if (mimeType === "image/gif" && options?.buffer) {
       isAnimated = this.isAnimatedGif(options.buffer);
       if (isAnimated) {
         // Classify animated GIF as video
         isImage = false;
         isVideo = true;
 
-        if (options?.targetSlot === 'photo') {
+        if (options?.targetSlot === "photo") {
           throw new BadRequestException(
-            'Animated GIFs are classified as videos on the CrimFig Ads platform. ' +
-              'Please select the Video ad format (up to 20MB) to upload animated GIFs, or upload a static image (JPG/PNG/WEBP/AVIF/Static GIF up to 750KB).',
+            "Animated GIFs are classified as videos on the CrimFig Ads platform. " +
+              "Please select the Video ad format (up to 20MB) to upload animated GIFs, or upload a static image (JPG/PNG/WEBP/AVIF/Static GIF up to 750KB).",
           );
         }
       }
     }
 
-    if (isImage && byteLength > ADS_MEDIA_UPLOAD_SETTINGS.limits.imageMaxBytes) {
-      const maxKb = Math.round(ADS_MEDIA_UPLOAD_SETTINGS.limits.imageMaxBytes / 1024);
+    if (
+      isImage &&
+      byteLength > ADS_MEDIA_UPLOAD_SETTINGS.limits.imageMaxBytes
+    ) {
+      const maxKb = Math.round(
+        ADS_MEDIA_UPLOAD_SETTINGS.limits.imageMaxBytes / 1024,
+      );
       const actualKb = (byteLength / 1024).toFixed(1);
       throw new BadRequestException(
         `Image size ${actualKb}KB exceeds maximum limit of ${maxKb}KB (750KB). Server optimization is disabled. Please resize or compress your image locally before uploading.`,
       );
     }
 
-    if (isVideo && byteLength > ADS_MEDIA_UPLOAD_SETTINGS.limits.videoMaxBytes) {
-      const maxMb = Math.round(ADS_MEDIA_UPLOAD_SETTINGS.limits.videoMaxBytes / (1024 * 1024));
+    if (
+      isVideo &&
+      byteLength > ADS_MEDIA_UPLOAD_SETTINGS.limits.videoMaxBytes
+    ) {
+      const maxMb = Math.round(
+        ADS_MEDIA_UPLOAD_SETTINGS.limits.videoMaxBytes / (1024 * 1024),
+      );
       const actualMb = (byteLength / (1024 * 1024)).toFixed(1);
-      const label = isAnimated ? 'Animated GIF' : 'Video';
+      const label = isAnimated ? "Animated GIF" : "Video";
       throw new BadRequestException(
         `${label} size ${actualMb}MB exceeds maximum limit of ${maxMb}MB (20MB). Server optimization is disabled. Please encode or compress your media locally before uploading.`,
       );
     }
 
     return {
-      resolvedType: isVideo ? 'video' : 'image',
+      resolvedType: isVideo ? "video" : "image",
       isAnimatedGif: isAnimated,
     };
   }
@@ -163,26 +196,37 @@ export class UploadsService {
   async uploadDirect(params: DirectUploadParams) {
     const { file, ownerId } = params;
     if (!file || !file.buffer) {
-      throw new BadRequestException('No file buffer provided for upload.');
+      throw new BadRequestException("No file buffer provided for upload.");
     }
 
     // 1. Strict validation (No server-side compression) with GIF animation detection
-    const { resolvedType, isAnimatedGif } = this.validateRestrictions(file.mimetype, file.size, {
-      buffer: file.buffer,
-    });
+    const { resolvedType, isAnimatedGif } = this.validateRestrictions(
+      file.mimetype,
+      file.size,
+      {
+        buffer: file.buffer,
+      },
+    );
 
     // 2. Hash calculation and flat storage key generation
-    const sha256 = crypto.createHash('sha256').update(file.buffer).digest('hex');
-    const ext = path.extname(file.originalname).replace('.', '') || 'bin';
+    const sha256 = crypto
+      .createHash("sha256")
+      .update(file.buffer)
+      .digest("hex");
+    const ext = path.extname(file.originalname).replace(".", "") || "bin";
     // If it is an animated GIF, use the video/file prefix ("file-") instead of "photo-"
-    const prefix = resolvedType === 'video'
-      ? ADS_MEDIA_UPLOAD_SETTINGS.storage.videoPrefix
-      : ADS_MEDIA_UPLOAD_SETTINGS.storage.imagePrefix;
+    const prefix =
+      resolvedType === "video"
+        ? ADS_MEDIA_UPLOAD_SETTINGS.storage.videoPrefix
+        : ADS_MEDIA_UPLOAD_SETTINGS.storage.imagePrefix;
     const storageKey = `${prefix}${Date.now()}-${sha256.substring(0, 16)}.${ext}`;
 
     const bucket = this.firebaseStorageService.getBucket();
 
-    if (!bucket) throw new ServiceUnavailableException('Media storage is unavailable. Your file was not uploaded; please try again later.');
+    if (!bucket)
+      throw new ServiceUnavailableException(
+        "Media storage is unavailable. Your file was not uploaded; please try again later.",
+      );
     const firebaseFile = bucket.file(storageKey);
     await firebaseFile.save(file.buffer, {
       metadata: {
@@ -191,7 +235,7 @@ export class UploadsService {
           ownerId,
           originalName: file.originalname,
           sha256,
-          isPrivate: 'true',
+          isPrivate: "true",
         },
       },
     });
@@ -209,7 +253,7 @@ export class UploadsService {
         mimeType: file.mimetype,
         bytes: file.size,
         sha256,
-        status: 'ready',
+        status: "ready",
       })
       .returning();
 
@@ -226,25 +270,116 @@ export class UploadsService {
   /**
    * Generates a signed upload URL for direct client-to-bucket upload to Firebase
    */
+  async uploadPrepared(
+    ownerId: string,
+    files: Express.Multer.File[],
+    manifest: any,
+  ) {
+    let checked;
+    try {
+      checked = await validatePreparedImages(files, manifest);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+    const groupId = crypto.randomUUID();
+    const assets: Array<Awaited<ReturnType<UploadsService['uploadDirect']>> & {width:number;height:number;profile:string}> = [];
+    for (const item of checked) {
+      const uploaded = await this.uploadDirect({ ownerId, file: item.file });
+      assets.push({
+        ...uploaded,
+        width: item.width,
+        height: item.height,
+        profile: assets.length === 0 ? manifest.profile : "compact",
+      });
+    }
+    const preparation = {
+      version: 1,
+      groupId,
+      quality: 0.97,
+      layout: manifest.layout,
+      ratio: manifest.ratio,
+      crop: manifest.crop,
+      profile: manifest.profile,
+      renditions: assets.map((a) => ({
+        assetId: a.assetId,
+        url: a.cdnUrl,
+        bytes: a.bytes,
+        width: a.width,
+        height: a.height,
+        profile: a.profile,
+      })),
+    };
+    await this.db.transaction(async (tx) => {
+      for (const asset of assets)
+        await tx
+          .update(adsMediaAssets)
+          .set({ width: asset.width, height: asset.height, preparation })
+          .where(
+            and(
+              eq(adsMediaAssets.id, asset.assetId),
+              eq(adsMediaAssets.ownerId, ownerId),
+            ),
+          );
+    });
+    return { ...assets[0], preparation };
+  }
+  async readyAsset(ownerId: string, id: string) {
+    const [asset] = await this.db
+      .select()
+      .from(adsMediaAssets)
+      .where(
+        and(
+          eq(adsMediaAssets.id, id),
+          eq(adsMediaAssets.ownerId, ownerId),
+          eq(adsMediaAssets.status, "ready"),
+        ),
+      )
+      .limit(1);
+    if (!asset)
+      throw new NotFoundException(
+        "Uploaded image is unavailable. Reselect the image before submitting.",
+      );
+    return {
+      assetId: asset.id,
+      cdnUrl: asset.cdnUrl,
+      bytes: asset.bytes,
+      width: asset.width,
+      height: asset.height,
+      preparation: asset.preparation,
+      status: asset.status,
+    };
+  }
+
   async presign(params: PresignRequest) {
     // 1. Strict size and MIME restriction validation
     this.validateRestrictions(params.contentType, params.contentLength);
 
-    const sha256 = params.sha256 || crypto.randomBytes(32).toString('hex');
-    const ext = params.fileName.split('.').pop() || 'bin';
-    const storageKey = this.generateStorageKey(params.contentType, params.ownerId, ext, sha256);
+    const sha256 = params.sha256 || crypto.randomBytes(32).toString("hex");
+    const ext = params.fileName.split(".").pop() || "bin";
+    const storageKey = this.generateStorageKey(
+      params.contentType,
+      params.ownerId,
+      ext,
+      sha256,
+    );
 
     const bucket = this.firebaseStorageService.getBucket();
-    let uploadUrl = '';
+    let uploadUrl = "";
     const expiresAt = new Date(
-      Date.now() + ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60 * 1000,
+      Date.now() +
+        ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60 * 1000,
     ).toISOString();
 
-    if (!bucket) throw new ServiceUnavailableException('Media storage is unavailable. No upload URL was created; please try again later.');
+    if (!bucket)
+      throw new ServiceUnavailableException(
+        "Media storage is unavailable. No upload URL was created; please try again later.",
+      );
     const fileRef = bucket.file(storageKey);
     const [signedUrl] = await fileRef.getSignedUrl({
-      action: 'write',
-      expires: Date.now() + ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60 * 1000,
+      action: "write",
+      expires:
+        Date.now() +
+        ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60 * 1000,
       contentType: params.contentType,
     });
     uploadUrl = signedUrl;
@@ -261,7 +396,7 @@ export class UploadsService {
         mimeType: params.contentType,
         bytes: params.contentLength,
         sha256,
-        status: 'pending',
+        status: "pending",
       })
       .returning();
 
@@ -284,29 +419,57 @@ export class UploadsService {
     range?: { start: number; end?: number },
   ) {
     // Validate storageKey format to prevent directory traversal
-    if (storageKey.includes('/') || storageKey.includes('\\') || storageKey.includes('..')) {
-      throw new BadRequestException('Invalid media key format. Subdirectories not permitted.');
+    if (
+      storageKey.includes("/") ||
+      storageKey.includes("\\") ||
+      storageKey.includes("..")
+    ) {
+      throw new BadRequestException(
+        "Invalid media key format. Subdirectories not permitted.",
+      );
     }
 
-    const [asset] = await this.db.select().from(adsMediaAssets).where(and(
-      eq(adsMediaAssets.storageKey, storageKey), eq(adsMediaAssets.status, 'ready'),
-      ...(ownerId ? [eq(adsMediaAssets.ownerId, ownerId)] : []),
-    )).limit(1);
-    if (!asset) throw new NotFoundException('Media asset not found');
+    const [asset] = await this.db
+      .select()
+      .from(adsMediaAssets)
+      .where(
+        and(
+          eq(adsMediaAssets.storageKey, storageKey),
+          eq(adsMediaAssets.status, "ready"),
+          ...(ownerId ? [eq(adsMediaAssets.ownerId, ownerId)] : []),
+        ),
+      )
+      .limit(1);
+    if (!asset) throw new NotFoundException("Media asset not found");
     if (!ownerId && !staffReview) {
-      const [approved] = await this.db.select({ id: schema.adsCreatives.id }).from(schema.adsCreatives)
-        .innerJoin(schema.adsCampaigns, eq(schema.adsCreatives.campaignId, schema.adsCampaigns.id))
-        .where(and(
-          eq(schema.adsCampaigns.advertiserId, asset.ownerId),
-          eq(schema.adsCampaigns.status, 'active'), eq(schema.adsCampaigns.moderationStatus, 'approved'),
-          eq(schema.adsCreatives.status, 'active'), eq(schema.adsCreatives.reviewStatus, 'approved'),
-          or(eq(schema.adsCreatives.imageUrl, asset.cdnUrl), eq(schema.adsCreatives.videoUrl, asset.cdnUrl)),
-        )).limit(1);
-      if (!approved) throw new NotFoundException('Public media asset not found');
+      const [approved] = await this.db
+        .select({ id: schema.adsCreatives.id })
+        .from(schema.adsCreatives)
+        .innerJoin(
+          schema.adsCampaigns,
+          eq(schema.adsCreatives.campaignId, schema.adsCampaigns.id),
+        )
+        .where(
+          and(
+            eq(schema.adsCampaigns.advertiserId, asset.ownerId),
+            eq(schema.adsCampaigns.status, "active"),
+            eq(schema.adsCampaigns.moderationStatus, "approved"),
+            eq(schema.adsCreatives.status, "active"),
+            eq(schema.adsCreatives.reviewStatus, "approved"),
+            or(
+              eq(schema.adsCreatives.imageUrl, asset.cdnUrl),
+              ...((asset.preparation as any)?.renditions?.[0]?.url ? [eq(schema.adsCreatives.imageUrl,(asset.preparation as any).renditions[0].url)] : []),
+              eq(schema.adsCreatives.videoUrl, asset.cdnUrl),
+            ),
+          ),
+        )
+        .limit(1);
+      if (!approved)
+        throw new NotFoundException("Public media asset not found");
     }
     const bucket = this.firebaseStorageService.getBucket();
     if (!bucket) {
-      throw new NotFoundException('Storage bucket not initialized');
+      throw new NotFoundException("Storage bucket not initialized");
     }
 
     const fileRef = bucket.file(storageKey);
@@ -321,19 +484,28 @@ export class UploadsService {
     let end = Math.max(0, totalSize - 1);
     let partial = false;
     if (range) {
-      if (!Number.isSafeInteger(range.start) || range.start < 0 || range.start >= totalSize) {
+      if (
+        !Number.isSafeInteger(range.start) ||
+        range.start < 0 ||
+        range.start >= totalSize
+      ) {
         return { rangeInvalid: true as const, totalSize };
       }
       start = range.start;
-      end = range.end !== undefined ? Math.min(range.end, totalSize - 1) : totalSize - 1;
-      if (!Number.isSafeInteger(end) || end < start) return { rangeInvalid: true as const, totalSize };
+      end =
+        range.end !== undefined
+          ? Math.min(range.end, totalSize - 1)
+          : totalSize - 1;
+      if (!Number.isSafeInteger(end) || end < start)
+        return { rangeInvalid: true as const, totalSize };
       partial = true;
     }
     const stream = fileRef.createReadStream({ start, end });
 
     return {
       stream,
-      contentType: (metadata.contentType as string) || 'application/octet-stream',
+      contentType:
+        (metadata.contentType as string) || "application/octet-stream",
       contentLength: end - start + 1,
       totalSize,
       start,
@@ -350,27 +522,43 @@ export class UploadsService {
     const [asset] = await this.db
       .select()
       .from(adsMediaAssets)
-      .where(and(eq(adsMediaAssets.id, params.assetId), eq(adsMediaAssets.ownerId, params.ownerId)))
+      .where(
+        and(
+          eq(adsMediaAssets.id, params.assetId),
+          eq(adsMediaAssets.ownerId, params.ownerId),
+        ),
+      )
       .limit(1);
 
     if (!asset) {
-      throw new NotFoundException('Media asset not found or unauthorized');
+      throw new NotFoundException("Media asset not found or unauthorized");
     }
 
     const bucket = this.firebaseStorageService.getBucket();
-    if (!bucket) throw new ServiceUnavailableException('Media storage is unavailable. Upload completion could not be verified.');
+    if (!bucket)
+      throw new ServiceUnavailableException(
+        "Media storage is unavailable. Upload completion could not be verified.",
+      );
     const object = bucket.file(asset.storageKey);
     const [exists] = await object.exists();
-    if (!exists) throw new BadRequestException('Upload is incomplete. Upload the file before marking it complete.');
+    if (!exists)
+      throw new BadRequestException(
+        "Upload is incomplete. Upload the file before marking it complete.",
+      );
     const [metadata] = await object.getMetadata();
-    if (Number(metadata.size) !== asset.bytes || metadata.contentType !== asset.mimeType) {
-      throw new BadRequestException('Uploaded file does not match the expected size or type. Please upload it again.');
+    if (
+      Number(metadata.size) !== asset.bytes ||
+      metadata.contentType !== asset.mimeType
+    ) {
+      throw new BadRequestException(
+        "Uploaded file does not match the expected size or type. Please upload it again.",
+      );
     }
 
     const [updated] = await this.db
       .update(adsMediaAssets)
       .set({
-        status: 'ready',
+        status: "ready",
         width: params.width || asset.width,
         height: params.height || asset.height,
         durationSeconds: params.durationSeconds || asset.durationSeconds,
@@ -390,13 +578,21 @@ export class UploadsService {
     const [asset] = await this.db
       .select()
       .from(adsMediaAssets)
-      .where(and(eq(adsMediaAssets.id, assetId), eq(adsMediaAssets.ownerId, ownerId)))
+      .where(
+        and(
+          eq(adsMediaAssets.id, assetId),
+          eq(adsMediaAssets.ownerId, ownerId),
+        ),
+      )
       .limit(1);
 
     if (!asset) {
-      throw new NotFoundException('Media asset not found or unauthorized');
+      throw new NotFoundException("Media asset not found or unauthorized");
     }
 
+    const primaryUrl=(asset.preparation as any)?.renditions?.[0]?.url||asset.cdnUrl;
+    const [attached]=await this.db.select({id:schema.adsCreatives.id}).from(schema.adsCreatives).where(or(eq(schema.adsCreatives.imageUrl,primaryUrl),eq(schema.adsCreatives.videoUrl,asset.cdnUrl))).limit(1);
+    if(attached)throw new BadRequestException('This media belongs to a saved creative and cannot be deleted independently.');
     // If bucket is active, remove from Firebase storage
     try {
       const bucket = this.firebaseStorageService.getBucket();
@@ -404,13 +600,15 @@ export class UploadsService {
         await bucket.file(asset.storageKey).delete({ ignoreNotFound: true });
       }
     } catch (err: any) {
-      this.logger.warn(`Could not delete file from Firebase bucket: ${err.message}`);
+      this.logger.warn(
+        `Could not delete file from Firebase bucket: ${err.message}`,
+      );
     }
 
     const [deleted] = await this.db
       .update(adsMediaAssets)
       .set({
-        status: 'deleted',
+        status: "deleted",
         updatedAt: new Date(),
       })
       .where(eq(adsMediaAssets.id, assetId))

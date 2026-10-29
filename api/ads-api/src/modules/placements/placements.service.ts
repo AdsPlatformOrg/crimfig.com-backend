@@ -1,7 +1,13 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
-import { DATABASE_TOKEN } from '../database/database.module';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '@crimfig/database/schema';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  Logger,
+} from "@nestjs/common";
+import { DATABASE_TOKEN } from "../database/database.module";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import * as schema from "@crimfig/database/schema";
 import {
   adsPlacements,
   adsCampaigns,
@@ -9,14 +15,15 @@ import {
   adsPromoters,
   adsPromoterWebsites,
   adsPromoterApps,
-} from '@crimfig/database/schema';
-import { and, eq, desc } from 'drizzle-orm';
-import * as crypto from 'crypto';
+} from "@crimfig/database/schema";
+import { and, eq, desc } from "drizzle-orm";
+import * as crypto from "crypto";
 
 @Injectable()
 export class PlacementsService {
   private readonly logger = new Logger(PlacementsService.name);
-  private readonly hmacSecret = process.env.HMAC_SECRET || 'crimfig-ads-hmac-secret-key-2026';
+  private readonly hmacSecret =
+    process.env.HMAC_SECRET || "crimfig-ads-hmac-secret-key-2026";
 
   constructor(
     @Inject(DATABASE_TOKEN)
@@ -28,53 +35,94 @@ export class PlacementsService {
    */
   async createPlacement(params: {
     promoterId: string;
+    imageMaxBytes?: number;
     campaignId: string;
     creativeId?: string;
     websiteId?: string;
     appId?: string;
   }) {
-    const [promoter] = await this.db.select().from(adsPromoters).where(eq(adsPromoters.id, params.promoterId)).limit(1);
-    if (!promoter || !promoter.isActive || promoter.isSuspended) throw new NotFoundException('Active promoter not found');
-    if (params.websiteId && params.appId) throw new BadRequestException('Choose one website or app');
+    const [promoter] = await this.db
+      .select()
+      .from(adsPromoters)
+      .where(eq(adsPromoters.id, params.promoterId))
+      .limit(1);
+    if (!promoter || !promoter.isActive || promoter.isSuspended)
+      throw new NotFoundException("Active promoter not found");
+    if (params.websiteId && params.appId)
+      throw new BadRequestException("Choose one website or app");
     if (params.websiteId) {
-      const [site] = await this.db.select().from(adsPromoterWebsites).where(and(
-        eq(adsPromoterWebsites.id, params.websiteId), eq(adsPromoterWebsites.promoterId, params.promoterId),
-      )).limit(1);
-      if (!site || !site.isActive || site.isSuspended) throw new NotFoundException('Active website not found');
+      const [site] = await this.db
+        .select()
+        .from(adsPromoterWebsites)
+        .where(
+          and(
+            eq(adsPromoterWebsites.id, params.websiteId),
+            eq(adsPromoterWebsites.promoterId, params.promoterId),
+          ),
+        )
+        .limit(1);
+      if (!site || !site.isActive || site.isSuspended)
+        throw new NotFoundException("Active website not found");
     }
     if (params.appId) {
-      const [app] = await this.db.select().from(adsPromoterApps).where(and(
-        eq(adsPromoterApps.id, params.appId), eq(adsPromoterApps.promoterId, params.promoterId),
-      )).limit(1);
-      if (!app || !app.isActive) throw new NotFoundException('Active app not found');
+      const [app] = await this.db
+        .select()
+        .from(adsPromoterApps)
+        .where(
+          and(
+            eq(adsPromoterApps.id, params.appId),
+            eq(adsPromoterApps.promoterId, params.promoterId),
+          ),
+        )
+        .limit(1);
+      if (!app || !app.isActive)
+        throw new NotFoundException("Active app not found");
     }
     // Ownership is required for code generation; delivery separately enforces verification.
     // 1. Verify active campaign
     const [campaign] = await this.db
       .select()
       .from(adsCampaigns)
-      .where(and(eq(adsCampaigns.id, params.campaignId), eq(adsCampaigns.status, 'active'), eq(adsCampaigns.moderationStatus, 'approved')))
+      .where(
+        and(
+          eq(adsCampaigns.id, params.campaignId),
+          eq(adsCampaigns.status, "active"),
+          eq(adsCampaigns.moderationStatus, "approved"),
+        ),
+      )
       .limit(1);
 
     if (!campaign) {
-      throw new BadRequestException('Campaign not found or not currently active');
+      throw new BadRequestException(
+        "Campaign not found or not currently active",
+      );
     }
 
     // Both supplied and automatically selected creatives must belong to this approved campaign.
-    const [creative] = await this.db.select().from(adsCreatives).where(and(
-      eq(adsCreatives.campaignId, params.campaignId), eq(adsCreatives.status, 'active'),
-      eq(adsCreatives.reviewStatus, 'approved'),
-      ...(params.creativeId ? [eq(adsCreatives.id, params.creativeId)] : []),
-    )).limit(1);
-    if (!creative) throw new BadRequestException('Approved campaign creative not found');
+    const [creative] = await this.db
+      .select()
+      .from(adsCreatives)
+      .where(
+        and(
+          eq(adsCreatives.campaignId, params.campaignId),
+          eq(adsCreatives.status, "active"),
+          eq(adsCreatives.reviewStatus, "approved"),
+          ...(params.creativeId
+            ? [eq(adsCreatives.id, params.creativeId)]
+            : []),
+        ),
+      )
+      .limit(1);
+    if (!creative)
+      throw new BadRequestException("Approved campaign creative not found");
     const creativeId = creative.id;
 
     // 3. Generate secure placement token and HMAC signature
-    const placementToken = crypto.randomBytes(32).toString('hex');
+    const placementToken = crypto.randomBytes(32).toString("hex");
     const linkSignature = crypto
-      .createHmac('sha256', this.hmacSecret)
+      .createHmac("sha256", this.hmacSecret)
       .update(`${placementToken}:${params.promoterId}:${params.campaignId}`)
-      .digest('hex');
+      .digest("hex");
 
     // 4. Save placement
     const [placement] = await this.db
@@ -86,13 +134,14 @@ export class PlacementsService {
         websiteId: params.websiteId || null,
         appId: params.appId || null,
         placementToken,
+        imageMaxBytes: params.imageMaxBytes ?? 150000,
         linkSignature,
-        status: 'active',
+        status: "active",
       })
       .returning();
 
     // 5. Generate channel integration code
-    const baseUrl = process.env.ADS_PUBLIC_URL || 'https://ads.crimfig.com';
+    const baseUrl = process.env.ADS_PUBLIC_URL || "https://ads.crimfig.com";
     const embedSnippet = `<div id="cf-ad-${placementToken}" class="crimfig-ad-slot"></div>\n<script src="${baseUrl}/api/v1/delivery/embed.js" data-placement="${placementToken}" async></script>`;
     const shareLink = `${baseUrl}/api/v1/delivery/go/${placementToken}?pid=${params.promoterId}`;
 
@@ -137,7 +186,7 @@ export class PlacementsService {
       .where(eq(adsPlacements.promoterId, promoterId))
       .orderBy(desc(adsPlacements.createdAt));
 
-    const baseUrl = process.env.ADS_PUBLIC_URL || 'https://ads.crimfig.com';
+    const baseUrl = process.env.ADS_PUBLIC_URL || "https://ads.crimfig.com";
 
     return placements.map((p) => ({
       ...p,

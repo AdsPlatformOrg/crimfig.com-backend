@@ -1,3 +1,11 @@
+import { createHash } from "crypto";
+import {
+  allDay,
+  inherited,
+  legacySchedule,
+  resolvedSchedule,
+  validateSchedule,
+} from "./daily-schedule";
 import {
   BadRequestException,
   ConflictException,
@@ -5,41 +13,55 @@ import {
   Injectable,
   Logger,
   NotFoundException,
-} from '@nestjs/common';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '@crimfig/database/schema';
+} from "@nestjs/common";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import * as schema from "@crimfig/database/schema";
 import {
   adsCampaigns,
   adsCreatives,
   adsCreativeStacks,
   adsMediaAssets,
   crimfigGeoTargets,
-} from '@crimfig/database/schema';
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm';
-import { DATABASE_TOKEN } from '../database/database.module';
-import { AdsEscrowService } from '../billing/ads-escrow.service';
-import { LocationsService, ResolvedTarget } from '../locations/locations.service';
-import { LocationScope } from '../locations/location.types';
+} from "@crimfig/database/schema";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { DATABASE_TOKEN } from "../database/database.module";
+import { AdsEscrowService } from "../billing/ads-escrow.service";
+import {
+  LocationsService,
+  ResolvedTarget,
+} from "../locations/locations.service";
+import { LocationScope } from "../locations/location.types";
 
-const AD_TYPES = ['text', 'image', 'video'] as const;
-const AD_FORMATS = ['banner', 'card', 'video', 'interstitial'] as const;
-const DEVICE_CATEGORIES = ['desktop', 'mobile', 'android', 'ios', 'tablet'] as const;
-const ALLOWED_VIDEO_PLACEMENTS = ['in_content_mid', 'in_content_end', 'listing_interstitial'];
+const AD_TYPES = ["text", "image", "video"] as const;
+const AD_FORMATS = ["banner", "card", "video", "interstitial"] as const;
+const DEVICE_CATEGORIES = [
+  "desktop",
+  "mobile",
+  "android",
+  "ios",
+  "tablet",
+] as const;
+const ALLOWED_VIDEO_PLACEMENTS = [
+  "in_content_mid",
+  "in_content_end",
+  "listing_interstitial",
+];
 
 type AdType = (typeof AD_TYPES)[number];
 type AdFormat = (typeof AD_FORMATS)[number];
 
 export interface GeoSelectionInput {
-  geoMode?: 'global' | 'targeted';
+  geoMode?: "global" | "targeted";
   locations?: string[];
 }
 
 export interface StackSettingsInput {
   name?: string;
-  geoMode?: 'inherit' | 'global' | 'targeted';
+  geoMode?: "inherit" | "global" | "targeted";
   locations?: string[];
   targetDevices?: string[] | null;
   targetHours?: number[] | null;
+  schedule?: unknown;
 }
 
 export interface CreativeInput {
@@ -52,15 +74,21 @@ export interface CreativeInput {
   imageUrl?: string;
   videoUrl?: string;
   adFormat?: AdFormat;
-  mediaFormat?: 'image' | 'gif' | 'video';
+  mediaFormat?: "image" | "gif" | "video";
   mediaAssetId?: string;
 }
 
 function videoAuthoringEnabled(): boolean {
-  return (process.env.CREATIVE_VIDEO_AUTHORING_ENABLED || 'false').toLowerCase() === 'true';
+  return (
+    (process.env.CREATIVE_VIDEO_AUTHORING_ENABLED || "false").toLowerCase() ===
+    "true"
+  );
 }
 
-function parseJsonArray<T>(value: string | null | undefined, fallback: T[]): T[] {
+function parseJsonArray<T>(
+  value: string | null | undefined,
+  fallback: T[],
+): T[] {
   if (!value) return fallback;
   try {
     const parsed = JSON.parse(value);
@@ -70,43 +98,65 @@ function parseJsonArray<T>(value: string | null | undefined, fallback: T[]): T[]
   }
 }
 
-function cleanString(value: string | undefined, field: string, max: number, required = false): string {
-  const text = (value || '').trim();
+function cleanString(
+  value: string | undefined,
+  field: string,
+  max: number,
+  required = false,
+): string {
+  const text = (value || "").trim();
   if (required && !text) throw new BadRequestException(`${field} is required.`);
-  if (text.length > max) throw new BadRequestException(`${field} must be ${max} characters or fewer.`);
+  if (text.length > max)
+    throw new BadRequestException(
+      `${field} must be ${max} characters or fewer.`,
+    );
   return text;
 }
 
 function assertHttpUrl(value: string): string {
-  const text = cleanString(value, 'Destination URL', 2048, true);
+  const text = cleanString(value, "Destination URL", 2048, true);
   let url: URL;
   try {
     url = new URL(text);
   } catch {
-    throw new BadRequestException('Enter a valid destination URL including https://.');
+    throw new BadRequestException(
+      "Enter a valid destination URL including https://.",
+    );
   }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
-    throw new BadRequestException('Destination URL must be an http(s) address without embedded credentials.');
+  if (
+    !["http:", "https:"].includes(url.protocol) ||
+    url.username ||
+    url.password
+  ) {
+    throw new BadRequestException(
+      "Destination URL must be an http(s) address without embedded credentials.",
+    );
   }
   return url.toString();
 }
 
 function cleanDevices(value: string[] | null | undefined): string[] | null {
   if (value === null || value === undefined) return null;
-  if (!Array.isArray(value) || value.length === 0) throw new BadRequestException('Choose at least one device category.');
+  if (Array.isArray(value) && value.length === 0) return null;
+  if (!Array.isArray(value))
+    throw new BadRequestException("Choose at least one device category.");
   const unique = [...new Set(value)];
   if (unique.some((device) => !DEVICE_CATEGORIES.includes(device as any))) {
-    throw new BadRequestException('Unsupported device category.');
+    throw new BadRequestException("Unsupported device category.");
   }
   return unique;
 }
 
 function cleanHours(value: number[] | null | undefined): number[] | null {
   if (value === null || value === undefined) return null;
-  if (!Array.isArray(value) || value.length === 0) throw new BadRequestException('Choose at least one daypart hour.');
+  if (Array.isArray(value) && value.length === 0) return null;
+  if (!Array.isArray(value))
+    throw new BadRequestException("Choose at least one daypart hour.");
   const unique = [...new Set(value)];
   if (unique.some((hour) => !Number.isInteger(hour) || hour < 0 || hour > 23)) {
-    throw new BadRequestException('Daypart hours must be integers from 0 to 23.');
+    throw new BadRequestException(
+      "Daypart hours must be integers from 0 to 23.",
+    );
   }
   return unique.sort((a, b) => a - b);
 }
@@ -125,52 +175,91 @@ export class CampaignsService {
   creationCapabilities() {
     const enabled = videoAuthoringEnabled();
     return {
-      geoTargetingEnabled: process.env.GEO_TARGETING_ENABLED === 'true',
+      geoTargetingEnabled: process.env.GEO_TARGETING_ENABLED === "true",
       videoAuthoringEnabled: enabled,
       allowedVideoPlacements: enabled ? ALLOWED_VIDEO_PLACEMENTS : [],
-      supportedAdTypes: enabled ? [...AD_TYPES] : ['text', 'image'],
+      scheduleVersion: 1,
+      imagePreparationEnabled: true,
+      supportedAdTypes: enabled ? [...AD_TYPES] : ["text", "image"],
     };
   }
 
   // ── Ownership and editability ───────────────────────────────────────────────
 
-  private async campaignForUpdate(tx: any, campaignId: string, advertiserId: string) {
+  private async campaignForUpdate(
+    tx: any,
+    campaignId: string,
+    advertiserId: string,
+  ) {
     const [campaign] = await tx
       .select()
       .from(adsCampaigns)
-      .where(and(eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, advertiserId)))
-      .for('update')
+      .where(
+        and(
+          eq(adsCampaigns.id, campaignId),
+          eq(adsCampaigns.advertiserId, advertiserId),
+        ),
+      )
+      .for("update")
       .limit(1);
-    if (!campaign) throw new NotFoundException('Campaign not found or unauthorized.');
+    if (!campaign)
+      throw new NotFoundException("Campaign not found or unauthorized.");
     return campaign;
   }
 
   private assertEditable(campaign: typeof adsCampaigns.$inferSelect) {
-    if (campaign.status === 'trash' || campaign.status === 'cancelled' || campaign.status === 'completed') {
-      throw new BadRequestException('This campaign can no longer be edited.');
+    if (
+      campaign.status === "trash" ||
+      campaign.status === "cancelled" ||
+      campaign.status === "completed"
+    ) {
+      throw new BadRequestException("This campaign can no longer be edited.");
     }
-    if (campaign.moderationStatus !== 'draft' && campaign.moderationStatus !== 'rejected') {
-      throw new BadRequestException('This campaign is in review or approved; creative changes are closed.');
+    if (
+      campaign.moderationStatus !== "draft" &&
+      campaign.moderationStatus !== "rejected"
+    ) {
+      throw new BadRequestException(
+        "This campaign is in review or approved; creative changes are closed.",
+      );
     }
   }
 
   private async resolveGeo(
-    geoMode: 'global' | 'targeted' | 'inherit',
+    geoMode: "global" | "targeted" | "inherit",
     locations: string[] | undefined,
-    fallbackMode: 'global' | 'targeted' = 'global',
-  ): Promise<{ mode: 'global' | 'targeted' | 'inherit'; targets: ResolvedTarget[] }> {
-    if (geoMode === 'inherit') {
-      if (locations && locations.length > 0) throw new BadRequestException('Inherited targeting cannot carry its own locations.');
-      return { mode: 'inherit', targets: [] };
+    fallbackMode: "global" | "targeted" = "global",
+  ): Promise<{
+    mode: "global" | "targeted" | "inherit";
+    targets: ResolvedTarget[];
+  }> {
+    if (geoMode === "inherit") {
+      if (locations && locations.length > 0)
+        throw new BadRequestException(
+          "Inherited targeting cannot carry its own locations.",
+        );
+      return { mode: "inherit", targets: [] };
     }
     const mode = geoMode || fallbackMode;
-    if (mode === 'global') {
-      if (locations && locations.length > 0) throw new BadRequestException('Global targeting cannot include locations.');
-      return { mode: 'global', targets: [] };
+    if (mode === "global") {
+      if (locations && locations.length > 0)
+        throw new BadRequestException(
+          "Global targeting cannot include locations.",
+        );
+      return { mode: "global", targets: [] };
     }
-    if (process.env.GEO_TARGETING_ENABLED !== 'true') throw new BadRequestException('Location targeting is not available yet. Select Global targeting.');
-    if (!locations || locations.length === 0) throw new BadRequestException('Choose at least one location, or select Global.');
-    return { mode: 'targeted', targets: await this.locations.resolveTargetsByIds(locations) };
+    if (process.env.GEO_TARGETING_ENABLED !== "true")
+      throw new BadRequestException(
+        "Location targeting is not available yet. Select Global targeting.",
+      );
+    if (!locations || locations.length === 0)
+      throw new BadRequestException(
+        "Choose at least one location, or select Global.",
+      );
+    return {
+      mode: "targeted",
+      targets: await this.locations.resolveTargetsByIds(locations),
+    };
   }
 
   // ── Campaign creation ───────────────────────────────────────────────────────
@@ -185,74 +274,163 @@ export class CampaignsService {
     dailyBudgetUsd?: number;
     costPerImpressionCents?: number;
     costPerClickCents?: number;
-    pricingModel?: 'cpm' | 'cpc';
+    pricingModel?: "cpm" | "cpc";
     format?: AdFormat;
     targetCountries?: string[];
     targetStates?: string[];
     targetDevices?: string[];
     targetHours?: number[];
+    schedule?: unknown;
+    requestId?: string;
     frequencyCapPerDay?: number;
-    geoMode?: 'global' | 'targeted';
+    geoMode?: "global" | "targeted";
     locations?: string[];
     startsAt?: Date;
     endsAt?: Date;
   }) {
-    const title = cleanString(params.title, 'Campaign title', 255, true);
-    if (params.budgetUsd < 5) throw new BadRequestException('Minimum campaign budget is $5.00 USD.');
+    const title = cleanString(params.title, "Campaign title", 255, true);
+    if (params.budgetUsd < 5)
+      throw new BadRequestException("Minimum campaign budget is $5.00 USD.");
     if (!Number.isFinite(params.budgetUsd) || params.budgetUsd > 100_000_000) {
-      throw new BadRequestException('Campaign budget is out of range.');
+      throw new BadRequestException("Campaign budget is out of range.");
     }
     const cpmBid = params.costPerImpressionCents ?? 50;
     const cpcBid = params.costPerClickCents ?? 10;
     if (!Number.isSafeInteger(cpmBid) || cpmBid < 50 || cpmBid > 2147483647) {
-      throw new BadRequestException('Minimum CPM bid is 50 integer USD cents ($0.50 per 1,000 viewable impressions).');
+      throw new BadRequestException(
+        "Minimum CPM bid is 50 integer USD cents ($0.50 per 1,000 viewable impressions).",
+      );
     }
     if (!Number.isSafeInteger(cpcBid) || cpcBid < 10 || cpcBid > 2147483647) {
-      throw new BadRequestException('Minimum CPC bid is 10 integer USD cents ($0.10 per click).');
+      throw new BadRequestException(
+        "Minimum CPC bid is 10 integer USD cents ($0.10 per click).",
+      );
     }
     const budgetCents = Math.round(params.budgetUsd * 100);
-    const dailyBudgetCents = params.dailyBudgetUsd ? Math.round(params.dailyBudgetUsd * 100) : null;
-    if (dailyBudgetCents !== null && (dailyBudgetCents < 100 || dailyBudgetCents > budgetCents)) {
-      throw new BadRequestException('Daily budget cannot exceed the total budget and must be at least $1.00.');
+    const dailyBudgetCents = params.dailyBudgetUsd
+      ? Math.round(params.dailyBudgetUsd * 100)
+      : null;
+    if (
+      dailyBudgetCents !== null &&
+      (dailyBudgetCents < 100 || dailyBudgetCents > budgetCents)
+    ) {
+      throw new BadRequestException(
+        "Daily budget cannot exceed the total budget and must be at least $1.00.",
+      );
     }
-    const hourlyPacingCents = dailyBudgetCents ? Math.ceil(dailyBudgetCents / 24) : null;
+    const hourlyPacingCents = dailyBudgetCents
+      ? Math.ceil(dailyBudgetCents / 24)
+      : null;
     const devices = cleanDevices(params.targetDevices);
+    if (params.schedule !== undefined && params.targetHours !== undefined)
+      throw new BadRequestException("Send schedule or targetHours, not both.");
     const hours = cleanHours(params.targetHours);
+    let schedule;
+    try {
+      schedule =
+        params.schedule === undefined
+          ? legacySchedule(hours)
+          : validateSchedule(params.schedule);
+    } catch (e) {
+      throw new BadRequestException((e as Error).message);
+    }
+    const fingerprint = createHash("sha256")
+      .update(JSON.stringify({ ...params, requestId: undefined, schedule }))
+      .digest("hex");
+    if (params.requestId) {
+      const existing = await this.findCreationRequest(
+        params.advertiserId,
+        params.requestId,
+      );
+      if (existing) {
+        if (existing.creationFingerprint !== fingerprint)
+          throw new ConflictException(
+            "This request ID belongs to different campaign details.",
+          );
+        return existing;
+      }
+    }
+
     const legacyCountryLocations = (params.targetCountries || [])
       .filter((code) => /^[A-Za-z]{2}$/.test(code))
       .map((code) => `country:${code.toUpperCase()}`);
-    const geoLocations = params.locations?.length ? params.locations : legacyCountryLocations;
+    const geoLocations = params.locations?.length
+      ? params.locations
+      : legacyCountryLocations;
     const geo = await this.resolveGeo(
-      params.geoMode || (geoLocations.length ? 'targeted' : 'global'),
+      params.geoMode || (geoLocations.length ? "targeted" : "global"),
       geoLocations,
     );
 
     const created = await this.db.transaction(async (tx) => {
+      if (params.requestId) {
+        await tx.execute(
+          sql`SELECT pg_advisory_xact_lock(hashtext(${params.advertiserId + params.requestId}))`,
+        );
+        const [existing] = await tx
+          .select()
+          .from(adsCampaigns)
+          .where(
+            and(
+              eq(adsCampaigns.advertiserId, params.advertiserId),
+              eq(adsCampaigns.creationRequestId, params.requestId),
+            ),
+          )
+          .limit(1);
+        if (existing) {
+          if (existing.creationFingerprint !== fingerprint)
+            throw new ConflictException("Request details changed.");
+          const [stack] = await tx
+            .select()
+            .from(adsCreativeStacks)
+            .where(eq(adsCreativeStacks.campaignId, existing.id))
+            .orderBy(asc(adsCreativeStacks.position))
+            .limit(1);
+          return { campaign: existing, stack, reused: true };
+        }
+      }
       const [campaign] = await tx
         .insert(adsCampaigns)
         .values({
           advertiserId: params.advertiserId,
+          creationRequestId: params.requestId,
+          creationFingerprint: fingerprint,
+          schedule,
           title,
           description: params.description?.trim() || null,
           category: params.category?.trim() || null,
-          channels: params.channels ? JSON.stringify([...new Set(params.channels)]) : null,
+          channels: params.channels
+            ? JSON.stringify([...new Set(params.channels)])
+            : null,
           budgetUsdCents: budgetCents,
           dailyBudgetUsdCents: dailyBudgetCents,
           hourlyPacingUsdCents: hourlyPacingCents,
           remainingBudgetUsdCents: budgetCents,
           pricingVersion: 2,
-          pricingModel: params.pricingModel || 'cpm',
+          pricingModel: params.pricingModel || "cpm",
           costPerImpressionUsdCents: cpmBid,
           costPerClickUsdCents: cpcBid,
-          format: params.format || 'card',
-          status: 'draft',
-          moderationStatus: 'draft',
-          targetCountries: geo.mode === 'targeted' ? JSON.stringify([...new Set(geo.targets.flatMap((t) => t.resolvedCountries))]) : null,
-          targetStates: geo.mode === 'targeted' ? JSON.stringify([...new Set(geo.targets.flatMap((t) => t.resolvedSubdivisions))]) : null,
+          format: params.format || "card",
+          status: "draft",
+          moderationStatus: "draft",
+          targetCountries:
+            geo.mode === "targeted"
+              ? JSON.stringify([
+                  ...new Set(geo.targets.flatMap((t) => t.resolvedCountries)),
+                ])
+              : null,
+          targetStates:
+            geo.mode === "targeted"
+              ? JSON.stringify([
+                  ...new Set(
+                    geo.targets.flatMap((t) => t.resolvedSubdivisions),
+                  ),
+                ])
+              : null,
           targetDevices: devices ? JSON.stringify(devices) : null,
           targetHours: hours ? JSON.stringify(hours) : null,
           frequencyCapPerDay: params.frequencyCapPerDay ?? 5,
-          geoMode: geo.mode === 'targeted' ? 'targeted' : 'global',
+          geoMode: geo.mode === "targeted" ? "targeted" : "global",
           startsAt: params.startsAt || new Date(),
           endsAt: params.endsAt,
         })
@@ -260,15 +438,27 @@ export class CampaignsService {
 
       const [stack] = await tx
         .insert(adsCreativeStacks)
-        .values({ campaignId: campaign.id, name: 'Ad Stack #1', position: 1 })
+        .values({
+          campaignId: campaign.id,
+          name: "Ad Stack #1",
+          position: 1,
+          schedule: inherited(),
+        })
         .returning();
 
-      if (geo.mode === 'targeted') {
-        await this.locations.replaceTargets(tx, 'campaign', campaign.id, geo.targets);
+      if (geo.mode === "targeted") {
+        await this.locations.replaceTargets(
+          tx,
+          "campaign",
+          campaign.id,
+          geo.targets,
+        );
       }
       return { campaign, stack };
     });
 
+    if ((created as any).reused)
+      return { ...created.campaign, defaultStackId: created.stack?.id };
     try {
       await this.escrowService.lockCampaignBudget({
         campaignId: created.campaign.id,
@@ -277,7 +467,9 @@ export class CampaignsService {
         campaignTitle: title,
       });
     } catch (err: any) {
-      this.logger.warn(`Campaign ${created.campaign.id} created; escrow lock deferred: ${err.message}`);
+      this.logger.warn(
+        `Campaign ${created.campaign.id} created; escrow lock deferred: ${err.message}`,
+      );
     }
 
     return { ...created.campaign, defaultStackId: created.stack.id };
@@ -285,12 +477,39 @@ export class CampaignsService {
 
   // ── Stacks ──────────────────────────────────────────────────────────────────
 
+  async findCreationRequest(advertiserId: string, requestId: string) {
+    const [campaign] = await this.db
+      .select()
+      .from(adsCampaigns)
+      .where(
+        and(
+          eq(adsCampaigns.advertiserId, advertiserId),
+          eq(adsCampaigns.creationRequestId, requestId),
+        ),
+      )
+      .limit(1);
+    if (!campaign) return null;
+    const [stack] = await this.db
+      .select()
+      .from(adsCreativeStacks)
+      .where(eq(adsCreativeStacks.campaignId, campaign.id))
+      .orderBy(asc(adsCreativeStacks.position))
+      .limit(1);
+    return { ...campaign, defaultStackId: stack?.id };
+  }
+
   async createStack(campaignId: string, advertiserId: string, name?: string) {
     return this.db.transaction(async (tx) => {
-      const campaign = await this.campaignForUpdate(tx, campaignId, advertiserId);
+      const campaign = await this.campaignForUpdate(
+        tx,
+        campaignId,
+        advertiserId,
+      );
       this.assertEditable(campaign);
       const [row] = await tx
-        .select({ max: sql<number>`coalesce(max(${adsCreativeStacks.position}), 0)` })
+        .select({
+          max: sql<number>`coalesce(max(${adsCreativeStacks.position}), 0)`,
+        })
         .from(adsCreativeStacks)
         .where(eq(adsCreativeStacks.campaignId, campaignId));
       const position = Number(row?.max || 0) + 1;
@@ -298,7 +517,13 @@ export class CampaignsService {
         .insert(adsCreativeStacks)
         .values({
           campaignId,
-          name: cleanString(name || `Ad Stack #${position}`, 'Stack name', 100, true),
+          schedule: inherited(),
+          name: cleanString(
+            name || `Ad Stack #${position}`,
+            "Stack name",
+            100,
+            true,
+          ),
           position,
         })
         .returning();
@@ -306,55 +531,114 @@ export class CampaignsService {
     });
   }
 
-  async updateStack(campaignId: string, stackId: string, advertiserId: string, input: StackSettingsInput) {
+  async updateStack(
+    campaignId: string,
+    stackId: string,
+    advertiserId: string,
+    input: StackSettingsInput,
+  ) {
     return this.db.transaction(async (tx) => {
-      const campaign = await this.campaignForUpdate(tx, campaignId, advertiserId);
+      const campaign = await this.campaignForUpdate(
+        tx,
+        campaignId,
+        advertiserId,
+      );
       this.assertEditable(campaign);
       const [stack] = await tx
         .select()
         .from(adsCreativeStacks)
-        .where(and(eq(adsCreativeStacks.id, stackId), eq(adsCreativeStacks.campaignId, campaignId)))
+        .where(
+          and(
+            eq(adsCreativeStacks.id, stackId),
+            eq(adsCreativeStacks.campaignId, campaignId),
+          ),
+        )
         .limit(1);
-      if (!stack) throw new NotFoundException('Ad stack not found.');
+      if (!stack) throw new NotFoundException("Ad stack not found.");
 
-      const update: Partial<typeof adsCreativeStacks.$inferInsert> = { updatedAt: new Date() };
-      if (input.name !== undefined) update.name = cleanString(input.name, 'Stack name', 100, true);
+      const update: Partial<typeof adsCreativeStacks.$inferInsert> = {
+        updatedAt: new Date(),
+      };
+      if (input.name !== undefined)
+        update.name = cleanString(input.name, "Stack name", 100, true);
       if (input.targetDevices !== undefined) {
         const devices = cleanDevices(input.targetDevices);
         update.targetDevices = devices ? JSON.stringify(devices) : null;
       }
+      if (input.schedule !== undefined && input.targetHours !== undefined)
+        throw new BadRequestException(
+          "Send schedule or targetHours, not both.",
+        );
+      if (input.schedule !== undefined) {
+        try {
+          update.schedule = validateSchedule(input.schedule, true);
+        } catch (e) {
+          throw new BadRequestException((e as Error).message);
+        }
+      }
       if (input.targetHours !== undefined) {
+        if (stack.schedule !== null && stack.schedule !== undefined)
+          throw new ConflictException(
+            "Use schedule to edit a minute schedule; legacy hours cannot erase it.",
+          );
         const hours = cleanHours(input.targetHours);
         update.targetHours = hours ? JSON.stringify(hours) : null;
       }
       if (input.geoMode !== undefined) {
-        const geo = await this.resolveGeo(input.geoMode, input.locations, 'global');
+        const geo = await this.resolveGeo(
+          input.geoMode,
+          input.locations,
+          "global",
+        );
         update.geoMode = geo.mode;
-        await this.locations.replaceTargets(tx, 'stack', stack.id, geo.targets);
+        await this.locations.replaceTargets(tx, "stack", stack.id, geo.targets);
       } else if (input.locations !== undefined) {
-        throw new BadRequestException('Choose inherit, global, or targeted before changing stack locations.');
+        throw new BadRequestException(
+          "Choose inherit, global, or targeted before changing stack locations.",
+        );
       }
-      const [updated] = await tx.update(adsCreativeStacks).set(update).where(eq(adsCreativeStacks.id, stack.id)).returning();
+      const [updated] = await tx
+        .update(adsCreativeStacks)
+        .set(update)
+        .where(eq(adsCreativeStacks.id, stack.id))
+        .returning();
       return updated;
     });
   }
 
   async deleteStack(campaignId: string, stackId: string, advertiserId: string) {
     return this.db.transaction(async (tx) => {
-      const campaign = await this.campaignForUpdate(tx, campaignId, advertiserId);
+      const campaign = await this.campaignForUpdate(
+        tx,
+        campaignId,
+        advertiserId,
+      );
       this.assertEditable(campaign);
       const stacks = await tx
         .select()
         .from(adsCreativeStacks)
         .where(eq(adsCreativeStacks.campaignId, campaignId))
         .orderBy(asc(adsCreativeStacks.position));
-      if (stacks.length <= 1) throw new BadRequestException('The last ad stack cannot be removed.');
+      if (stacks.length <= 1)
+        throw new BadRequestException("The last ad stack cannot be removed.");
       const stack = stacks.find((s) => s.id === stackId);
-      if (!stack) throw new NotFoundException('Ad stack not found.');
-      if (stack.position === 1) throw new BadRequestException('The default ad stack cannot be removed.');
+      if (!stack) throw new NotFoundException("Ad stack not found.");
+      if (stack.position === 1)
+        throw new BadRequestException(
+          "The default ad stack cannot be removed.",
+        );
       await tx.delete(adsCreatives).where(eq(adsCreatives.adStackId, stack.id));
-      await tx.delete(crimfigGeoTargets).where(and(eq(crimfigGeoTargets.ownerType, 'stack'), eq(crimfigGeoTargets.ownerId, stack.id)));
-      await tx.delete(adsCreativeStacks).where(eq(adsCreativeStacks.id, stack.id));
+      await tx
+        .delete(crimfigGeoTargets)
+        .where(
+          and(
+            eq(crimfigGeoTargets.ownerType, "stack"),
+            eq(crimfigGeoTargets.ownerId, stack.id),
+          ),
+        );
+      await tx
+        .delete(adsCreativeStacks)
+        .where(eq(adsCreativeStacks.id, stack.id));
       return { deleted: true };
     });
   }
@@ -376,51 +660,82 @@ export class CampaignsService {
     videoUrl: string | null;
     posterUrl: string | null;
     mediaAssetId: string | null;
-    mediaFormat: 'image' | 'gif' | 'video';
+    mediaFormat: "image" | "gif" | "video";
+    width?: number | null;
+    height?: number | null;
   }> {
     const destinationUrl = assertHttpUrl(input.destinationUrl);
-    const adFormat = (input.adFormat || 'card') as AdFormat;
-    if (!AD_FORMATS.includes(adFormat)) throw new BadRequestException('Unsupported display format.');
+    const adFormat = (input.adFormat || "card") as AdFormat;
+    if (!AD_FORMATS.includes(adFormat))
+      throw new BadRequestException("Unsupported display format.");
 
     let adType = input.adType;
     if (!adType) {
-      adType = input.videoUrl ? 'video' : input.imageUrl ? 'image' : 'text';
+      adType = input.videoUrl ? "video" : input.imageUrl ? "image" : "text";
     }
-    if (!AD_TYPES.includes(adType)) throw new BadRequestException('Unsupported ad type.');
-    if (adType === 'video' && !videoAuthoringEnabled()) {
-      throw new BadRequestException('Video authoring is not available yet.');
+    if (!AD_TYPES.includes(adType))
+      throw new BadRequestException("Unsupported ad type.");
+    if (adType === "video" && !videoAuthoringEnabled()) {
+      throw new BadRequestException("Video authoring is not available yet.");
     }
 
     // Image/video artwork may contain the entire advertising message. Text ads are
     // the only type that must carry a discrete headline.
-    const headline = input.headline?.trim() ? cleanString(input.headline, 'Headline', 100) : null;
-    if (adType === 'text' && !headline) {
-      throw new BadRequestException('A headline is required for text ads.');
+    const headline = input.headline?.trim()
+      ? cleanString(input.headline, "Headline", 100)
+      : null;
+    if (adType === "text" && !headline) {
+      throw new BadRequestException("A headline is required for text ads.");
     }
-    const bodyText = input.bodyText?.trim() ? cleanString(input.bodyText, 'Body text', 2000) : null;
-    const configuredCta = input.ctaText?.trim() ? cleanString(input.ctaText, 'Call to action', 50) : null;
-    const ctaText = adType === 'text' ? configuredCta || 'Learn More' : configuredCta;
+    const bodyText = input.bodyText?.trim()
+      ? cleanString(input.bodyText, "Body text", 2000)
+      : null;
+    const configuredCta = input.ctaText?.trim()
+      ? cleanString(input.ctaText, "Call to action", 50)
+      : null;
+    const ctaText =
+      adType === "text" ? configuredCta || "Learn More" : configuredCta;
 
     let asset: typeof adsMediaAssets.$inferSelect | undefined;
     if (input.mediaAssetId) {
       [asset] = await tx
         .select()
         .from(adsMediaAssets)
-        .where(and(eq(adsMediaAssets.id, input.mediaAssetId), eq(adsMediaAssets.ownerId, advertiserId), eq(adsMediaAssets.status, 'ready')))
+        .where(
+          and(
+            eq(adsMediaAssets.id, input.mediaAssetId),
+            eq(adsMediaAssets.ownerId, advertiserId),
+            eq(adsMediaAssets.status, "ready"),
+          ),
+        )
         .limit(1);
-      if (!asset) throw new BadRequestException('The selected media asset is not owned by this advertiser or is not ready.');
+      if (!asset)
+        throw new BadRequestException(
+          "The selected media asset is not owned by this advertiser or is not ready.",
+        );
     } else {
-      const candidate = adType === 'video' ? input.videoUrl : adType === 'image' ? input.imageUrl : undefined;
+      const candidate =
+        adType === "video"
+          ? input.videoUrl
+          : adType === "image"
+            ? input.imageUrl
+            : undefined;
       if (candidate) {
         [asset] = await tx
           .select()
           .from(adsMediaAssets)
-          .where(and(eq(adsMediaAssets.cdnUrl, candidate), eq(adsMediaAssets.ownerId, advertiserId), eq(adsMediaAssets.status, 'ready')))
+          .where(
+            and(
+              eq(adsMediaAssets.cdnUrl, candidate),
+              eq(adsMediaAssets.ownerId, advertiserId),
+              eq(adsMediaAssets.status, "ready"),
+            ),
+          )
           .limit(1);
       }
     }
 
-    if (adType === 'text') {
+    if (adType === "text") {
       return {
         adType,
         headline,
@@ -432,15 +747,30 @@ export class CampaignsService {
         videoUrl: null,
         posterUrl: null,
         mediaAssetId: null,
-        mediaFormat: 'image',
+        mediaFormat: "image",
       };
     }
-    if (!asset) throw new BadRequestException(`A validated ${adType} asset is required.`);
-    if (adType === 'image' && !asset.mimeType.startsWith('image/')) {
-      throw new BadRequestException('The selected asset is not an image.');
+    if (!asset)
+      throw new BadRequestException(`A validated ${adType} asset is required.`);
+    if (adType === "image" && asset.bytes > 200000)
+      throw new BadRequestException(
+        "Prepare this image to a delivered size of at most 200 KB.",
+      );
+    if (
+      adType === "image" &&
+      asset.preparation &&
+      (asset.preparation as any).layout !== adFormat
+    )
+      throw new BadRequestException(
+        "Prepared image layout does not match this creative.",
+      );
+    if (adType === "image" && !asset.mimeType.startsWith("image/")) {
+      throw new BadRequestException("The selected asset is not an image.");
     }
-    if (adType === 'video' && !asset.mimeType.startsWith('video/')) {
-      throw new BadRequestException('The selected asset is not a supported video.');
+    if (adType === "video" && !asset.mimeType.startsWith("video/")) {
+      throw new BadRequestException(
+        "The selected asset is not a supported video.",
+      );
     }
     return {
       adType,
@@ -449,23 +779,43 @@ export class CampaignsService {
       ctaText,
       destinationUrl,
       adFormat,
-      imageUrl: adType === 'image' ? asset.cdnUrl : null,
-      videoUrl: adType === 'video' ? asset.cdnUrl : null,
+      imageUrl: adType === "image" ? asset.cdnUrl : null,
+      videoUrl: adType === "video" ? asset.cdnUrl : null,
       posterUrl: asset.thumbnailUrl || null,
       mediaAssetId: asset.id,
-      mediaFormat: asset.mimeType === 'image/gif' ? 'gif' : adType === 'video' ? 'video' : 'image',
+      width: asset.width,
+      height: asset.height,
+      mediaFormat:
+        asset.mimeType === "image/gif"
+          ? "gif"
+          : adType === "video"
+            ? "video"
+            : "image",
     };
   }
 
-  async addCreative(campaignId: string, advertiserId: string, input: CreativeInput) {
+  async addCreative(
+    campaignId: string,
+    advertiserId: string,
+    input: CreativeInput,
+  ) {
     return this.db.transaction(async (tx) => {
-      const campaign = await this.campaignForUpdate(tx, campaignId, advertiserId);
+      const campaign = await this.campaignForUpdate(
+        tx,
+        campaignId,
+        advertiserId,
+      );
       this.assertEditable(campaign);
       const [stack] = input.adStackId
         ? await tx
             .select()
             .from(adsCreativeStacks)
-            .where(and(eq(adsCreativeStacks.id, input.adStackId), eq(adsCreativeStacks.campaignId, campaignId)))
+            .where(
+              and(
+                eq(adsCreativeStacks.id, input.adStackId),
+                eq(adsCreativeStacks.campaignId, campaignId),
+              ),
+            )
             .limit(1)
         : await tx
             .select()
@@ -473,7 +823,10 @@ export class CampaignsService {
             .where(eq(adsCreativeStacks.campaignId, campaignId))
             .orderBy(asc(adsCreativeStacks.position))
             .limit(1);
-      if (!stack) throw new BadRequestException('Choose a valid ad stack for this campaign.');
+      if (!stack)
+        throw new BadRequestException(
+          "Choose a valid ad stack for this campaign.",
+        );
       const validated = await this.validateCreative(tx, advertiserId, input);
       const [creative] = await tx
         .insert(adsCreatives)
@@ -491,24 +844,40 @@ export class CampaignsService {
           mediaAssetId: validated.mediaAssetId,
           adFormat: validated.adFormat,
           mediaFormat: validated.mediaFormat,
-          reviewStatus: 'pending',
-          status: 'active',
+          reviewStatus: "pending",
+          status: "active",
         })
         .returning();
       return creative;
     });
   }
 
-  async replaceCreative(creativeId: string, advertiserId: string, input: Partial<CreativeInput>) {
+  async replaceCreative(
+    creativeId: string,
+    advertiserId: string,
+    input: Partial<CreativeInput>,
+  ) {
     return this.db.transaction(async (tx) => {
       const [existing] = await tx
         .select({ creative: adsCreatives, campaign: adsCampaigns })
         .from(adsCreatives)
         .innerJoin(adsCampaigns, eq(adsCreatives.campaignId, adsCampaigns.id))
-        .where(and(eq(adsCreatives.id, creativeId), eq(adsCampaigns.advertiserId, advertiserId)))
+        .where(
+          and(
+            eq(adsCreatives.id, creativeId),
+            eq(adsCampaigns.advertiserId, advertiserId),
+          ),
+        )
         .limit(1);
-      if (!existing) throw new NotFoundException('Creative asset not found or unauthorized.');
-      const campaign = await this.campaignForUpdate(tx, existing.campaign.id, advertiserId);
+      if (!existing)
+        throw new NotFoundException(
+          "Creative asset not found or unauthorized.",
+        );
+      const campaign = await this.campaignForUpdate(
+        tx,
+        existing.campaign.id,
+        advertiserId,
+      );
       this.assertEditable(campaign);
 
       const merged: CreativeInput = {
@@ -517,13 +886,25 @@ export class CampaignsService {
         headline: input.headline ?? existing.creative.headline,
         bodyText: input.bodyText ?? existing.creative.bodyText ?? undefined,
         ctaText: input.ctaText ?? existing.creative.ctaText,
-        destinationUrl: input.destinationUrl ?? existing.creative.destinationUrl,
-        imageUrl: input.imageUrl !== undefined ? input.imageUrl : existing.creative.imageUrl ?? undefined,
-        videoUrl: input.videoUrl !== undefined ? input.videoUrl : existing.creative.videoUrl ?? undefined,
+        destinationUrl:
+          input.destinationUrl ?? existing.creative.destinationUrl,
+        imageUrl:
+          input.imageUrl !== undefined
+            ? input.imageUrl
+            : (existing.creative.imageUrl ?? undefined),
+        videoUrl:
+          input.videoUrl !== undefined
+            ? input.videoUrl
+            : (existing.creative.videoUrl ?? undefined),
         adFormat: (input.adFormat || existing.creative.adFormat) as AdFormat,
         mediaAssetId: input.mediaAssetId,
       };
-      if (merged.adType === 'text' && !input.mediaAssetId && input.imageUrl === undefined && input.videoUrl === undefined) {
+      if (
+        merged.adType === "text" &&
+        !input.mediaAssetId &&
+        input.imageUrl === undefined &&
+        input.videoUrl === undefined
+      ) {
         merged.imageUrl = undefined;
         merged.videoUrl = undefined;
       }
@@ -543,7 +924,7 @@ export class CampaignsService {
           mediaAssetId: validated.mediaAssetId,
           adFormat: validated.adFormat,
           mediaFormat: validated.mediaFormat,
-          reviewStatus: 'pending',
+          reviewStatus: "pending",
           rejectionReason: null,
           reviewedAt: null,
           updatedAt: new Date(),
@@ -560,18 +941,37 @@ export class CampaignsService {
     const [preflight] = await this.db
       .select()
       .from(adsCampaigns)
-      .where(and(eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, advertiserId)))
+      .where(
+        and(
+          eq(adsCampaigns.id, campaignId),
+          eq(adsCampaigns.advertiserId, advertiserId),
+        ),
+      )
       .limit(1);
-    if (!preflight) throw new NotFoundException('Campaign not found or unauthorized.');
-    if (preflight.geoMode === 'targeted' && process.env.GEO_TARGETING_ENABLED !== 'true') {
-      throw new BadRequestException('Location targeting is not available yet. Change this campaign to Global before submitting.');
+    if (!preflight)
+      throw new NotFoundException("Campaign not found or unauthorized.");
+    if (
+      preflight.geoMode === "targeted" &&
+      process.env.GEO_TARGETING_ENABLED !== "true"
+    ) {
+      throw new BadRequestException(
+        "Location targeting is not available yet. Change this campaign to Global before submitting.",
+      );
     }
-    if (preflight.moderationStatus !== 'draft' && preflight.moderationStatus !== 'rejected') {
-      throw new BadRequestException('This campaign has already been submitted or approved.');
+    if (
+      preflight.moderationStatus !== "draft" &&
+      preflight.moderationStatus !== "rejected"
+    ) {
+      throw new BadRequestException(
+        "This campaign has already been submitted or approved.",
+      );
     }
 
-    const escrow = await this.escrowService.getCampaignEscrow(campaignId, advertiserId);
-    if (!escrow || escrow.status !== 'active') {
+    const escrow = await this.escrowService.getCampaignEscrow(
+      campaignId,
+      advertiserId,
+    );
+    if (!escrow || escrow.status !== "active") {
       await this.escrowService.lockCampaignBudget({
         campaignId,
         userId: advertiserId,
@@ -581,60 +981,133 @@ export class CampaignsService {
     }
 
     return this.db.transaction(async (tx) => {
-      const campaign = await this.campaignForUpdate(tx, campaignId, advertiserId);
-      if (campaign.moderationStatus !== 'draft' && campaign.moderationStatus !== 'rejected') {
-        throw new ConflictException('This campaign was already submitted by another request.');
+      const campaign = await this.campaignForUpdate(
+        tx,
+        campaignId,
+        advertiserId,
+      );
+      if (
+        campaign.moderationStatus !== "draft" &&
+        campaign.moderationStatus !== "rejected"
+      ) {
+        throw new ConflictException(
+          "This campaign was already submitted by another request.",
+        );
       }
       const stacks = await tx
         .select()
         .from(adsCreativeStacks)
         .where(eq(adsCreativeStacks.campaignId, campaignId))
         .orderBy(asc(adsCreativeStacks.position));
-      if (stacks.length === 0) throw new BadRequestException('Add at least one ad stack before submitting.');
-      const creatives = await tx.select().from(adsCreatives).where(eq(adsCreatives.campaignId, campaignId));
       for (const stack of stacks) {
-        const stackCreatives = creatives.filter((c) => c.adStackId === stack.id);
-        if (stackCreatives.length === 0) throw new BadRequestException(`${stack.name} needs at least one complete ad.`);
+        try {
+          resolvedSchedule(
+            campaign.schedule,
+            stack.schedule,
+            campaign.targetHours,
+            stack.targetHours,
+          );
+        } catch (e) {
+          throw new BadRequestException((e as Error).message);
+        }
+      }
+      if (stacks.length === 0)
+        throw new BadRequestException(
+          "Add at least one ad stack before submitting.",
+        );
+      const creatives = await tx
+        .select()
+        .from(adsCreatives)
+        .where(eq(adsCreatives.campaignId, campaignId));
+      for (const stack of stacks) {
+        const stackCreatives = creatives.filter(
+          (c) => c.adStackId === stack.id,
+        );
+        if (stackCreatives.length === 0)
+          throw new BadRequestException(
+            `${stack.name} needs at least one complete ad.`,
+          );
         for (const creative of stackCreatives) {
-          if (!creative.headline?.trim() || !creative.destinationUrl?.trim()) {
-            throw new BadRequestException(`${stack.name} has an ad with missing headline or destination.`);
+          if (
+            (creative.adType === "text" && !creative.headline?.trim()) ||
+            !creative.destinationUrl?.trim()
+          ) {
+            throw new BadRequestException(
+              `${stack.name} has an ad with missing headline or destination.`,
+            );
           }
-          if (creative.adType === 'image' && !creative.imageUrl) {
-            throw new BadRequestException(`${stack.name} has an image ad without an image asset.`);
+          if (creative.adType === "image" && !creative.imageUrl) {
+            throw new BadRequestException(
+              `${stack.name} has an image ad without an image asset.`,
+            );
           }
-          if (creative.adType === 'video' && !creative.videoUrl) {
-            throw new BadRequestException(`${stack.name} has a video ad without a video asset.`);
+          if (creative.adType === "video" && !creative.videoUrl) {
+            throw new BadRequestException(
+              `${stack.name} has a video ad without a video asset.`,
+            );
           }
           if (creative.mediaAssetId) {
             const [asset] = await tx
               .select({ id: adsMediaAssets.id })
               .from(adsMediaAssets)
-              .where(and(eq(adsMediaAssets.id, creative.mediaAssetId), eq(adsMediaAssets.ownerId, advertiserId), eq(adsMediaAssets.status, 'ready')))
+              .where(
+                and(
+                  eq(adsMediaAssets.id, creative.mediaAssetId),
+                  eq(adsMediaAssets.ownerId, advertiserId),
+                  eq(adsMediaAssets.status, "ready"),
+                ),
+              )
               .limit(1);
-            if (!asset) throw new BadRequestException(`${stack.name} has an ad whose media asset is unavailable.`);
+            if (!asset)
+              throw new BadRequestException(
+                `${stack.name} has an ad whose media asset is unavailable.`,
+              );
           }
         }
-        if (stack.geoMode === 'targeted') {
-          if (process.env.GEO_TARGETING_ENABLED !== 'true') throw new BadRequestException('Location targeting is not available yet. Change stack geography to Global or inherit the campaign.');
+        if (stack.geoMode === "targeted") {
+          if (process.env.GEO_TARGETING_ENABLED !== "true")
+            throw new BadRequestException(
+              "Location targeting is not available yet. Change stack geography to Global or inherit the campaign.",
+            );
           const targets = await tx
             .select({ id: crimfigGeoTargets.id })
             .from(crimfigGeoTargets)
-            .where(and(eq(crimfigGeoTargets.ownerType, 'stack'), eq(crimfigGeoTargets.ownerId, stack.id)))
+            .where(
+              and(
+                eq(crimfigGeoTargets.ownerType, "stack"),
+                eq(crimfigGeoTargets.ownerId, stack.id),
+              ),
+            )
             .limit(1);
-          if (targets.length === 0) throw new BadRequestException(`${stack.name} has targeted geography but no locations.`);
+          if (targets.length === 0)
+            throw new BadRequestException(
+              `${stack.name} has targeted geography but no locations.`,
+            );
         }
       }
-      if (campaign.geoMode === 'targeted') {
+      if (campaign.geoMode === "targeted") {
         const targets = await tx
           .select({ id: crimfigGeoTargets.id })
           .from(crimfigGeoTargets)
-          .where(and(eq(crimfigGeoTargets.ownerType, 'campaign'), eq(crimfigGeoTargets.ownerId, campaign.id)))
+          .where(
+            and(
+              eq(crimfigGeoTargets.ownerType, "campaign"),
+              eq(crimfigGeoTargets.ownerId, campaign.id),
+            ),
+          )
           .limit(1);
-        if (targets.length === 0) throw new BadRequestException('Choose at least one campaign location, or select Global.');
+        if (targets.length === 0)
+          throw new BadRequestException(
+            "Choose at least one campaign location, or select Global.",
+          );
       }
       const [updated] = await tx
         .update(adsCampaigns)
-        .set({ status: 'paused', moderationStatus: 'pending_primary_review', updatedAt: new Date() })
+        .set({
+          status: "paused",
+          moderationStatus: "pending_primary_review",
+          updatedAt: new Date(),
+        })
         .where(eq(adsCampaigns.id, campaignId))
         .returning();
       return updated;
@@ -645,7 +1118,8 @@ export class CampaignsService {
 
   async getAdvertiserCampaigns(advertiserId: string, status?: string) {
     const conditions = [eq(adsCampaigns.advertiserId, advertiserId)];
-    if (status && status !== 'all') conditions.push(eq(adsCampaigns.status, status as any));
+    if (status && status !== "all")
+      conditions.push(eq(adsCampaigns.status, status as any));
     const campaigns = await this.db
       .select()
       .from(adsCampaigns)
@@ -654,44 +1128,73 @@ export class CampaignsService {
     return campaigns.map((c) => ({
       ...c,
       budgetUsd: c.budgetUsdCents / 100,
-      dailyBudgetUsd: c.dailyBudgetUsdCents ? c.dailyBudgetUsdCents / 100 : null,
+      dailyBudgetUsd: c.dailyBudgetUsdCents
+        ? c.dailyBudgetUsdCents / 100
+        : null,
       remainingBudgetUsd: c.remainingBudgetUsdCents / 100,
       spentUsd: (c.budgetUsdCents - c.remainingBudgetUsdCents) / 100,
     }));
   }
 
   async getCampaignDetails(campaignId: string, advertiserId: string) {
-    if (!advertiserId) throw new NotFoundException('Campaign not found.');
+    if (!advertiserId) throw new NotFoundException("Campaign not found.");
     const [campaign] = await this.db
       .select()
       .from(adsCampaigns)
-      .where(and(eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, advertiserId)))
+      .where(
+        and(
+          eq(adsCampaigns.id, campaignId),
+          eq(adsCampaigns.advertiserId, advertiserId),
+        ),
+      )
       .limit(1);
-    if (!campaign) throw new NotFoundException('Campaign not found.');
+    if (!campaign) throw new NotFoundException("Campaign not found.");
 
     const [stacks, creatives, targets] = await Promise.all([
-      this.db.select().from(adsCreativeStacks).where(eq(adsCreativeStacks.campaignId, campaignId)).orderBy(asc(adsCreativeStacks.position)),
-      this.db.select().from(adsCreatives).where(eq(adsCreatives.campaignId, campaignId)).orderBy(asc(adsCreatives.createdAt)),
-      this.db.select().from(crimfigGeoTargets).where(
-        and(
-          eq(crimfigGeoTargets.ownerType, 'campaign'),
-          eq(crimfigGeoTargets.ownerId, campaignId),
+      this.db
+        .select()
+        .from(adsCreativeStacks)
+        .where(eq(adsCreativeStacks.campaignId, campaignId))
+        .orderBy(asc(adsCreativeStacks.position)),
+      this.db
+        .select()
+        .from(adsCreatives)
+        .where(eq(adsCreatives.campaignId, campaignId))
+        .orderBy(asc(adsCreatives.createdAt)),
+      this.db
+        .select()
+        .from(crimfigGeoTargets)
+        .where(
+          and(
+            eq(crimfigGeoTargets.ownerType, "campaign"),
+            eq(crimfigGeoTargets.ownerId, campaignId),
+          ),
         ),
-      ),
     ]);
     const stackTargets = stacks.length
-      ? await this.db.select().from(crimfigGeoTargets).where(
-          and(eq(crimfigGeoTargets.ownerType, 'stack'), inArray(crimfigGeoTargets.ownerId, stacks.map((s) => s.id))),
-        )
+      ? await this.db
+          .select()
+          .from(crimfigGeoTargets)
+          .where(
+            and(
+              eq(crimfigGeoTargets.ownerType, "stack"),
+              inArray(
+                crimfigGeoTargets.ownerId,
+                stacks.map((s) => s.id),
+              ),
+            ),
+          )
       : [];
     const allTargets = [...targets, ...stackTargets];
-    const places = await this.locations.getPlacesByIds([...new Set(allTargets.map((t) => t.placeId))]);
+    const places = await this.locations.getPlacesByIds([
+      ...new Set(allTargets.map((t) => t.placeId)),
+    ]);
     const placeById = new Map(places.map((p) => [p.id, p]));
 
     const mapLocations = (ownerTargets: typeof allTargets) =>
       ownerTargets.map((target) => ({
         id: target.placeId,
-        scope: target.scope as Exclude<LocationScope, 'global'>,
+        scope: target.scope as Exclude<LocationScope, "global">,
         name: placeById.get(target.placeId)?.name || target.placeId,
         resolvedCountries: parseJsonArray(target.resolvedCountries, []),
         resolvedSubdivisions: parseJsonArray(target.resolvedSubdivisions, []),
@@ -702,7 +1205,7 @@ export class CampaignsService {
     const campaignHours = parseJsonArray<number>(campaign.targetHours, []);
     const stackViews = stacks.map((stack) => {
       const ownTargets = stackTargets.filter((t) => t.ownerId === stack.id);
-      const inherited = stack.geoMode === 'inherit';
+      const inherited = stack.geoMode === "inherit";
       return {
         ...stack,
         creatives: creatives.filter((c) => c.adStackId === stack.id),
@@ -711,12 +1214,25 @@ export class CampaignsService {
           locations: mapLocations(ownTargets),
           targetDevices: parseJsonArray<string>(stack.targetDevices, []),
           targetHours: parseJsonArray<number>(stack.targetHours, []),
+          schedule: stack.schedule ?? legacySchedule(stack.targetHours, true),
         },
         effectiveSettings: {
           geoMode: inherited ? campaign.geoMode : stack.geoMode,
-          locations: inherited ? mapLocations(targets) : mapLocations(ownTargets),
-          targetDevices: stack.targetDevices ? parseJsonArray<string>(stack.targetDevices, []) : campaignDevices,
-          targetHours: stack.targetHours ? parseJsonArray<number>(stack.targetHours, []) : campaignHours,
+          locations: inherited
+            ? mapLocations(targets)
+            : mapLocations(ownTargets),
+          targetDevices: stack.targetDevices
+            ? parseJsonArray<string>(stack.targetDevices, [])
+            : campaignDevices,
+          targetHours: stack.targetHours
+            ? parseJsonArray<number>(stack.targetHours, [])
+            : campaignHours,
+          schedule: resolvedSchedule(
+            campaign.schedule,
+            stack.schedule,
+            campaign.targetHours,
+            stack.targetHours,
+          ),
           frequencyCapPerDay: campaign.frequencyCapPerDay,
           budgetUsdCents: campaign.budgetUsdCents,
           costPerImpressionUsdCents: campaign.costPerImpressionUsdCents,
@@ -729,12 +1245,16 @@ export class CampaignsService {
     return {
       ...campaign,
       budgetUsd: campaign.budgetUsdCents / 100,
-      dailyBudgetUsd: campaign.dailyBudgetUsdCents ? campaign.dailyBudgetUsdCents / 100 : null,
+      dailyBudgetUsd: campaign.dailyBudgetUsdCents
+        ? campaign.dailyBudgetUsdCents / 100
+        : null,
       remainingBudgetUsd: campaign.remainingBudgetUsdCents / 100,
-      spentUsd: (campaign.budgetUsdCents - campaign.remainingBudgetUsdCents) / 100,
+      spentUsd:
+        (campaign.budgetUsdCents - campaign.remainingBudgetUsdCents) / 100,
       geoLocations: mapLocations(targets),
       targetDevices: campaignDevices,
       targetHours: campaignHours,
+      schedule: campaign.schedule ?? legacySchedule(campaign.targetHours),
       adStacks: stackViews,
       creatives,
     };
@@ -751,7 +1271,7 @@ export class CampaignsService {
         createdAt: adsCampaigns.createdAt,
       })
       .from(adsCampaigns)
-      .where(eq(adsCampaigns.status, 'active'))
+      .where(eq(adsCampaigns.status, "active"))
       .orderBy(desc(adsCampaigns.createdAt));
     return activeCampaigns
       .filter((c) => !category || c.category === category)
@@ -769,21 +1289,44 @@ export class CampaignsService {
   async updateStatus(
     campaignId: string,
     advertiserId: string,
-    status: 'active' | 'paused' | 'under_review' | 'draft' | 'rejected' | 'suspended' | 'trash',
+    status:
+      | "active"
+      | "paused"
+      | "under_review"
+      | "draft"
+      | "rejected"
+      | "suspended"
+      | "trash",
   ) {
     const [campaign] = await this.db
       .select()
       .from(adsCampaigns)
-      .where(and(eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, advertiserId)))
+      .where(
+        and(
+          eq(adsCampaigns.id, campaignId),
+          eq(adsCampaigns.advertiserId, advertiserId),
+        ),
+      )
       .limit(1);
-    if (!campaign) throw new NotFoundException('Campaign not found.');
-    if (!['active', 'paused', 'trash'].includes(status)) {
-      throw new BadRequestException('Use the review workflow for moderation states.');
+    if (!campaign) throw new NotFoundException("Campaign not found.");
+    if (!["active", "paused", "trash"].includes(status)) {
+      throw new BadRequestException(
+        "Use the review workflow for moderation states.",
+      );
     }
-    if (campaign.status === 'suspended') throw new BadRequestException('A suspended campaign requires staff review.');
-    if (status === 'active' && campaign.moderationStatus !== 'approved') {
-      throw new BadRequestException('Campaign must have completed moderation before activation.');
+    if (campaign.status === "suspended")
+      throw new BadRequestException(
+        "A suspended campaign requires staff review.",
+      );
+    if (status === "active" && campaign.moderationStatus !== "approved") {
+      throw new BadRequestException(
+        "Campaign must have completed moderation before activation.",
+      );
     }
-    return this.escrowService.changeCampaignStatus(campaignId, advertiserId, status as 'active' | 'paused' | 'trash');
+    return this.escrowService.changeCampaignStatus(
+      campaignId,
+      advertiserId,
+      status as "active" | "paused" | "trash",
+    );
   }
 }

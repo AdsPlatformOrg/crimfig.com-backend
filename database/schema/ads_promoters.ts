@@ -1,7 +1,18 @@
-import { pgTable, uuid, varchar, text, boolean, smallint, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
-import { users } from './users';
-import { adsCampaigns } from './ads_campaigns';
-import { adsCreatives } from './ads_creatives';
+import {
+  integer,
+  pgTable,
+  uuid,
+  varchar,
+  text,
+  boolean,
+  smallint,
+  timestamp,
+  pgEnum,
+  index,
+} from "drizzle-orm/pg-core";
+import { users } from "./users";
+import { adsCampaigns } from "./ads_campaigns";
+import { adsCreatives } from "./ads_creatives";
 
 /**
  * ads_promoters
@@ -13,33 +24,40 @@ import { adsCreatives } from './ads_creatives';
  *   INDIVIDUAL  → share links via ads_placements
  *   MOBILE_APP  → ads_promoter_apps
  */
-export const promoterTypeEnum = pgEnum('ads_promoter_type', [
-  'WEBSITE',
-  'INDIVIDUAL',
-  'MOBILE_APP',
+export const promoterTypeEnum = pgEnum("ads_promoter_type", [
+  "WEBSITE",
+  "INDIVIDUAL",
+  "MOBILE_APP",
 ]);
 
 export const adsPromoters = pgTable(
-  'ads_promoters',
+  "ads_promoters",
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id').notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
-    type: promoterTypeEnum('type').notNull(),
-    displayName: varchar('display_name', { length: 100 }),
-    bio: text('bio'),
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .unique()
+      .references(() => users.id, { onDelete: "cascade" }),
+    type: promoterTypeEnum("type").notNull(),
+    displayName: varchar("display_name", { length: 100 }),
+    bio: text("bio"),
     // JSON array of category names allowed by this promoter
-    allowedCategories: text('allowed_categories'),
-    trustScore: smallint('trust_score').notNull().default(70),
-    isSuspended: boolean('is_suspended').notNull().default(false),
-    suspensionReason: text('suspension_reason'),
-    isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    allowedCategories: text("allowed_categories"),
+    trustScore: smallint("trust_score").notNull().default(70),
+    isSuspended: boolean("is_suspended").notNull().default(false),
+    suspensionReason: text("suspension_reason"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
-    index('ads_promoters_user_id_idx').on(t.userId),
-    index('ads_promoters_type_idx').on(t.type),
-    index('ads_promoters_trust_score_idx').on(t.trustScore),
+    index("ads_promoters_user_id_idx").on(t.userId),
+    index("ads_promoters_type_idx").on(t.type),
+    index("ads_promoters_trust_score_idx").on(t.trustScore),
   ],
 );
 
@@ -57,55 +75,73 @@ export const adsPromoters = pgTable(
  * embed_ping_last_at: Updated each time the embed.js fires an embed_ping
  * event from this site — used to detect inactive/removed embeds.
  */
-export const verificationStatusEnum = pgEnum('ads_verification_status', [
-  'pending',
-  'verified',
-  'failed',
-  'revoked',
+export const verificationStatusEnum = pgEnum("ads_verification_status", [
+  "pending",
+  "verified",
+  "failed",
+  "revoked",
 ]);
 
-export const verificationMethodEnum = pgEnum('ads_verification_method', [
-  'dns_txt',
-  'html_file_and_meta_tag',
+export const verificationMethodEnum = pgEnum("ads_verification_method", [
+  "dns_txt",
+  "html_file_and_meta_tag",
 ]);
 
 export const adsPromoterWebsites = pgTable(
-  'ads_promoter_websites',
+  "ads_promoter_websites",
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    promoterId: uuid('promoter_id').notNull().references(() => adsPromoters.id, { onDelete: 'cascade' }),
-    url: text('url').notNull(),
-    domain: varchar('domain', { length: 255 }).notNull(),
-    verificationToken: varchar('verification_token', { length: 100 }).notNull(),
-    verificationMethod: verificationMethodEnum('verification_method').notNull(),
-    verificationStatus: verificationStatusEnum('verification_status').notNull().default('pending'),
-    verifiedAt: timestamp('verified_at', { withTimezone: true }),
-    lastVerificationAttemptAt: timestamp('last_verification_attempt_at', { withTimezone: true }),
-    verificationErrorMessage: text('verification_error_message'),
-    embedPingLastAt: timestamp('embed_ping_last_at', { withTimezone: true }),
+    id: uuid("id").primaryKey().defaultRandom(),
+    promoterId: uuid("promoter_id")
+      .notNull()
+      .references(() => adsPromoters.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    domain: varchar("domain", { length: 255 }).notNull(),
+    verificationToken: varchar("verification_token", { length: 100 }).notNull(),
+    verificationMethod: verificationMethodEnum("verification_method").notNull(),
+    verificationStatus: verificationStatusEnum("verification_status")
+      .notNull()
+      .default("pending"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    lastVerificationAttemptAt: timestamp("last_verification_attempt_at", {
+      withTimezone: true,
+    }),
+    verificationErrorMessage: text("verification_error_message"),
+    embedPingLastAt: timestamp("embed_ping_last_at", { withTimezone: true }),
     // Category overrides specific to this website (JSON string, fallback to promoter default)
-    allowedCategories: text('allowed_categories'),
-    trustScore: smallint('trust_score').notNull().default(70),
-    isSuspended: boolean('is_suspended').notNull().default(false),
-    suspensionReason: text('suspension_reason'),
-    verificationFailures: smallint('verification_failures').notNull().default(0),
+    allowedCategories: text("allowed_categories"),
+    trustScore: smallint("trust_score").notNull().default(70),
+    isSuspended: boolean("is_suspended").notNull().default(false),
+    suspensionReason: text("suspension_reason"),
+    verificationFailures: smallint("verification_failures")
+      .notNull()
+      .default(0),
 
     // AdStation Configuration (PLAN-0018)
     // Global CrimFig network ad delivery preference: 'high' | 'medium' | 'low'
-    deliveryPreference: varchar('delivery_preference', { length: 20 }).notNull().default('medium'),
+    deliveryPreference: varchar("delivery_preference", { length: 20 })
+      .notNull()
+      .default("medium"),
     // Consideration slot status (required for AdStation access)
-    considerationSlotActive: boolean('consideration_slot_active').notNull().default(false),
-    considerationSlotVerifiedAt: timestamp('consideration_slot_verified_at', { withTimezone: true }),
+    considerationSlotActive: boolean("consideration_slot_active")
+      .notNull()
+      .default(false),
+    considerationSlotVerifiedAt: timestamp("consideration_slot_verified_at", {
+      withTimezone: true,
+    }),
 
-    isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
-    index('ads_promoter_websites_promoter_id_idx').on(t.promoterId),
-    index('ads_promoter_websites_domain_idx').on(t.domain),
-    index('ads_promoter_websites_status_idx').on(t.verificationStatus),
-    index('ads_promoter_websites_trust_score_idx').on(t.trustScore),
+    index("ads_promoter_websites_promoter_id_idx").on(t.promoterId),
+    index("ads_promoter_websites_domain_idx").on(t.domain),
+    index("ads_promoter_websites_status_idx").on(t.verificationStatus),
+    index("ads_promoter_websites_trust_score_idx").on(t.trustScore),
   ],
 );
 
@@ -114,28 +150,38 @@ export const adsPromoterWebsites = pgTable(
  *
  * Mobile app registered by a MOBILE_APP-type promoter.
  */
-export const appPlatformEnum = pgEnum('ads_app_platform', ['ios', 'android', 'both']);
+export const appPlatformEnum = pgEnum("ads_app_platform", [
+  "ios",
+  "android",
+  "both",
+]);
 
 export const adsPromoterApps = pgTable(
-  'ads_promoter_apps',
+  "ads_promoter_apps",
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    promoterId: uuid('promoter_id').notNull().references(() => adsPromoters.id, { onDelete: 'cascade' }),
-    appName: varchar('app_name', { length: 100 }).notNull(),
-    bundleId: varchar('bundle_id', { length: 255 }).notNull(),
-    platform: appPlatformEnum('platform').notNull(),
-    storeUrl: text('store_url'),
-    verificationStatus: verificationStatusEnum('verification_status').notNull().default('pending'),
-    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    id: uuid("id").primaryKey().defaultRandom(),
+    promoterId: uuid("promoter_id")
+      .notNull()
+      .references(() => adsPromoters.id, { onDelete: "cascade" }),
+    appName: varchar("app_name", { length: 100 }).notNull(),
+    bundleId: varchar("bundle_id", { length: 255 }).notNull(),
+    platform: appPlatformEnum("platform").notNull(),
+    storeUrl: text("store_url"),
+    verificationStatus: verificationStatusEnum("verification_status")
+      .notNull()
+      .default("pending"),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
     // Category overrides specific to this mobile app
-    allowedCategories: text('allowed_categories'),
-    isActive: boolean('is_active').notNull().default(true),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    allowedCategories: text("allowed_categories"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
-  (t) => [
-    index('ads_promoter_apps_promoter_id_idx').on(t.promoterId),
-  ],
+  (t) => [index("ads_promoter_apps_promoter_id_idx").on(t.promoterId)],
 );
 
 /**
@@ -148,43 +194,60 @@ export const adsPromoterApps = pgTable(
  * Share link structure:
  *   https://go.crimfig.com/ad/{placement_token}?pid={promoter_id}&cid={campaign_id}&crid={creative_id}&...
  */
-export const placementStatusEnum = pgEnum('ads_placement_status', [
-  'active',
-  'paused',
-  'completed',
-  'rejected',
+export const placementStatusEnum = pgEnum("ads_placement_status", [
+  "active",
+  "paused",
+  "completed",
+  "rejected",
 ]);
 
 export const adsPlacements = pgTable(
-  'ads_placements',
+  "ads_placements",
   {
-    id: uuid('id').primaryKey().defaultRandom(),
-    campaignId: uuid('campaign_id').notNull().references(() => adsCampaigns.id, { onDelete: 'cascade' }),
-    creativeId: uuid('creative_id').notNull().references(() => adsCreatives.id, { onDelete: 'cascade' }),
-    promoterId: uuid('promoter_id').notNull().references(() => adsPromoters.id, { onDelete: 'cascade' }),
+    imageMaxBytes: integer("image_max_bytes").notNull().default(150000),
+    id: uuid("id").primaryKey().defaultRandom(),
+    campaignId: uuid("campaign_id")
+      .notNull()
+      .references(() => adsCampaigns.id, { onDelete: "cascade" }),
+    creativeId: uuid("creative_id")
+      .notNull()
+      .references(() => adsCreatives.id, { onDelete: "cascade" }),
+    promoterId: uuid("promoter_id")
+      .notNull()
+      .references(() => adsPromoters.id, { onDelete: "cascade" }),
 
     // Nullable — set for WEBSITE placements
-    websiteId: uuid('website_id').references(() => adsPromoterWebsites.id, { onDelete: 'set null' }),
+    websiteId: uuid("website_id").references(() => adsPromoterWebsites.id, {
+      onDelete: "set null",
+    }),
 
     // Nullable — set for MOBILE_APP placements
-    appId: uuid('app_id').references(() => adsPromoterApps.id, { onDelete: 'set null' }),
+    appId: uuid("app_id").references(() => adsPromoterApps.id, {
+      onDelete: "set null",
+    }),
 
-    status: placementStatusEnum('status').notNull().default('active'),
+    status: placementStatusEnum("status").notNull().default("active"),
 
     // Unique token used in embed code and share links for tracking
-    placementToken: varchar('placement_token', { length: 64 }).notNull().unique(),
+    placementToken: varchar("placement_token", { length: 64 })
+      .notNull()
+      .unique(),
 
     // HMAC signature for share link validation (prevents token forgery)
-    linkSignature: varchar('link_signature', { length: 128 }),
+    linkSignature: varchar("link_signature", { length: 128 }),
 
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
   },
   (t) => [
-    index('ads_placements_campaign_id_idx').on(t.campaignId),
-    index('ads_placements_promoter_id_idx').on(t.promoterId),
-    index('ads_placements_token_idx').on(t.placementToken),
-    index('ads_placements_status_idx').on(t.status),
+    index("ads_placements_campaign_id_idx").on(t.campaignId),
+    index("ads_placements_promoter_id_idx").on(t.promoterId),
+    index("ads_placements_token_idx").on(t.placementToken),
+    index("ads_placements_status_idx").on(t.status),
   ],
 );
 

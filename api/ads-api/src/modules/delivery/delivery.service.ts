@@ -1,8 +1,10 @@
-import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
-import * as crypto from 'crypto';
-import { DATABASE_TOKEN } from '../database/database.module';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '@crimfig/database/schema';
+import { selectImageRendition } from "../uploads/prepared-image";
+import { resolvedSchedule, scheduleMatches } from "../campaigns/daily-schedule";
+import { Injectable, Inject, NotFoundException, Logger } from "@nestjs/common";
+import * as crypto from "crypto";
+import { DATABASE_TOKEN } from "../database/database.module";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import * as schema from "@crimfig/database/schema";
 import {
   adsPlacements,
   adsCampaigns,
@@ -15,29 +17,39 @@ import {
   adsMediaAssets,
   adsCreativeStacks,
   crimfigGeoTargets,
-} from '@crimfig/database/schema';
-import { eq, sql, and, or, inArray } from 'drizzle-orm';
-import { ImpressionTokenService, ImpressionTokenPayload } from './impression-token.service';
-import { AuctionEngineService } from './auction-engine.service';
-import { FraudRulesService } from '../verification/fraud-rules.service';
+} from "@crimfig/database/schema";
+import { eq, sql, and, or, inArray } from "drizzle-orm";
+import {
+  ImpressionTokenService,
+  ImpressionTokenPayload,
+} from "./impression-token.service";
+import { AuctionEngineService } from "./auction-engine.service";
+import { FraudRulesService } from "../verification/fraud-rules.service";
 
 const SLOT_HANDLE_BY_ID: Record<string, string> = {
-  cf_slot_0001: 'banner_top',
-  cf_slot_0002: 'banner_bottom',
-  cf_slot_0003: 'in_content_mid',
-  cf_slot_0004: 'in_content_end',
-  cf_slot_0005: 'sidebar_sticky',
-  cf_slot_0006: 'listing_interstitial',
-  cf_slot_0007: 'popup_exit_intent',
-  cf_slot_0008: 'app_interstitial',
-  cf_slot_0009: 'app_rewarded',
-  cf_slot_0010: 'reels_preroll',
+  cf_slot_0001: "banner_top",
+  cf_slot_0002: "banner_bottom",
+  cf_slot_0003: "in_content_mid",
+  cf_slot_0004: "in_content_end",
+  cf_slot_0005: "sidebar_sticky",
+  cf_slot_0006: "listing_interstitial",
+  cf_slot_0007: "popup_exit_intent",
+  cf_slot_0008: "app_interstitial",
+  cf_slot_0009: "app_rewarded",
+  cf_slot_0010: "reels_preroll",
 };
 
-const VIDEO_PLACEMENTS = new Set(['in_content_mid', 'in_content_end', 'listing_interstitial']);
+const VIDEO_PLACEMENTS = new Set([
+  "in_content_mid",
+  "in_content_end",
+  "listing_interstitial",
+]);
 
 function videoDeliveryEnabled(): boolean {
-  return (process.env.CREATIVE_VIDEO_AUTHORING_ENABLED || 'false').toLowerCase() === 'true';
+  return (
+    (process.env.CREATIVE_VIDEO_AUTHORING_ENABLED || "false").toLowerCase() ===
+    "true"
+  );
 }
 
 @Injectable()
@@ -53,36 +65,54 @@ export class DeliveryService {
   ) {}
 
   private publicBaseUrl(): string {
-    return (process.env.ADS_PUBLIC_URL || 'https://ads.crimfig.com').replace(/\/+$/, '');
+    return (process.env.ADS_PUBLIC_URL || "https://ads.crimfig.com").replace(
+      /\/+$/,
+      "",
+    );
   }
 
   /** Media is served by the Ads API itself; reject unrelated or relative external paths. */
   private absoluteMediaUrl(value: string | null | undefined): string | null {
     if (!value) return null;
     if (/^https?:\/\//i.test(value)) return value;
-    if (value.startsWith('/api/v1/uploads/media/')) return `${this.publicBaseUrl()}${value}`;
+    if (value.startsWith("/api/v1/uploads/media/"))
+      return `${this.publicBaseUrl()}${value}`;
     return null;
   }
 
-  private requestedPlacementHandle(token: string, isSlotCatalog: boolean): string {
-    if (isSlotCatalog) return SLOT_HANDLE_BY_ID[token] || 'unknown';
+  private requestedPlacementHandle(
+    token: string,
+    isSlotCatalog: boolean,
+  ): string {
+    if (isSlotCatalog) return SLOT_HANDLE_BY_ID[token] || "unknown";
     // Legacy placements render the card surface; keep video limited to the
     // same allowlist rather than treating an unknown embed as video-capable.
-    return 'in_content_mid';
+    return "in_content_mid";
   }
 
-  private allowedAdTypes(handle: string): Array<'text' | 'image' | 'video'> {
-    if (videoDeliveryEnabled() && VIDEO_PLACEMENTS.has(handle)) return ['text', 'image', 'video'];
-    return ['text', 'image'];
+  private allowedAdTypes(handle: string): Array<"text" | "image" | "video"> {
+    if (videoDeliveryEnabled() && VIDEO_PLACEMENTS.has(handle))
+      return ["text", "image", "video"];
+    return ["text", "image"];
   }
 
   /** A valid signature is necessary but never sufficient: bind every identity to its stored serve. */
   private async boundServe(payload: ImpressionTokenPayload): Promise<boolean> {
-    const [serve] = await this.db.select().from(adsServes).where(eq(adsServes.id, payload.servedId)).limit(1);
-    return !!serve && serve.placementId === payload.placementId && serve.campaignId === payload.campaignId &&
-      serve.creativeId === payload.creativeId && serve.promoterId === payload.promoterId &&
-      serve.ipHash === payload.ipHash && serve.servedAt.getTime() <= payload.timestamp &&
-      payload.timestamp - serve.servedAt.getTime() <= 60_000;
+    const [serve] = await this.db
+      .select()
+      .from(adsServes)
+      .where(eq(adsServes.id, payload.servedId))
+      .limit(1);
+    return (
+      !!serve &&
+      serve.placementId === payload.placementId &&
+      serve.campaignId === payload.campaignId &&
+      serve.creativeId === payload.creativeId &&
+      serve.promoterId === payload.promoterId &&
+      serve.ipHash === payload.ipHash &&
+      serve.servedAt.getTime() <= payload.timestamp &&
+      payload.timestamp - serve.servedAt.getTime() <= 60_000
+    );
   }
 
   /**
@@ -277,7 +307,7 @@ export class DeliveryService {
       var img = document.createElement('img');
       img.src = resolvedMedia(ad.imageUrl);
       img.alt = ad.headline || 'Advertisement';
-      img.style.cssText = 'width:100%;height:180px;object-fit:cover;border-radius:8px;margin-bottom:12px;display:block;';
+      img.style.cssText = 'width:100%;height:auto;object-fit:contain;border-radius:8px;margin-bottom:12px;display:block;';
       if (ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
         var imgLink = document.createElement('a');
         imgLink.href = ad.clickUrl;
@@ -345,7 +375,9 @@ export class DeliveryService {
     if (!value) return [];
     try {
       const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'string') : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((item) => typeof item === "string")
+        : [];
     } catch {
       return [];
     }
@@ -355,7 +387,9 @@ export class DeliveryService {
     if (!value) return [];
     try {
       const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed.filter((item) => typeof item === 'number') : [];
+      return Array.isArray(parsed)
+        ? parsed.filter((item) => typeof item === "number")
+        : [];
     } catch {
       return [];
     }
@@ -367,13 +401,16 @@ export class DeliveryService {
     return a === b || a.endsWith(`-${b}`) || b.endsWith(`-${a}`);
   }
 
-  private deviceFromUserAgent(userAgent?: string): 'desktop' | 'android' | 'ios' | 'tablet' | undefined {
+  private deviceFromUserAgent(
+    userAgent?: string,
+  ): "desktop" | "android" | "ios" | "tablet" | undefined {
     if (!userAgent) return undefined;
     const value = userAgent.toLowerCase();
-    if (/ipad|tablet/.test(value)) return 'tablet';
-    if (/iphone|ipod/.test(value)) return 'ios';
-    if (/android/.test(value)) return /mobile/.test(value) ? 'android' : 'tablet';
-    if (/mozilla|chrome|safari|firefox|edg/.test(value)) return 'desktop';
+    if (/ipad|tablet/.test(value)) return "tablet";
+    if (/iphone|ipod/.test(value)) return "ios";
+    if (/android/.test(value))
+      return /mobile/.test(value) ? "android" : "tablet";
+    if (/mozilla|chrome|safari|firefox|edg/.test(value)) return "desktop";
     return undefined;
   }
 
@@ -383,19 +420,44 @@ export class DeliveryService {
    */
   private async filterEligibleCandidates(
     candidates: any[],
-    clientGeo?: { country?: string; region?: string; city?: string; device?: string },
+    clientGeo?: {
+      country?: string;
+      region?: string;
+      city?: string;
+      device?: string;
+    },
   ): Promise<any[]> {
     if (candidates.length === 0) return [];
-    const campaignIds = [...new Set(candidates.map((candidate) => candidate.campaignId))];
-    const stackIds = [...new Set(candidates.map((candidate) => candidate.adStackId).filter(Boolean))];
-    const targetConditions = [and(eq(crimfigGeoTargets.ownerType, 'campaign'), inArray(crimfigGeoTargets.ownerId, campaignIds))];
+    const campaignIds = [
+      ...new Set(candidates.map((candidate) => candidate.campaignId)),
+    ];
+    const stackIds = [
+      ...new Set(
+        candidates.map((candidate) => candidate.adStackId).filter(Boolean),
+      ),
+    ];
+    const targetConditions = [
+      and(
+        eq(crimfigGeoTargets.ownerType, "campaign"),
+        inArray(crimfigGeoTargets.ownerId, campaignIds),
+      ),
+    ];
     if (stackIds.length > 0) {
-      targetConditions.push(and(eq(crimfigGeoTargets.ownerType, 'stack'), inArray(crimfigGeoTargets.ownerId, stackIds)) as any);
+      targetConditions.push(
+        and(
+          eq(crimfigGeoTargets.ownerType, "stack"),
+          inArray(crimfigGeoTargets.ownerId, stackIds),
+        ) as any,
+      );
     }
     const targetRows = await this.db
       .select()
       .from(crimfigGeoTargets)
-      .where(targetConditions.length === 1 ? targetConditions[0] : or(...targetConditions));
+      .where(
+        targetConditions.length === 1
+          ? targetConditions[0]
+          : or(...targetConditions),
+      );
     const targetsByOwner = new Map<string, typeof targetRows>();
     for (const row of targetRows) {
       const key = `${row.ownerType}:${row.ownerId}`;
@@ -405,30 +467,71 @@ export class DeliveryService {
     }
 
     const effectiveTargets = (candidate: any) => {
-      const stackMode = candidate.stackGeoMode || 'inherit';
-      const geoMode = stackMode === 'inherit' ? candidate.campaignGeoMode || 'global' : stackMode;
-      if (geoMode === 'global') return { geoMode, rows: [] as typeof targetRows };
-      const owner = stackMode === 'targeted' ? `stack:${candidate.adStackId}` : `campaign:${candidate.campaignId}`;
+      const stackMode = candidate.stackGeoMode || "inherit";
+      const geoMode =
+        stackMode === "inherit"
+          ? candidate.campaignGeoMode || "global"
+          : stackMode;
+      if (geoMode === "global")
+        return { geoMode, rows: [] as typeof targetRows };
+      const owner =
+        stackMode === "targeted"
+          ? `stack:${candidate.adStackId}`
+          : `campaign:${candidate.campaignId}`;
       return { geoMode, rows: targetsByOwner.get(owner) || [] };
     };
 
     return candidates.filter((candidate) => {
       const targeting = effectiveTargets(candidate);
-      const countries = targeting.geoMode === 'targeted'
-        ? [...new Set(targeting.rows.flatMap((row) => this.parseStringArray(row.resolvedCountries)))]
-        : this.parseStringArray(candidate.targetCountries);
-      const subdivisions = targeting.geoMode === 'targeted'
-        ? [...new Set(targeting.rows.flatMap((row) => this.parseStringArray(row.resolvedSubdivisions)))]
-        : this.parseStringArray(candidate.targetStates);
-      const cities = targeting.geoMode === 'targeted'
-        ? [...new Set(targeting.rows.flatMap((row) => this.parseStringArray(row.resolvedCities)))]
-        : [];
-      if (targeting.geoMode === 'targeted' && targeting.rows.length === 0) return false;
-      if (countries.length > 0 && (!clientGeo?.country || !countries.map((c) => c.toUpperCase()).includes(clientGeo.country.toUpperCase()))) {
+      const countries =
+        targeting.geoMode === "targeted"
+          ? [
+              ...new Set(
+                targeting.rows.flatMap((row) =>
+                  this.parseStringArray(row.resolvedCountries),
+                ),
+              ),
+            ]
+          : this.parseStringArray(candidate.targetCountries);
+      const subdivisions =
+        targeting.geoMode === "targeted"
+          ? [
+              ...new Set(
+                targeting.rows.flatMap((row) =>
+                  this.parseStringArray(row.resolvedSubdivisions),
+                ),
+              ),
+            ]
+          : this.parseStringArray(candidate.targetStates);
+      const cities =
+        targeting.geoMode === "targeted"
+          ? [
+              ...new Set(
+                targeting.rows.flatMap((row) =>
+                  this.parseStringArray(row.resolvedCities),
+                ),
+              ),
+            ]
+          : [];
+      if (targeting.geoMode === "targeted" && targeting.rows.length === 0)
+        return false;
+      if (
+        countries.length > 0 &&
+        (!clientGeo?.country ||
+          !countries
+            .map((c) => c.toUpperCase())
+            .includes(clientGeo.country.toUpperCase()))
+      ) {
         return false;
       }
       if (subdivisions.length > 0) {
-        if (!clientGeo?.region || !subdivisions.some((value) => this.regionMatches(value, clientGeo.region!))) return false;
+        if (
+          !clientGeo?.region ||
+          !subdivisions.some((value) =>
+            this.regionMatches(value, clientGeo.region!),
+          )
+        )
+          return false;
       }
       if (cities.length > 0) {
         if (!clientGeo?.city || !cities.includes(clientGeo.city)) return false;
@@ -439,11 +542,28 @@ export class DeliveryService {
       if (devices.length > 0) {
         const device = clientGeo?.device;
         if (!device) return false;
-        if (device === 'tablet' && devices.includes('mobile')) {
+        if (device === "tablet" && devices.includes("mobile")) {
           // Tablets count as mobile only when the campaign opted into the broad category.
-        } else if (!devices.includes(device) && !(device === 'android' || device === 'ios' ? devices.includes('mobile') : false)) {
+        } else if (
+          !devices.includes(device) &&
+          !(device === "android" || device === "ios"
+            ? devices.includes("mobile")
+            : false)
+        ) {
           return false;
         }
+      }
+      try {
+        candidate.schedule = resolvedSchedule(
+          candidate.campaignSchedule,
+          candidate.stackSchedule,
+          candidate.targetHours,
+          candidate.stackTargetHours,
+        );
+        candidate.scheduleValidated = true;
+      } catch {
+        this.logger.warn("Invalid stored campaign schedule excluded");
+        return false;
       }
       const hours = candidate.stackTargetHours
         ? this.parseNumberArray(candidate.stackTargetHours)
@@ -464,28 +584,50 @@ export class DeliveryService {
     referrerDomain?: string,
     mode?: string,
     allowHomeNetworkFill?: boolean,
-    clientGeo?: { country?: string; region?: string; city?: string; device?: string },
+    clientGeo?: {
+      country?: string;
+      region?: string;
+      city?: string;
+      device?: string;
+    },
   ) {
     this.tokenService.assertConfigured();
 
     // Check if token matches standard slot catalog handles (e.g. cf_slot_0001) or placementToken
-    const isDirectBarterMode = mode === 'owned_site_direct';
-    const isSlotCatalog = token.startsWith('cf_slot_');
+    const isDirectBarterMode = mode === "owned_site_direct";
+    const isSlotCatalog = token.startsWith("cf_slot_");
 
     const [placement] = await this.db
       .select({
         id: adsPlacements.id,
         promoterId: adsPlacements.promoterId,
+        imageMaxBytes: adsPlacements.imageMaxBytes,
         campaignId: adsPlacements.campaignId,
         creativeId: adsPlacements.creativeId,
         websiteId: adsPlacements.websiteId,
         status: adsPlacements.status,
         campaignStatus: adsCampaigns.status,
+        campaignModeration: adsCampaigns.moderationStatus,
+        creativeReview: adsCreatives.reviewStatus,
+        creativeStatus: adsCreatives.status,
+        campaignSchedule: adsCampaigns.schedule,
+        stackSchedule: adsCreativeStacks.schedule,
+        campaignGeoMode: adsCampaigns.geoMode,
+        stackGeoMode: adsCreativeStacks.geoMode,
+        adStackId: adsCreatives.adStackId,
+        targetHours: adsCampaigns.targetHours,
+        stackTargetHours: adsCreativeStacks.targetHours,
+        targetCountries: adsCampaigns.targetCountries,
+        targetStates: adsCampaigns.targetStates,
+        targetDevices: adsCampaigns.targetDevices,
+        stackTargetDevices: adsCreativeStacks.targetDevices,
         remainingBudget: adsCampaigns.remainingBudgetUsdCents,
         headline: adsCreatives.headline,
         bodyText: adsCreatives.bodyText,
         ctaText: adsCreatives.ctaText,
         imageUrl: adsCreatives.imageUrl,
+        preparation: adsMediaAssets.preparation,
+        imageBytes: adsMediaAssets.bytes,
         videoUrl: adsCreatives.videoUrl,
         posterUrl: adsCreatives.posterUrl,
         adType: adsCreatives.adType,
@@ -498,17 +640,33 @@ export class DeliveryService {
       .from(adsPlacements)
       .innerJoin(adsCampaigns, eq(adsPlacements.campaignId, adsCampaigns.id))
       .innerJoin(adsCreatives, eq(adsPlacements.creativeId, adsCreatives.id))
-      .leftJoin(adsMediaAssets, eq(adsCreatives.mediaAssetId, adsMediaAssets.id))
+      .leftJoin(
+        adsCreativeStacks,
+        eq(adsCreatives.adStackId, adsCreativeStacks.id),
+      )
+      .leftJoin(
+        adsMediaAssets,
+        eq(adsCreatives.mediaAssetId, adsMediaAssets.id),
+      )
       .where(eq(adsPlacements.placementToken, token))
       .limit(1);
 
     if (!placement && !isDirectBarterMode && !isSlotCatalog) {
-      throw new NotFoundException('Ad placement unavailable or budget exhausted');
+      throw new NotFoundException(
+        "Ad placement unavailable or budget exhausted",
+      );
     }
 
-    if (placement && (placement.status !== 'active' || placement.campaignStatus !== 'active' || placement.remainingBudget <= 0)) {
+    if (
+      placement &&
+      (placement.status !== "active" ||
+        placement.campaignStatus !== "active" ||
+        placement.remainingBudget <= 0)
+    ) {
       if (!isDirectBarterMode) {
-        throw new NotFoundException('Ad placement unavailable or budget exhausted');
+        throw new NotFoundException(
+          "Ad placement unavailable or budget exhausted",
+        );
       }
     }
 
@@ -530,6 +688,8 @@ export class DeliveryService {
         bodyText: adsCreatives.bodyText,
         ctaText: adsCreatives.ctaText,
         imageUrl: adsCreatives.imageUrl,
+        preparation: adsMediaAssets.preparation,
+        imageBytes: adsMediaAssets.bytes,
         videoUrl: adsCreatives.videoUrl,
         posterUrl: adsCreatives.posterUrl,
         adType: adsCreatives.adType,
@@ -547,24 +707,32 @@ export class DeliveryService {
         targetStates: adsCampaigns.targetStates,
         targetDevices: adsCampaigns.targetDevices,
         targetHours: adsCampaigns.targetHours,
+        campaignSchedule: adsCampaigns.schedule,
         campaignGeoMode: adsCampaigns.geoMode,
         adStackId: adsCreatives.adStackId,
         stackGeoMode: adsCreativeStacks.geoMode,
         stackTargetDevices: adsCreativeStacks.targetDevices,
         stackTargetHours: adsCreativeStacks.targetHours,
+        stackSchedule: adsCreativeStacks.schedule,
         format: adsCreatives.adFormat,
       })
       .from(adsCampaigns)
       .innerJoin(adsCreatives, eq(adsCampaigns.id, adsCreatives.campaignId))
-      .innerJoin(adsCreativeStacks, eq(adsCreatives.adStackId, adsCreativeStacks.id))
-      .leftJoin(adsMediaAssets, eq(adsCreatives.mediaAssetId, adsMediaAssets.id))
+      .innerJoin(
+        adsCreativeStacks,
+        eq(adsCreatives.adStackId, adsCreativeStacks.id),
+      )
+      .leftJoin(
+        adsMediaAssets,
+        eq(adsCreatives.mediaAssetId, adsMediaAssets.id),
+      )
       .where(
         and(
-          eq(adsCampaigns.status, 'active'),
+          eq(adsCampaigns.status, "active"),
           eq(adsCampaigns.pricingVersion, 2),
-          eq(adsCampaigns.moderationStatus, 'approved'),
-          eq(adsCreatives.status, 'active'),
-          eq(adsCreatives.reviewStatus, 'approved'),
+          eq(adsCampaigns.moderationStatus, "approved"),
+          eq(adsCreatives.status, "active"),
+          eq(adsCreatives.reviewStatus, "approved"),
           sql`${adsCampaigns.remainingBudgetUsdCents} > 0`,
         ),
       )
@@ -572,7 +740,7 @@ export class DeliveryService {
 
     const formattedCandidates = activeCandidates.map((c) => ({
       ...c,
-      pricingModel: (c.pricingModel || 'cpm') as 'cpm' | 'cpc',
+      pricingModel: (c.pricingModel || "cpm") as "cpm" | "cpc",
       targetCountries: c.targetCountries ? JSON.parse(c.targetCountries) : null,
       targetStates: c.targetStates ? JSON.parse(c.targetStates) : null,
       targetDevices: c.targetDevices ? JSON.parse(c.targetDevices) : null,
@@ -581,38 +749,119 @@ export class DeliveryService {
 
     const requestedHandle = this.requestedPlacementHandle(token, isSlotCatalog);
     const allowedTypes = new Set(this.allowedAdTypes(requestedHandle));
-    if (placement && !allowedTypes.has(((placement.adType || 'text') as 'text' | 'image' | 'video'))) {
-      if (!isDirectBarterMode) throw new NotFoundException('This placement does not support the creative type.');
+    if (
+      placement &&
+      !allowedTypes.has(
+        (placement.adType || "text") as "text" | "image" | "video",
+      )
+    ) {
+      if (!isDirectBarterMode)
+        throw new NotFoundException(
+          "This placement does not support the creative type.",
+        );
     }
-    const eligibleCandidates = await this.filterEligibleCandidates(formattedCandidates, {
-      ...clientGeo,
-      device: clientGeo?.device || this.deviceFromUserAgent(userAgent),
+    const eligibleCandidates = await this.filterEligibleCandidates(
+      formattedCandidates,
+      {
+        ...clientGeo,
+        device: clientGeo?.device || this.deviceFromUserAgent(userAgent),
+      },
+    );
+    const requestedLayout = requestedHandle.startsWith("banner_")
+      ? "banner"
+      : "card";
+    const imageCap = Math.min(
+      placement?.imageMaxBytes ?? 150000,
+      requestedLayout === "banner" ? 50000 : 200000,
+    );
+    const compatibleCandidates = eligibleCandidates.filter((candidate: any) => {
+      if (!allowedTypes.has(candidate.adType || "text")) return false;
+      if (candidate.format !== requestedLayout && candidate.adType !== "video")
+        return false;
+      if (candidate.adType === "image") {
+        const rendition = selectImageRendition(
+          candidate,
+          requestedLayout,
+          imageCap,
+        );
+        if (!rendition) return false;
+        candidate.imageUrl = rendition.url;
+        candidate.width = rendition.width;
+        candidate.height = rendition.height;
+      }
+      return true;
     });
-    const compatibleCandidates = eligibleCandidates.filter((candidate) =>
-      allowedTypes.has((candidate.adType || 'text') as 'text' | 'image' | 'video'),
+
+    const auctionResult = this.auctionEngine.resolveAuction(
+      compatibleCandidates,
+      {
+        slotHandle: requestedHandle,
+        clientIp,
+        clientDevice: (clientGeo?.device ||
+          this.deviceFromUserAgent(userAgent)) as
+          "desktop" | "android" | "ios" | "tablet" | undefined,
+        clientGeoCountry: clientGeo?.country,
+        clientGeoRegion: clientGeo?.region,
+        clientGeoCity: clientGeo?.city,
+      },
     );
 
-    const auctionResult = this.auctionEngine.resolveAuction(compatibleCandidates, {
-      slotHandle: requestedHandle,
-      clientIp,
-      clientDevice: (clientGeo?.device || this.deviceFromUserAgent(userAgent)) as
-        | 'desktop' | 'android' | 'ios' | 'tablet' | undefined,
-      clientGeoCountry: clientGeo?.country,
-      clientGeoRegion: clientGeo?.region,
-      clientGeoCity: clientGeo?.city,
-    });
-
     if (!auctionResult && !placement) {
-      throw new NotFoundException('No eligible ad creative available');
+      throw new NotFoundException("No eligible ad creative available");
     }
 
+    if (!auctionResult && placement) {
+      if (
+        placement.campaignModeration !== "approved" ||
+        placement.creativeReview !== "approved" ||
+        placement.creativeStatus !== "active"
+      )
+        throw new NotFoundException(
+          "This creative is not approved for delivery.",
+        );
+      const direct = await this.filterEligibleCandidates([placement], {
+        ...clientGeo,
+        device: clientGeo?.device || this.deviceFromUserAgent(userAgent),
+      });
+      if (!direct.length || !scheduleMatches(direct[0].schedule, new Date()))
+        throw new NotFoundException(
+          "This placement is outside its effective schedule or targeting.",
+        );
+    }
     // Select the winning creative
     const winningCreative = auctionResult ? auctionResult.winner : placement!;
-    const clearingPriceMicros = isDirectBarterMode && !allowHomeNetworkFill ? 0 : (auctionResult ? auctionResult.clearingPriceMicros : 0);
-    const finalCampaignId = auctionResult ? auctionResult.winner.campaignId : placement!.campaignId;
-    const finalCreativeId = auctionResult ? auctionResult.winner.creativeId : placement!.creativeId;
-    const promoterId = placement?.promoterId || '00000000-0000-0000-0000-000000000000';
-    const placementId = placement?.id || '00000000-0000-0000-0000-000000000000';
+    if (
+      (winningCreative as any).adType === "image" &&
+      winningCreative === placement
+    ) {
+      const rendition = selectImageRendition(
+        winningCreative,
+        (winningCreative as any).adFormat || "card",
+        Math.min((placement as any).imageMaxBytes ?? 150000, 200000),
+      );
+      if (!rendition)
+        throw new NotFoundException(
+          "No compatible image rendition for this placement.",
+        );
+      winningCreative.imageUrl = rendition.url;
+      (winningCreative as any).width = rendition.width;
+      (winningCreative as any).height = rendition.height;
+    }
+    const clearingPriceMicros =
+      isDirectBarterMode && !allowHomeNetworkFill
+        ? 0
+        : auctionResult
+          ? auctionResult.clearingPriceMicros
+          : 0;
+    const finalCampaignId = auctionResult
+      ? auctionResult.winner.campaignId
+      : placement!.campaignId;
+    const finalCreativeId = auctionResult
+      ? auctionResult.winner.creativeId
+      : placement!.creativeId;
+    const promoterId =
+      placement?.promoterId || "00000000-0000-0000-0000-000000000000";
+    const placementId = placement?.id || "00000000-0000-0000-0000-000000000000";
 
     const ipHash = this.tokenService.hashIp(clientIp);
 
@@ -624,11 +873,19 @@ export class DeliveryService {
         campaignId: finalCampaignId,
         creativeId: finalCreativeId,
         promoterId: placement ? placement.promoterId : null,
-        slotHandle: isSlotCatalog ? token : 'cf_slot_auto',
+        slotHandle: isSlotCatalog ? token : "cf_slot_auto",
         clearingPriceMicros,
         pricingVersion: 2,
-        billingPriceNanos: isDirectBarterMode && !allowHomeNetworkFill ? BigInt(0) : BigInt(auctionResult?.billingPriceNanos || 0),
-        pricingModel: isDirectBarterMode && !allowHomeNetworkFill ? 'cpm' : (auctionResult ? auctionResult.winner.pricingModel : 'cpm'),
+        billingPriceNanos:
+          isDirectBarterMode && !allowHomeNetworkFill
+            ? BigInt(0)
+            : BigInt(auctionResult?.billingPriceNanos || 0),
+        pricingModel:
+          isDirectBarterMode && !allowHomeNetworkFill
+            ? "cpm"
+            : auctionResult
+              ? auctionResult.winner.pricingModel
+              : "cpm",
         ipHash,
         userAgentHash: userAgent ? this.tokenService.hashIp(userAgent) : null,
       })
@@ -645,27 +902,33 @@ export class DeliveryService {
     });
 
     // Record interaction telemetry (money settlement runs in 30-min cron via PLAN-0002)
-    await this.db
-      .insert(adsInteractions)
-      .values({
-        placementId,
-        promoterId,
-        serveId: serve.id,
-        type: 'impression',
-        source: placement?.websiteId ? 'embed' : 'share_link',
-        actorIp: clientIp,
-        userAgent,
-        referrer: referrerDomain,
-        isValid: true,
-      });
+    await this.db.insert(adsInteractions).values({
+      placementId,
+      promoterId,
+      serveId: serve.id,
+      type: "impression",
+      source: placement?.websiteId ? "embed" : "share_link",
+      actorIp: clientIp,
+      userAgent,
+      referrer: referrerDomain,
+      isValid: true,
+    });
 
-    const baseUrl = process.env.ADS_PUBLIC_URL || 'https://ads.crimfig.com';
+    const baseUrl = process.env.ADS_PUBLIC_URL || "https://ads.crimfig.com";
     const clickUrl = `${baseUrl}/api/v1/delivery/go/${impToken}?pid=${promoterId}`;
 
-    const adType = ((winningCreative as any).adType || ((winningCreative as any).videoUrl ? 'video' : (winningCreative as any).imageUrl ? 'image' : 'text')) as 'text' | 'image' | 'video';
+    const adType = ((winningCreative as any).adType ||
+      ((winningCreative as any).videoUrl
+        ? "video"
+        : (winningCreative as any).imageUrl
+          ? "image"
+          : "text")) as "text" | "image" | "video";
     return {
       adType,
-      format: (winningCreative as any).adFormat || (winningCreative as any).format || 'card',
+      format:
+        (winningCreative as any).adFormat ||
+        (winningCreative as any).format ||
+        "card",
       headline: winningCreative.headline,
       bodyText: winningCreative.bodyText,
       ctaText: winningCreative.ctaText,
@@ -685,7 +948,12 @@ export class DeliveryService {
    * Verifies cryptographic impToken signature (or falls back to legacy token),
    * validates campaign active state and budget, and logs click telemetry.
    */
-  async handleClick(token: string, clientIp?: string, userAgent?: string, referrer?: string) {
+  async handleClick(
+    token: string,
+    clientIp?: string,
+    userAgent?: string,
+    referrer?: string,
+  ) {
     let placementId: string | undefined;
     let serveId: string | undefined;
     let campaignId: string | undefined;
@@ -696,9 +964,12 @@ export class DeliveryService {
     // 1. Try to decode as cryptographically signed impression token
     const tokenPayload = this.tokenService.verifyToken(token, clientIp);
     if (tokenPayload && !(await this.boundServe(tokenPayload))) {
-      throw new NotFoundException('Click attribution does not match its ad serve');
+      throw new NotFoundException(
+        "Click attribution does not match its ad serve",
+      );
     }
-    if (!tokenPayload && token.startsWith('imp_')) throw new NotFoundException('Click token invalid or expired');
+    if (!tokenPayload && token.startsWith("imp_"))
+      throw new NotFoundException("Click token invalid or expired");
     if (tokenPayload) {
       serveId = tokenPayload.servedId;
       placementId = tokenPayload.placementId;
@@ -743,18 +1014,27 @@ export class DeliveryService {
     }
 
     if (!placementId || !campaignId || !destinationUrl) {
-      throw new NotFoundException('Placement or click token invalid or expired');
+      throw new NotFoundException(
+        "Placement or click token invalid or expired",
+      );
     }
 
     // Verify campaign is active with budget
     const [campaign] = await this.db
-      .select({ status: adsCampaigns.status, remainingBudget: adsCampaigns.remainingBudgetUsdCents })
+      .select({
+        status: adsCampaigns.status,
+        remainingBudget: adsCampaigns.remainingBudgetUsdCents,
+      })
       .from(adsCampaigns)
       .where(eq(adsCampaigns.id, campaignId))
       .limit(1);
 
-    if (!campaign || campaign.status !== 'active' || campaign.remainingBudget <= 0) {
-      throw new NotFoundException('Campaign inactive or budget exhausted');
+    if (
+      !campaign ||
+      campaign.status !== "active" ||
+      campaign.remainingBudget <= 0
+    ) {
+      throw new NotFoundException("Campaign inactive or budget exhausted");
     }
 
     // Run anti-fraud rules evaluation on click
@@ -773,8 +1053,8 @@ export class DeliveryService {
         placementId,
         promoterId: promoterId || placementId,
         serveId,
-        type: 'click',
-        source: 'share_link',
+        type: "click",
+        source: "share_link",
         actorIp: clientIp,
         userAgent,
         referrer,
@@ -785,7 +1065,7 @@ export class DeliveryService {
       .returning();
 
     // Generate signed unique clickId (cf_click) and persist in ads_clicks (30-day validity)
-    const clickId = `clk_${Date.now().toString(36)}_${crypto.randomBytes(8).toString('hex')}`;
+    const clickId = `clk_${Date.now().toString(36)}_${crypto.randomBytes(8).toString("hex")}`;
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
 
     try {
@@ -800,11 +1080,13 @@ export class DeliveryService {
         expiresAt,
       });
     } catch (clickErr: any) {
-      this.logger.warn(`Failed to insert ads_clicks entry: ${clickErr.message}`);
+      this.logger.warn(
+        `Failed to insert ads_clicks entry: ${clickErr.message}`,
+      );
     }
 
     // Append cf_click to destination URL for conversion attribution
-    const separator = destinationUrl.includes('?') ? '&' : '?';
+    const separator = destinationUrl.includes("?") ? "&" : "?";
     return `${destinationUrl}${separator}cf_click=${clickId}`;
   }
 
@@ -865,7 +1147,17 @@ export class DeliveryService {
   async logInteraction(params: {
     placementToken?: string;
     impToken?: string;
-    type: 'hover' | 'touch' | 'impression' | 'viewable_impression' | 'click' | 'reels_view' | 'video_q25' | 'video_q50' | 'video_q75' | 'video_complete';
+    type:
+      | "hover"
+      | "touch"
+      | "impression"
+      | "viewable_impression"
+      | "click"
+      | "reels_view"
+      | "video_q25"
+      | "video_q50"
+      | "video_q75"
+      | "video_complete";
     source?: string;
     clientIp?: string;
     userAgent?: string;
@@ -880,7 +1172,10 @@ export class DeliveryService {
 
     // 1. If signed impToken is provided, decode cryptographic payload
     if (params.impToken) {
-      const payload = this.tokenService.verifyToken(params.impToken, params.clientIp);
+      const payload = this.tokenService.verifyToken(
+        params.impToken,
+        params.clientIp,
+      );
       if (!payload || !(await this.boundServe(payload))) return;
       if (payload) {
         signedPayload = payload;
@@ -915,7 +1210,7 @@ export class DeliveryService {
     let isValid = true;
     let invalidReason: string | null = null;
 
-    if (params.type === 'impression' || params.type === 'viewable_impression') {
+    if (params.type === "impression" || params.type === "viewable_impression") {
       const validation = this.fraudRules.validateImpression({
         placementId,
         clientIp: params.clientIp,
@@ -926,18 +1221,40 @@ export class DeliveryService {
       invalidReason = validation.reasonCode || null;
     }
 
-    if (params.type === 'click') {
-      const validation = this.fraudRules.validateClick({ placementId, clientIp: params.clientIp,
-        userAgent: params.userAgent, tokenTimestampMs: signedPayload?.timestamp });
-      isValid = validation.isValid; invalidReason = validation.reasonCode || null;
+    if (params.type === "click") {
+      const validation = this.fraudRules.validateClick({
+        placementId,
+        clientIp: params.clientIp,
+        userAgent: params.userAgent,
+        tokenTimestampMs: signedPayload?.timestamp,
+      });
+      isValid = validation.isValid;
+      invalidReason = validation.reasonCode || null;
     }
-    if (params.type === 'viewable_impression') {
-      const [creative] = signedPayload ? await this.db.select({ adType: adsCreatives.adType, format: adsCreatives.adFormat }).from(adsCreatives)
-        .where(eq(adsCreatives.id, signedPayload.creativeId)).limit(1) : [];
-      const minimum = creative?.adType === 'video' || creative?.format === 'video' ? 2 : 1;
-      if (!creative || !Number.isFinite(params.visibleRatio) || params.visibleRatio! < 0.5 || params.visibleRatio! > 1 ||
-        !Number.isFinite(params.durationSeconds) || params.durationSeconds! < minimum || params.durationSeconds! > 900) {
-        isValid = false; invalidReason = 'VIEWABILITY_THRESHOLD';
+    if (params.type === "viewable_impression") {
+      const [creative] = signedPayload
+        ? await this.db
+            .select({
+              adType: adsCreatives.adType,
+              format: adsCreatives.adFormat,
+            })
+            .from(adsCreatives)
+            .where(eq(adsCreatives.id, signedPayload.creativeId))
+            .limit(1)
+        : [];
+      const minimum =
+        creative?.adType === "video" || creative?.format === "video" ? 2 : 1;
+      if (
+        !creative ||
+        !Number.isFinite(params.visibleRatio) ||
+        params.visibleRatio! < 0.5 ||
+        params.visibleRatio! > 1 ||
+        !Number.isFinite(params.durationSeconds) ||
+        params.durationSeconds! < minimum ||
+        params.durationSeconds! > 900
+      ) {
+        isValid = false;
+        invalidReason = "VIEWABILITY_THRESHOLD";
       }
     }
 
@@ -946,7 +1263,7 @@ export class DeliveryService {
       promoterId: promoterId || placementId,
       serveId,
       type: params.type,
-      source: params.source || 'embed',
+      source: params.source || "embed",
       actorIp: params.clientIp,
       userAgent: params.userAgent,
       referrer: params.referrer,
