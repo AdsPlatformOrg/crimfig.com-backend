@@ -1,4 +1,4 @@
-import { Injectable, ServiceUnavailableException, BadRequestException } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException, BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export interface WalletBalanceResponse {
@@ -41,11 +41,22 @@ export class BillingEcosystemClient {
         redirect: 'error',
         signal: AbortSignal.timeout(10_000),
       });
-      if (!response.ok) throw new Error('Billing rejected request');
+      if (!response.ok) {
+        // Only a known, completed budget rejection is safe to classify as a business error.
+        // Unknown conflicts/receipts and transport failures remain unconfirmed; never retry them here.
+        if (response.status === 409 && /^campaign-escrows\/[^/]+\/reserve$/.test(action)) {
+          const rejection = await response.json() as any;
+          if (rejection?.message === 'Insufficient wallet funds or wallet limit exceeded') {
+            throw new ConflictException('Your wallet cannot reserve this campaign budget. Check your balance or choose a smaller budget.');
+          }
+        }
+        throw new Error('Billing rejected request');
+      }
       const json = await response.json() as any;
       if (json?.status !== 'success') throw new Error('Invalid Billing acknowledgement');
       return json.data;
-    } catch {
+    } catch (error) {
+      if (error instanceof ConflictException) throw error;
       // Do not expose provider bodies, internal secrets or a fabricated success to callers.
       throw new ServiceUnavailableException('Billing request could not be confirmed; reconcile before retrying financial operations');
     }

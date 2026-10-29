@@ -1,4 +1,4 @@
-import { BadRequestException, ServiceUnavailableException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ServiceUnavailableException } from '@nestjs/common';
 import { BillingEcosystemClient } from '../../../api/ads-api/src/modules/billing/billing-ecosystem.client';
 
 const configuration = (values: Record<string, string> = {}) => ({ get: (key: string) => values[key] }) as any;
@@ -58,6 +58,16 @@ describe('Ads Billing boundary', () => {
       fetchMock.mockResolvedValue(response);
       await expect(client().getWalletBalance('owner')).rejects.toBeInstanceOf(ServiceUnavailableException);
     }
+  });
+
+  it('reports a confirmed budget rejection clearly without retrying or exposing Billing details', async () => {
+    fetchMock.mockResolvedValue({ ok: false, status: 409, json: async () => ({ message: 'Insufficient wallet funds or wallet limit exceeded' }) });
+    await expect(client().reserveCampaignEscrow('owner', 'campaign', 2500)).rejects.toEqual(
+      new ConflictException('Your wallet cannot reserve this campaign budget. Check your balance or choose a smaller budget.'),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    fetchMock.mockResolvedValue({ ok: false, status: 409, json: async () => ({ message: 'Escrow has no confirmed Billing receipt; reconciliation required' }) });
+    await expect(client().reserveCampaignEscrow('owner', 'campaign', 2500)).rejects.toBeInstanceOf(ServiceUnavailableException);
   });
 
   it('requires a matching durable receipt and sends once using the configured key', async () => {
