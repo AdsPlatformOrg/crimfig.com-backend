@@ -1,3 +1,4 @@
+import { imageSpecsView } from "../uploads/prepared-image";
 import { createHash } from "crypto";
 import {
   allDay,
@@ -1171,6 +1172,30 @@ export class CampaignsService {
           ),
         ),
     ]);
+    const mediaIds = [
+      ...new Set(
+        creatives.map((c) => c.mediaAssetId).filter((id): id is string => !!id),
+      ),
+    ];
+    const media = mediaIds.length
+      ? await this.db
+          .select()
+          .from(adsMediaAssets)
+          .where(
+            and(
+              eq(adsMediaAssets.ownerId, advertiserId),
+              inArray(adsMediaAssets.id, mediaIds),
+            ),
+          )
+      : [];
+    const mediaById = new Map(media.map((asset) => [asset.id, asset]));
+    const creativeViews = creatives.map((creative) => ({
+      ...creative,
+      imageSpecs:
+        creative.mediaAssetId && mediaById.has(creative.mediaAssetId)
+          ? imageSpecsView(mediaById.get(creative.mediaAssetId))
+          : null,
+    }));
     const stackTargets = stacks.length
       ? await this.db
           .select()
@@ -1208,7 +1233,7 @@ export class CampaignsService {
       const inherited = stack.geoMode === "inherit";
       return {
         ...stack,
-        creatives: creatives.filter((c) => c.adStackId === stack.id),
+        creatives: creativeViews.filter((c) => c.adStackId === stack.id),
         settings: {
           geoMode: stack.geoMode,
           locations: mapLocations(ownTargets),
@@ -1256,7 +1281,7 @@ export class CampaignsService {
       targetHours: campaignHours,
       schedule: campaign.schedule ?? legacySchedule(campaign.targetHours),
       adStacks: stackViews,
-      creatives,
+      creatives: creativeViews,
     };
   }
 

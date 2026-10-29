@@ -1,4 +1,9 @@
-import { validatePreparedImages } from "./prepared-image";
+import {
+  validatePreparedImages,
+  validatePreparationDescriptor,
+  IMAGE_PROFILES,
+  imageSpecsView,
+} from "./prepared-image";
 import {
   Injectable,
   Logger,
@@ -12,7 +17,7 @@ import { DATABASE_TOKEN } from "../database/database.module";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "@crimfig/database/schema";
 import { adsMediaAssets } from "@crimfig/database/schema";
-import { eq, and, or } from "drizzle-orm";
+import { eq, and, or, inArray } from "drizzle-orm";
 import * as crypto from "crypto";
 import * as path from "path";
 import { FirebaseStorageService } from "./firebase-storage.service";
@@ -281,47 +286,169 @@ export class UploadsService {
     } catch (e) {
       throw new BadRequestException((e as Error).message);
     }
+    const bucket = this.firebaseStorageService.getBucket();
+    if (!bucket)
+      throw new ServiceUnavailableException(
+        "Media storage is unavailable. Your previous image is unchanged.",
+      );
     const groupId = crypto.randomUUID();
-    const assets: Array<Awaited<ReturnType<UploadsService['uploadDirect']>> & {width:number;height:number;profile:string}> = [];
-    for (const item of checked) {
-      const uploaded = await this.uploadDirect({ ownerId, file: item.file });
-      assets.push({
-        ...uploaded,
+    const assets = checked.map((item, index) => {
+      const id = crypto.randomUUID(),
+        sha256 = crypto
+          .createHash("sha256")
+          .update(item.file.buffer)
+          .digest("hex");
+      const ext =
+        item.mime === "image/jpeg"
+          ? "jpg"
+          : item.mime === "image/png"
+            ? "png"
+            : "webp";
+      const storageKey = `photo-${Date.now()}-${id.replace(/-/g, "")}.${ext}`;
+      const profile = (
+        index === 0 ? manifest.profile : "compact"
+      ) as keyof typeof IMAGE_PROFILES;
+      return {
+        id,
+        ownerId,
+        storageKey,
+        cdnUrl: `/api/v1/uploads/media/${storageKey}`,
+        mimeType: item.mime,
+        bytes: item.file.buffer.length,
         width: item.width,
         height: item.height,
-        profile: assets.length === 0 ? manifest.profile : "compact",
-      });
-    }
+        sha256,
+        status: "ready" as const,
+        profile,
+        cap: item.cap,
+        target: IMAGE_PROFILES[profile].target,
+      };
+    });
     const preparation = {
       version: 1,
+      pipelineVersion: manifest.pipelineVersion ?? 1,
       groupId,
       quality: 0.97,
       layout: manifest.layout,
       ratio: manifest.ratio,
       crop: manifest.crop,
+      descriptor:
+        manifest.pipelineVersion === 2
+          ? validatePreparationDescriptor(manifest)
+          : null,
       profile: manifest.profile,
       renditions: assets.map((a) => ({
-        assetId: a.assetId,
+        assetId: a.id,
         url: a.cdnUrl,
-        bytes: a.bytes,
         width: a.width,
         height: a.height,
+        bytes: a.bytes,
+        mimeType: a.mimeType,
+        sha256: a.sha256,
         profile: a.profile,
+        cap: a.cap,
+        target: a.target,
       })),
     };
-    await this.db.transaction(async (tx) => {
-      for (const asset of assets)
-        await tx
-          .update(adsMediaAssets)
-          .set({ width: asset.width, height: asset.height, preparation })
-          .where(
-            and(
-              eq(adsMediaAssets.id, asset.assetId),
-              eq(adsMediaAssets.ownerId, ownerId),
-            ),
-          );
+    const rows = assets.map(({ profile, cap, target, ...asset }) => ({
+      ...asset,
+      preparation,
+    }));
+    const uploaded: string[] = [];
+    let persistenceStarted = false;
+    const response = (asset: any) => ({
+      assetId: asset.id,
+      storageKey: asset.storageKey,
+      cdnUrl: asset.cdnUrl,
+      status: asset.status,
+      ...imageSpecsView(asset),
     });
-    return { ...assets[0], preparation };
+    try {
+      for (let i = 0; i < assets.length; i++) {
+        const asset = assets[i];
+        uploaded.push(asset.storageKey);
+        await bucket
+          .file(asset.storageKey)
+          .save(checked[i].file.buffer, {
+            resumable: false,
+            metadata: {
+              contentType: asset.mimeType,
+              metadata: {
+                ownerId,
+                sha256: asset.sha256,
+                isPrivate: "true",
+                preparationGroupId: groupId,
+              },
+            },
+          });
+      }
+      persistenceStarted = true;
+      const stored = await this.db.transaction(async (tx) => {
+        const result = await tx.insert(adsMediaAssets).values(rows).returning();
+        if (
+          result.length !== rows.length ||
+          result.some(
+            (row) =>
+              row.status !== "ready" ||
+              !row.width ||
+              !row.height ||
+              (row.preparation as any)?.groupId !== groupId,
+          )
+        )
+          throw Error("Prepared image metadata was not saved completely.");
+        return result;
+      });
+      return response(stored.find((a) => a.id === assets[0].id)!);
+    } catch (error) {
+      let safeToRemove = !persistenceStarted;
+      if (persistenceStarted) {
+        try {
+          const existing = await this.db
+            .select()
+            .from(adsMediaAssets)
+            .where(
+              and(
+                eq(adsMediaAssets.ownerId, ownerId),
+                inArray(
+                  adsMediaAssets.id,
+                  assets.map((a) => a.id),
+                ),
+              ),
+            );
+          if (
+            existing.length === rows.length &&
+            existing.every(
+              (a) =>
+                a.status === "ready" &&
+                a.width &&
+                a.height &&
+                (a.preparation as any)?.groupId === groupId,
+            )
+          )
+            return response(existing.find((a) => a.id === assets[0].id)!);
+          safeToRemove = existing.length === 0;
+        } catch {
+          /* An uncertain commit must be reconciled before removing its objects. */
+        }
+      }
+      if (safeToRemove) {
+        for (const key of uploaded) {
+          try {
+            await bucket.file(key).delete({ ignoreNotFound: true });
+          } catch {
+            this.logger.warn(
+              "Prepared image cleanup deferred for an unbound upload.",
+            );
+          }
+        }
+      } else
+        this.logger.warn(
+          "Prepared image persistence is unconfirmed; retain objects for reconciliation.",
+        );
+      throw new ServiceUnavailableException(
+        "The image and its specifications could not be confirmed. Your previous image is unchanged.",
+      );
+    }
   }
   async readyAsset(ownerId: string, id: string) {
     const [asset] = await this.db
@@ -345,6 +472,8 @@ export class UploadsService {
       bytes: asset.bytes,
       width: asset.width,
       height: asset.height,
+      mimeType: asset.mimeType,
+      sha256: asset.sha256,
       preparation: asset.preparation,
       status: asset.status,
     };
@@ -458,7 +587,14 @@ export class UploadsService {
             eq(schema.adsCreatives.reviewStatus, "approved"),
             or(
               eq(schema.adsCreatives.imageUrl, asset.cdnUrl),
-              ...((asset.preparation as any)?.renditions?.[0]?.url ? [eq(schema.adsCreatives.imageUrl,(asset.preparation as any).renditions[0].url)] : []),
+              ...((asset.preparation as any)?.renditions?.[0]?.url
+                ? [
+                    eq(
+                      schema.adsCreatives.imageUrl,
+                      (asset.preparation as any).renditions[0].url,
+                    ),
+                  ]
+                : []),
               eq(schema.adsCreatives.videoUrl, asset.cdnUrl),
             ),
           ),
@@ -590,9 +726,22 @@ export class UploadsService {
       throw new NotFoundException("Media asset not found or unauthorized");
     }
 
-    const primaryUrl=(asset.preparation as any)?.renditions?.[0]?.url||asset.cdnUrl;
-    const [attached]=await this.db.select({id:schema.adsCreatives.id}).from(schema.adsCreatives).where(or(eq(schema.adsCreatives.imageUrl,primaryUrl),eq(schema.adsCreatives.videoUrl,asset.cdnUrl))).limit(1);
-    if(attached)throw new BadRequestException('This media belongs to a saved creative and cannot be deleted independently.');
+    const primaryUrl =
+      (asset.preparation as any)?.renditions?.[0]?.url || asset.cdnUrl;
+    const [attached] = await this.db
+      .select({ id: schema.adsCreatives.id })
+      .from(schema.adsCreatives)
+      .where(
+        or(
+          eq(schema.adsCreatives.imageUrl, primaryUrl),
+          eq(schema.adsCreatives.videoUrl, asset.cdnUrl),
+        ),
+      )
+      .limit(1);
+    if (attached)
+      throw new BadRequestException(
+        "This media belongs to a saved creative and cannot be deleted independently.",
+      );
     // If bucket is active, remove from Firebase storage
     try {
       const bucket = this.firebaseStorageService.getBucket();
