@@ -1,9 +1,10 @@
 import { Controller, Post, Headers, Req, HttpCode, BadRequestException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { WebhooksService } from './webhooks.service';
-import { Public } from '@crimfig/shared';
+import { Public, FinancialOperation } from '@crimfig/shared';
 
 @ApiTags('Webhooks')
+@FinancialOperation('webhook')
 @Controller('webhooks')
 export class WebhooksController {
   constructor(private readonly webhooksService: WebhooksService) {}

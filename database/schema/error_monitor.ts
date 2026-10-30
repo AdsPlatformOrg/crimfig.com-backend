@@ -1,0 +1,138 @@
+import {
+  pgTable,
+  uuid,
+  varchar,
+  text,
+  integer,
+  boolean,
+  timestamp,
+  jsonb,
+  index,
+  uniqueIndex,
+} from 'drizzle-orm/pg-core';
+
+export const errorMonitorGroups = pgTable(
+  'error_monitor_groups',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    fingerprint: varchar('fingerprint', { length: 64 }).notNull(),
+    environment: varchar('environment', { length: 32 }).notNull().default('staging'),
+    service: varchar('service', { length: 64 }).notNull(),
+    source: varchar('source', { length: 24 }).notNull().default('server'),
+    httpMethod: varchar('http_method', { length: 16 }).notNull(),
+    normalizedRoute: varchar('normalized_route', { length: 255 }).notNull(),
+    statusCode: integer('status_code').notNull(),
+    severity: varchar('severity', { length: 16 }).notNull().default('error'),
+    errorCategory: varchar('error_category', { length: 80 }).notNull(),
+    safeSummary: varchar('safe_summary', { length: 320 }).notNull(),
+    isFinancialRoute: boolean('is_financial_route').notNull().default(false),
+    financialCategory: varchar('financial_category', { length: 64 }),
+    emailEligibility: varchar('email_eligibility', { length: 32 }).notNull(),
+    exclusionReason: varchar('exclusion_reason', { length: 64 }),
+    notificationState: varchar('notification_state', { length: 32 }).notNull().default('excluded_by_policy'),
+    occurrenceCount: integer('occurrence_count').notNull().default(1),
+    sampledOccurrenceCount: integer('sampled_occurrence_count').notNull().default(1),
+    windowStartedAt: timestamp('window_started_at', { withTimezone: true }),
+    windowEndsAt: timestamp('window_ends_at', { withTimezone: true }),
+    windowSuppressedCount: integer('window_suppressed_count').notNull().default(0),
+    firstSeenAt: timestamp('first_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).defaultNow().notNull(),
+    lastRequestId: varchar('last_request_id', { length: 64 }),
+    railwayLogUrl: varchar('railway_log_url', { length: 512 }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('error_monitor_groups_env_fingerprint_uq').on(table.environment, table.fingerprint),
+    index('error_monitor_groups_service_last_seen_idx').on(table.service, table.lastSeenAt),
+    index('error_monitor_groups_status_last_seen_idx').on(table.statusCode, table.lastSeenAt),
+    index('error_monitor_groups_email_state_idx').on(table.emailEligibility, table.notificationState),
+  ],
+);
+
+export const errorMonitorOccurrences = pgTable(
+  'error_monitor_occurrences',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => errorMonitorGroups.id, { onDelete: 'cascade' }),
+    requestId: varchar('request_id', { length: 64 }).notNull(),
+    correlationId: varchar('correlation_id', { length: 64 }),
+    environment: varchar('environment', { length: 32 }).notNull(),
+    service: varchar('service', { length: 64 }).notNull(),
+    deploymentId: varchar('deployment_id', { length: 96 }),
+    source: varchar('source', { length: 24 }).notNull().default('server'),
+    httpMethod: varchar('http_method', { length: 16 }).notNull(),
+    normalizedRoute: varchar('normalized_route', { length: 255 }).notNull(),
+    statusCode: integer('status_code').notNull(),
+    errorCategory: varchar('error_category', { length: 80 }).notNull(),
+    safeSummary: varchar('safe_summary', { length: 320 }).notNull(),
+    upstreamService: varchar('upstream_service', { length: 64 }),
+    upstreamStatusCode: integer('upstream_status_code'),
+    actorUserId: uuid('actor_user_id'),
+    deviceType: varchar('device_type', { length: 32 }),
+    countryCode: varchar('country_code', { length: 8 }),
+    sanitizedContext: jsonb('sanitized_context').$type<Record<string, unknown>>().notNull().default({}),
+    railwayLogUrl: varchar('railway_log_url', { length: 512 }),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('error_monitor_occurrences_group_occurred_idx').on(table.groupId, table.occurredAt),
+    index('error_monitor_occurrences_request_id_idx').on(table.requestId),
+    index('error_monitor_occurrences_correlation_id_idx').on(table.correlationId),
+  ],
+);
+
+export const errorMonitorOutbox = pgTable(
+  'error_monitor_outbox',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    groupId: uuid('group_id')
+      .notNull()
+      .references(() => errorMonitorGroups.id, { onDelete: 'cascade' }),
+    dedupeKey: varchar('dedupe_key', { length: 140 }).notNull(),
+    kind: varchar('kind', { length: 32 }).notNull().default('initial'),
+    environment: varchar('environment', { length: 32 }).notNull(),
+    recipients: jsonb('recipients').$type<string[]>().notNull(),
+    subject: varchar('subject', { length: 255 }).notNull(),
+    htmlBody: text('html_body').notNull(),
+    textBody: text('text_body').notNull(),
+    occurrenceCount: integer('occurrence_count').notNull().default(1),
+    windowStartedAt: timestamp('window_started_at', { withTimezone: true }).notNull(),
+    windowEndsAt: timestamp('window_ends_at', { withTimezone: true }).notNull(),
+    status: varchar('status', { length: 32 }).notNull().default('pending'),
+    attempts: integer('attempts').notNull().default(0),
+    maxAttempts: integer('max_attempts').notNull().default(4),
+    nextAttemptAt: timestamp('next_attempt_at', { withTimezone: true }).defaultNow().notNull(),
+    leaseOwner: varchar('lease_owner', { length: 80 }),
+    leaseExpiresAt: timestamp('lease_expires_at', { withTimezone: true }),
+    providerMessageId: varchar('provider_message_id', { length: 160 }),
+    lastError: varchar('last_error', { length: 320 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('error_monitor_outbox_dedupe_key_uq').on(table.dedupeKey),
+    index('error_monitor_outbox_status_next_attempt_idx').on(table.status, table.nextAttemptAt),
+    index('error_monitor_outbox_group_id_idx').on(table.groupId),
+  ],
+);
+
+export const errorMonitorSources = pgTable(
+  'error_monitor_sources',
+  {
+    id: uuid('id').defaultRandom().primaryKey(),
+    service: varchar('service', { length: 64 }).notNull(),
+    environment: varchar('environment', { length: 32 }).notNull().default('staging'),
+    displayName: varchar('display_name', { length: 120 }).notNull(),
+    sourceType: varchar('source_type', { length: 24 }).notNull().default('server'),
+    status: varchar('status', { length: 32 }).notNull().default('active'),
+    captureEnabled: boolean('capture_enabled').notNull().default(true),
+    lastHeartbeatAt: timestamp('last_heartbeat_at', { withTimezone: true }),
+    lastEventAt: timestamp('last_event_at', { withTimezone: true }),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex('error_monitor_sources_env_service_uq').on(table.environment, table.service),
+  ],
+);

@@ -376,7 +376,7 @@ export class AdstationController {
     return { status: 'success', data: result };
   }
 
-  @AdsRoles('ads_admin', 'super_admin', 'compliance_reviewer')
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
   @Post('admin/websites/:websiteId/policy')
   @ApiOperation({
     summary: 'Admin: Approve, reject, or set testing policy status on a promoter website',
@@ -399,7 +399,7 @@ export class AdstationController {
     return { status: 'success', data: result };
   }
 
-  @AdsRoles('ads_admin', 'super_admin', 'compliance_reviewer')
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
   @Get('admin/auction-decisions')
   @ApiOperation({
     summary: 'Admin: List recent tamper-evident auction decision snapshots',

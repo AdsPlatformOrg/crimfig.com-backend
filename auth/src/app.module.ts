@@ -9,6 +9,7 @@ import { TokensModule } from './modules/tokens/tokens.module';
 import { DatabaseModule } from './modules/database/database.module';
 import { HealthModule } from './modules/health/health.module';
 import { EmailModule } from './modules/email/email.module';
+import { ErrorMonitorModule } from './modules/error-monitor/error-monitor.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { EmailModule } from './modules/email/email.module';
     MfaModule,          // TOTP enrollment, verification, backup codes
     ConsentModule,      // App-specific Terms acceptance
     OrganizationsModule, // Multi-owner org management + email invites
+    ErrorMonitorModule, // Central Platform Admin Error Monitor & Email Outbox (PLAN-0045)
   ],
 })
 export class AppModule {}

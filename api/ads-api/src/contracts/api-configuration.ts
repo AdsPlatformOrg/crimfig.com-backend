@@ -4,7 +4,7 @@ import { VersioningType } from '@nestjs/common';
 export const ADS_API_PREFIX = 'api';
 export const ADS_API_VERSION = '1';
 export function configureAdsApi(app: {
-  enableVersioning(options: { type: VersioningType; defaultVersion: string }): unknown;
+  enableVersioning(options: { type: VersioningType.URI; defaultVersion: string }): unknown;
   setGlobalPrefix(prefix: string): unknown;
 }) {
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: ADS_API_VERSION });

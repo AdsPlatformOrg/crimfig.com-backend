@@ -1,6 +1,7 @@
 import { AdsRoles } from '../security/ads-staff-grants';
 import { Controller, Get, Post, Body, Param, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { FinancialOperation } from '@crimfig/shared';
 import { AdsEscrowService } from './ads-escrow.service';
 import { AdsSettlementService } from './ads-settlement.service';
 import { DeferredAuditService } from './deferred-audit.service';
@@ -40,6 +41,7 @@ export class ReleaseCampaignEscrowDto {
 }
 
 @ApiTags('Ads Billing & Escrow')
+@FinancialOperation('escrow')
 @AdsRoles('ads_finance', 'ads_admin', 'super_admin')
 @Controller('ads/billing')
 export class AdsBillingController {

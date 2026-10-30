@@ -1,5 +1,6 @@
 import { Injectable, ServiceUnavailableException, BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { ensureRequestId } from '@crimfig/shared';
 
 export interface WalletBalanceResponse {
   userId: string;
@@ -30,13 +31,19 @@ export class BillingEcosystemClient {
     this.internalKey = config.get<string>('INTERNAL_ECOSYSTEM_KEY') || '';
   }
 
-  private async request(userId: string, action: string, body?: Record<string, unknown>): Promise<any> {
+  private async request(userId: string, action: string, body?: Record<string, unknown>, requestId?: string): Promise<any> {
     if (!this.internalKey) throw new ServiceUnavailableException('Billing service authorization is not configured');
     if (typeof userId !== 'string' || !userId.trim()) throw new BadRequestException('Wallet owner is required');
+    const correlationId = ensureRequestId(requestId);
     try {
       const response = await fetch(`${this.billingApiUrl}/ecosystem/wallets/${encodeURIComponent(userId)}/${action}`, {
         method: body ? 'POST' : 'GET',
-        headers: { 'Content-Type': 'application/json', 'x-internal-key': this.internalKey },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-key': this.internalKey,
+          'x-request-id': correlationId,
+          'x-correlation-id': correlationId,
+        },
         ...(body ? { body: JSON.stringify(body) } : {}),
         redirect: 'error',
         signal: AbortSignal.timeout(10_000),
@@ -89,7 +96,13 @@ export class BillingEcosystemClient {
     if (!this.internalKey) throw new ServiceUnavailableException('Billing service authorization is not configured');
     try {
       const response = await fetch(`${this.billingApiUrl}/ecosystem/campaigns/${campaignId}/settlements`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-internal-key': this.internalKey },
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-internal-key': this.internalKey,
+          'x-request-id': requestId,
+          'x-correlation-id': requestId,
+        },
         body: JSON.stringify({ requestId, periodEnd }), redirect: 'error', signal: AbortSignal.timeout(10_000),
       });
       const json = await response.json() as any;

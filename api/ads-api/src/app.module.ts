@@ -1,5 +1,5 @@
-import { APP_GUARD } from '@nestjs/core';
-import { DashboardAuthModule } from '@crimfig/shared';
+import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
+import { DashboardAuthModule, ErrorMonitorCaptureInterceptor } from '@crimfig/shared';
 import { AdsAccessGuard } from './modules/security/ads-access.guard';
 import { AdsStaffGrants } from './modules/security/ads-staff-grants';
 import { Module } from '@nestjs/common';
@@ -46,6 +46,14 @@ import { AdvertiserMilestonesModule } from './modules/advertiser-milestones/adve
     AdstationModule,
     AdvertiserMilestonesModule,
   ],
-  providers: [AdsStaffGrants, { provide: APP_GUARD, useClass: AdsAccessGuard }],
+  providers: [
+    AdsStaffGrants,
+    { provide: APP_GUARD, useClass: AdsAccessGuard },
+    {
+      provide: APP_INTERCEPTOR,
+      useFactory: (reflector: Reflector) => new ErrorMonitorCaptureInterceptor('ads-api', reflector),
+      inject: [Reflector],
+    },
+  ],
 })
 export class AppModule {}

@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import { FinancialOperation } from '@crimfig/shared';
 import { WalletService } from './wallet.service';
 import { IsNumber, IsOptional, IsBoolean, IsString, Min, IsUUID } from 'class-validator';
 
@@ -25,6 +26,7 @@ export class FundWalletDto {
 }
 
 @ApiTags('Wallet')
+@FinancialOperation('wallet')
 @Controller('wallet')
 export class WalletController {
   constructor(private readonly walletService: WalletService) {}

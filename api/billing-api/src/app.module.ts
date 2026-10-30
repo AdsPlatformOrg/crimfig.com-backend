@@ -13,8 +13,8 @@ import { WebhooksModule } from './modules/webhooks/webhooks.module';
 import { EcosystemModule } from './modules/ecosystem/ecosystem.module';
 import { HealthModule } from './modules/health/health.module';
 import { RewardsModule } from './modules/rewards/rewards.module';
-import { APP_GUARD } from '@nestjs/core';
-import { DashboardAuthModule } from '@crimfig/shared';
+import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
+import { DashboardAuthModule, ErrorMonitorCaptureInterceptor } from '@crimfig/shared';
 import { BillingAccessGuard } from './modules/security/billing-access.guard';
 
 @Module({
@@ -35,6 +35,14 @@ import { BillingAccessGuard } from './modules/security/billing-access.guard';
     HealthModule,
     RewardsModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: BillingAccessGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: BillingAccessGuard },
+    {
+      provide: APP_INTERCEPTOR,
+      useFactory: (reflector: Reflector) =>
+        new ErrorMonitorCaptureInterceptor('billing-api', reflector),
+      inject: [Reflector],
+    },
+  ],
 })
 export class AppModule {}

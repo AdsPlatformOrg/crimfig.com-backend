@@ -162,6 +162,13 @@
       "when": 1793360000000,
       "tag": "0023_promoter_supply_auction_and_evidence",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1793380000000,
+      "tag": "0024_platform_error_monitor",
+      "breakpoints": true
     }
   ]
 }

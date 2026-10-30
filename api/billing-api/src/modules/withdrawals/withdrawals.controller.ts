@@ -1,6 +1,7 @@
 import { RefundReviewService } from './refund-review.service';
 import { Controller, Get, Post, Body, Req, Param, ForbiddenException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { FinancialOperation } from '@crimfig/shared';
 import { WithdrawalsService } from './withdrawals.service';
 import { IsNumber, IsUUID, Max, Min, IsString, IsIn, IsInt, MaxLength } from 'class-validator';
 
@@ -66,6 +67,7 @@ export class ApproveRefundReviewDto {
 }
 
 @ApiTags('Withdrawals')
+@FinancialOperation('withdrawal')
 @Controller('withdrawals')
 export class WithdrawalsController {
   constructor(private readonly withdrawalsService: WithdrawalsService, @Optional() private readonly refundReview?: RefundReviewService) {}

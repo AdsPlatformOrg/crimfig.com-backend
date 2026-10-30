@@ -57,3 +57,47 @@ export type { LogLevel, LogEntry } from './logger';
 // Default-deny first-party dashboard authentication (not publisher ad delivery).
 export { AccessTokenGuard, DashboardAuthModule } from './security/access-token.guard';
 export { dashboardOrigins, validateDashboardOrigins } from './security/dashboard-origins';
+
+// Platform Error Monitor & Alerting (PLAN-0045)
+export {
+  DEFAULT_ERROR_ALERT_RECIPIENTS,
+  DEFAULT_SUPPRESSION_WINDOW_MS,
+  REFUSED_INPUT_SUPPRESSION_WINDOW_MS,
+  MAX_OCCURRENCE_SAMPLES_PER_GROUP,
+  resolveErrorAlertRecipients,
+  resolveErrorMonitorEnvironment,
+  resolveErrorMonitorConfig,
+} from './monitoring/error-alert.config';
+export type {
+  ErrorMonitorEnvironment,
+  ErrorMonitorRuntimeConfig,
+} from './monitoring/error-alert.config';
+export {
+  FINANCIAL_OPERATION_KEY,
+  FinancialOperation,
+  ALLOWLISTED_ERROR_SERVICES,
+  classifyErrorEmailEligibility,
+  normalizeErrorRoute,
+  sanitizeMonitorString,
+  sanitizeMonitorContext,
+  resolveSafeCategoryAndSummary,
+  computeErrorFingerprint,
+  buildRailwayLogUrl,
+  escapeHtml,
+  ensureRequestId,
+  redactAndSanitizeErrorEvent,
+} from './monitoring/error-monitor.contract';
+export type {
+  FinancialOperationCategory,
+  FinancialOperationMetadata,
+  ErrorSourceType,
+  EmailEligibility,
+  EmailExclusionReason,
+  NotificationDeliveryState,
+  EmailEligibilityDecision,
+  RawErrorCaptureInput,
+  SanitizedErrorMonitorEvent,
+  AllowlistedErrorService,
+} from './monitoring/error-monitor.contract';
+export { ErrorMonitorCaptureInterceptor } from './monitoring/error-monitor.interceptor';
+export type { ErrorMonitorSink } from './monitoring/error-monitor.interceptor';

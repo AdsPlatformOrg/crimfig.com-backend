@@ -16,7 +16,7 @@ import { CampaignEscrowService } from './campaign-escrow.service';
 import { WalletService } from '../wallet/wallet.service';
 import { IsNumber, IsString, Min, IsIn, IsUUID, IsISO8601 } from 'class-validator';
 import { AdSettlementService } from './ad-settlement.service';
-import { Public } from '@crimfig/shared';
+import { Public, FinancialOperation } from '@crimfig/shared';
 import { timingSafeEqual } from 'crypto';
 import { BillingStaffGrants } from '../security/billing-staff-grants';
 
@@ -67,6 +67,7 @@ export class FundedSettlementDto {
 }
 
 @ApiTags('Internal Ecosystem')
+@FinancialOperation('escrow')
 @Controller('ecosystem')
 
 export class EcosystemController {
