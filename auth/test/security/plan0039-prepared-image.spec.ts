@@ -5,7 +5,7 @@ import {
 } from "../../../api/ads-api/src/modules/uploads/prepared-image";
 const manifest = {
   version: 1,
-  quality: 0.97,
+  quality: 1.0,
   profile: "standard",
   layout: "card",
   ratio: 1,
@@ -37,19 +37,19 @@ describe("prepared image validation", () => {
       width: 600,
       height: 600,
       mime: "image/webp",
-      cap: 150000,
+      cap: 250000,
     }));
   it("rejects MIME forgery, malformed image, cap overflow, ratio mismatch and low-quality manifest", async () => {
     const valid = await file();
     for (const f of [
       { ...valid, mimetype: "image/jpeg" },
       { ...valid, buffer: Buffer.from("bad"), size: 3 },
-      { ...valid, buffer: Buffer.alloc(150001), size: 150001 },
+      { ...valid, buffer: Buffer.alloc(250001), size: 250001 },
       await file(600, 300),
     ])
       await expect(validatePreparedImages([f], manifest)).rejects.toThrow();
     await expect(
-      validatePreparedImages([valid], { ...manifest, quality: 0.96 }),
+      validatePreparedImages([valid], { ...manifest, quality: 0.95 }),
     ).rejects.toThrow();
   });
   it("rejects EXIF data rather than retaining location metadata", async () => {

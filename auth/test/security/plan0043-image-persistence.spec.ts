@@ -122,8 +122,8 @@ describe("PLAN-0043 confirmed metadata persistence", () => {
       height: 600,
       mimeType: "image/webp",
       bytes: file.size,
-      cap: 150000,
-      target: 100000,
+      cap: 250000,
+      target: 230000,
     });
     expect(result.preparation.renditions[0].sha256).toMatch(/^[a-f0-9]{64}$/);
   });

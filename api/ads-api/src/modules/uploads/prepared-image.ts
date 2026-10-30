@@ -1,8 +1,8 @@
 import sharp from "sharp";
 export const IMAGE_PROFILES = {
-  compact: { target: 40000, cap: 50000 },
-  standard: { target: 100000, cap: 150000 },
-  larger: { target: 150000, cap: 200000 },
+  compact: { target: 80000, cap: 100000 },
+  standard: { target: 230000, cap: 250000 },
+  larger: { target: 280000, cap: 300000 },
 } as const;
 export async function validatePreparedImages(
   files: Express.Multer.File[],
@@ -11,7 +11,7 @@ export async function validatePreparedImages(
   if (
     !manifest ||
     manifest.version !== 1 ||
-    manifest.quality !== 0.97 ||
+    (manifest.quality !== 1.0 && manifest.quality !== 0.97) ||
     !["card", "banner"].includes(manifest.layout) ||
     !IMAGE_PROFILES[manifest.profile as keyof typeof IMAGE_PROFILES]
   )
@@ -20,9 +20,9 @@ export async function validatePreparedImages(
     !Array.isArray(files) ||
     !files.length ||
     files.length > 3 ||
-    files.reduce((n, f) => n + f.size, 0) > 450000
+    files.reduce((n, f) => n + f.size, 0) > 700000
   )
-    throw Error("Upload one to three prepared images, at most 450 KB total.");
+    throw Error("Upload one to three prepared images, at most 700 KB total.");
   if (
     !Number.isFinite(manifest.ratio) ||
     manifest.ratio <= 0 ||
@@ -57,7 +57,7 @@ export async function validatePreparedImages(
     const cap =
       i === 0
         ? IMAGE_PROFILES[manifest.profile as keyof typeof IMAGE_PROFILES].cap
-        : 50000;
+        : 100000;
     if (f.size !== f.buffer.length || !f.size || f.size > cap)
       throw Error("Prepared image exceeds its delivered byte cap.");
     const image = sharp(f.buffer, {

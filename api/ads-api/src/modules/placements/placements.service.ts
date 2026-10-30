@@ -134,7 +134,7 @@ export class PlacementsService {
         websiteId: params.websiteId || null,
         appId: params.appId || null,
         placementToken,
-        imageMaxBytes: params.imageMaxBytes ?? 150000,
+        imageMaxBytes: params.imageMaxBytes ?? 250000,
         linkSignature,
         status: "active",
       })

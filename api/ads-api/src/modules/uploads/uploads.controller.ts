@@ -100,7 +100,7 @@ export class UploadsController {
   @Post("prepared")
   @UseInterceptors(
     FilesInterceptor("files", 3, {
-      limits: { fileSize: 200000, files: 3, fields: 1, fieldSize: 8192 },
+      limits: { fileSize: 300000, files: 3, fields: 1, fieldSize: 8192 },
     }),
   )
   async uploadPrepared(

@@ -216,7 +216,7 @@ export const placementStatusEnum = pgEnum("ads_placement_status", [
 export const adsPlacements = pgTable(
   "ads_placements",
   {
-    imageMaxBytes: integer("image_max_bytes").notNull().default(150000),
+    imageMaxBytes: integer("image_max_bytes").notNull().default(250000),
     id: uuid("id").primaryKey().defaultRandom(),
     campaignId: uuid("campaign_id")
       .notNull()

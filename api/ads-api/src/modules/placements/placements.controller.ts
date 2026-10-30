@@ -5,7 +5,7 @@ import { PromotersService } from "../promoters/promoters.service";
 import { IsString, IsOptional, IsInt, Min, Max } from "class-validator";
 
 export class CreatePlacementDto {
-  @IsOptional() @IsInt() @Min(1000) @Max(200000) imageMaxBytes?: number;
+  @IsOptional() @IsInt() @Min(1000) @Max(300000) imageMaxBytes?: number;
   @IsString()
   campaignId: string;
 

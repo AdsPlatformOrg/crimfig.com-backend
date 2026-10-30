@@ -1225,8 +1225,8 @@ export class DeliveryService {
         ? 'banner'
         : 'card';
     const imageCap = Math.min(
-      placement?.imageMaxBytes ?? 150000,
-      requestedLayout === 'banner' ? 50000 : 200000,
+      placement?.imageMaxBytes ?? 250000,
+      requestedLayout === 'banner' ? 100000 : 300000,
     );
 
     const compatibleCandidates = eligibleCandidates.filter((candidate: any) => {
@@ -1328,7 +1328,7 @@ export class DeliveryService {
       const rendition = selectImageRendition(
         winningCreative,
         (winningCreative as any).adFormat || 'card',
-        Math.min((placement as any).imageMaxBytes ?? 150000, 200000),
+        Math.min((placement as any).imageMaxBytes ?? 250000, 300000),
       );
       if (!rendition)
         throw new NotFoundException(

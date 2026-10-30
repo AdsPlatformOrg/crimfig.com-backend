@@ -169,6 +169,13 @@
       "when": 1793380000000,
       "tag": "0024_platform_error_monitor",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793400000000,
+      "tag": "0025_update_placement_image_cap",
+      "breakpoints": true
     }
   ]
 }
