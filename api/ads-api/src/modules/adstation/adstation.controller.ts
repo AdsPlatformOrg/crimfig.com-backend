@@ -1,3 +1,4 @@
+import { AdsRoles } from '../security/ads-staff-grants';
 import { Controller, Get, Post, Put, Body, Param, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AdstationService } from './adstation.service';
@@ -140,6 +141,7 @@ export class AdstationController {
   @Post('direct-events')
   @ApiOperation({ summary: 'Record direct deal impression/click event with idempotency' })
   async recordDirectEvent(
+    @Req() req: any,
     @Body()
     dto: {
       directCampaignId: string;
@@ -151,17 +153,25 @@ export class AdstationController {
       viewDurationMs?: number;
     },
   ) {
-    const result = await this.adstationService.recordDirectEvent(dto);
+    const userId = req.user.sub;
+    const promoter = await this.promotersService.getOrCreatePromoter(userId, 'WEBSITE');
+    const result = await this.adstationService.recordDirectEvent({
+      ...dto,
+      promoterId: promoter.id,
+    });
     return { status: 'success', data: result };
   }
 
   @Get('websites/:websiteId/health')
   @ApiOperation({ summary: 'Audit consideration slot health and 48h grace status' })
-  async getWebsiteHealth(@Param('websiteId') websiteId: string) {
-    const result = await this.adstationService.checkConsiderationSlotHealth(websiteId);
+  async getWebsiteHealth(@Req() req: any, @Param('websiteId') websiteId: string) {
+    const userId = req.user.sub;
+    const promoter = await this.promotersService.getOrCreatePromoter(userId, 'WEBSITE');
+    const result = await this.adstationService.checkConsiderationSlotHealth(websiteId, promoter.id);
     return { status: 'success', data: result };
   }
 
+  @AdsRoles('ads_admin', 'super_admin')
   @Post('admin/websites/:websiteId/suspend')
   @ApiOperation({ summary: 'Super Admin: Suspend website direct deal serving' })
   async suspendWebsite(
@@ -172,6 +182,7 @@ export class AdstationController {
     return { status: 'success', data: result };
   }
 
+  @AdsRoles('ads_admin', 'super_admin')
   @Post('admin/websites/:websiteId/reinstate')
   @ApiOperation({ summary: 'Super Admin: Reinstate website direct deal serving' })
   async reinstateWebsite(@Param('websiteId') websiteId: string) {

@@ -119,11 +119,16 @@ export class BillingEcosystemClient {
   }
 
   async reserveCampaignEscrow(userId: string, campaignId: string, amountUsdCents: number) {
+    return (await this.reserveCampaignEscrowReceipt(userId,campaignId,amountUsdCents)).escrow;
+  }
+
+  async reserveCampaignEscrowReceipt(userId: string, campaignId: string, amountUsdCents: number) {
     if (!Number.isSafeInteger(amountUsdCents) || amountUsdCents < 500 || amountUsdCents > 2147483647) {
       throw new BadRequestException('Escrow requires 500 to 2147483647 integer USD cents');
     }
     const data = await this.request(userId, `campaign-escrows/${encodeURIComponent(campaignId)}/reserve`, { amountUsdCents, reason: 'Campaign budget reservation' });
-    return this.checkedEscrow(data, userId, campaignId, 'reserve');
+    this.checkedEscrow(data, userId, campaignId, 'reserve');
+    return data;
   }
 
   async releaseCampaignEscrow(userId: string, campaignId: string) {

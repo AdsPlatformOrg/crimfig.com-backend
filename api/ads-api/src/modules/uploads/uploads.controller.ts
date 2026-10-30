@@ -20,6 +20,7 @@ import { Request, Response } from "express";
 import { UploadsService } from "./uploads.service";
 import { IsString, IsNumber, IsOptional, Min } from "class-validator";
 import { ADS_MEDIA_UPLOAD_SETTINGS } from "../../config/ads-settings.constants";
+import { documentAdsController } from '../../contracts/ads-contract';
 
 export class PresignUploadDto {
   @IsString()
@@ -283,3 +284,5 @@ export class UploadsController {
     return { status: "success", data: result };
   }
 }
+
+documentAdsController(UploadsController);

@@ -5,10 +5,11 @@ dotenv.config();
 
 import { AdsGlobalExceptionFilter } from './modules/security/ads-exception.filter';
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, VersioningType, Logger, ShutdownSignal } from '@nestjs/common';
+import { ValidationPipe, Logger, ShutdownSignal } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { configureAdsApi } from './contracts/api-configuration';
 
 const logger = new Logger('Bootstrap');
 
@@ -33,8 +34,7 @@ async function bootstrap() {
     }),
   );
 
-  app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
-  app.setGlobalPrefix('api');
+  configureAdsApi(app);
 
   if (process.env.NODE_ENV !== 'production') {
     const document = SwaggerModule.createDocument(

@@ -7,6 +7,7 @@ import { PlacementsService } from '../../../api/ads-api/src/modules/placements/p
 import { UploadsService } from '../../../api/ads-api/src/modules/uploads/uploads.service';
 import { ConversionsService } from '../../../api/ads-api/src/modules/conversions/conversions.service';
 import { ModerationService } from '../../../api/ads-api/src/modules/moderation/moderation.service';
+import { AdstationService } from '../../../api/ads-api/src/modules/adstation/adstation.service';
 
 /** Isolated query adapter records Drizzle predicates; no real database is contacted. */
 function database(rows: any[][]) {
@@ -17,6 +18,7 @@ function database(rows: any[][]) {
       const chain: any = {
         from: () => chain, innerJoin: () => chain, orderBy: () => chain,
         where: (where: any) => { predicates.push(dialect.sqlToQuery(where)); return chain; },
+        for: () => chain,
         limit: async () => result,
         then: (resolve: any, reject: any) => Promise.resolve(result).then(resolve, reject),
       };
@@ -61,7 +63,8 @@ describe('Ads object ownership and workflow boundaries', () => {
   });
 
   it('does not activate an approved campaign if funding fails', async () => {
-    const { db } = database([[{ id: 'campaign', status: 'paused', moderationStatus: 'approved', remainingBudgetUsdCents: 500 }]]);
+    const subId = '11111111-1111-4111-8111-111111111111';
+    const { db } = database([[{ id: 'campaign', status: 'paused', moderationStatus: 'approved', remainingBudgetUsdCents: 500, contentRevision: 1, currentSubmissionId: subId, approvedSubmissionId: subId, approvedRevision: 1, submissionIntentId: null }]]);
     const escrow = { changeCampaignStatus: jest.fn(async () => { throw new Error('Billing unavailable'); }) };
     await expect(new CampaignsService(db, escrow as any, {} as any).updateStatus('campaign', 'owner', 'active')).rejects.toThrow('Billing unavailable');
     expect(db.update).not.toHaveBeenCalled();
@@ -89,6 +92,22 @@ describe('Ads object ownership and workflow boundaries', () => {
     expect(wrongCreative.db.insert).not.toHaveBeenCalled();
   });
 
+  it('AdStation direct campaign creation, direct event recording and health checks enforce promoter website ownership', async () => {
+    const foreignSite = database([[]]);
+    await expect(new AdstationService(foreignSite.db).createDirectCampaign('promoter', { websiteId: 'foreign-site', clientName: 'Acme', campaignTitle: 'Deal', destinationUrl: 'https://acme.test' })).rejects.toBeInstanceOf(NotFoundException);
+    expect(foreignSite.predicates[0].params).toEqual(expect.arrayContaining(['foreign-site', 'promoter']));
+    expect(foreignSite.db.insert).not.toHaveBeenCalled();
+
+    const foreignEvent = database([[]]);
+    await expect(new AdstationService(foreignEvent.db).recordDirectEvent({ promoterId: 'promoter', directCampaignId: 'foreign-camp', websiteId: 'foreign-site', eventType: 'impression', idempotencyKey: 'key-1' })).rejects.toBeInstanceOf(NotFoundException);
+    expect(foreignEvent.predicates[0].params).toEqual(expect.arrayContaining(['foreign-camp', 'promoter', 'foreign-site']));
+    expect(foreignEvent.db.insert).not.toHaveBeenCalled();
+
+    const foreignHealth = database([[]]);
+    await expect(new AdstationService(foreignHealth.db).checkConsiderationSlotHealth('foreign-site', 'promoter')).rejects.toBeInstanceOf(NotFoundException);
+    expect(foreignHealth.predicates[0].params).toEqual(expect.arrayContaining(['foreign-site', 'promoter']));
+  });
+
   it('private media requires an owner match and public media requires approved active binding before bucket access', async () => {
     const bucket = { getBucket: jest.fn() };
     const owner = database([[]]);
@@ -101,24 +120,34 @@ describe('Ads object ownership and workflow boundaries', () => {
   });
 
   it('manager approval and emergency override never bypass funded activation', async () => {
+    const campId = '11111111-1111-4111-8111-111111111111', subId = '22222222-2222-4222-8222-222222222222', reqId = '33333333-3333-4333-8333-333333333333';
     for (const method of ['reviewCampaignManager', 'emergencyOverride'] as const) {
-      const { db } = database([[{ id: 'campaign', advertiserId: 'owner', moderationStatus: 'pending_manager_approval', status: 'under_review' }], [{ reviewerId: 'primary-reviewer' }]]);
+      const camp = { id: campId, advertiserId: 'owner', moderationStatus: 'pending_manager_approval', status: 'paused', currentSubmissionId: subId, contentRevision: 1, primaryReviewerId: 'primary-reviewer' };
+      const { db } = database([[camp], [], [{ id: subId, state: 'submitted', contentRevision: 1 }], [], [], [], [{ id: 'c1', reviewStatus: 'approved' }], [], [], []]);
       const values: any[] = [];
-      db.update = () => ({ set: (value: any) => { values.push(value); return { where: () => ({ returning: async () => [{ id: 'campaign', ...value }] }) }; } });
-      const result = await new ModerationService(db)[method]('campaign', { reviewerId: 'manager', decision: 'approved', overrideReason: 'Documented emergency fixture reason' });
-      expect(values.at(-1)).toMatchObject({ status: 'paused', moderationStatus: 'approved' });
+      db.execute = jest.fn();
+      db.transaction = (fn: any) => fn(db);
+      db.update = () => ({ set: (value: any) => { values.push(value); return { where: () => ({ returning: async () => [{ ...camp, ...value }] }) }; } });
+      const service = new ModerationService(db);
+      const result: any = await service[method](campId, { reviewerId: 'manager', decision: 'approved', overrideReason: 'Documented emergency fixture reason', expectedRevision: 1, submissionId: subId, requestId: reqId });
+      expect(values.at(-1)).toMatchObject({ status: 'paused', moderationStatus: 'approved', approvedSubmissionId: subId, approvedRevision: 1 });
       expect(result.live).toBe(false);
     }
   });
 
   it('prevents staff owners from reviewing their own campaign or creative', async () => {
+    const campId = '11111111-1111-4111-8111-111111111111', subId = '22222222-2222-4222-8222-222222222222', reqId = '33333333-3333-4333-8333-333333333333';
     for (const method of ['reviewCampaignPrimary', 'reviewCampaignManager'] as const) {
-      const { db } = database([[{ advertiserId: 'owner' }]]);
-      await expect(new ModerationService(db)[method]('campaign', { reviewerId: 'owner', decision: 'approved' })).rejects.toBeInstanceOf(BadRequestException);
+      const { db } = database([[{ id: campId, advertiserId: 'owner' }]]);
+      db.execute = jest.fn();
+      db.transaction = (fn: any) => fn(db);
+      await expect(new ModerationService(db)[method](campId, { reviewerId: 'owner', decision: 'approved', expectedRevision: 1, submissionId: subId, requestId: reqId })).rejects.toBeInstanceOf(BadRequestException);
       expect(db.insert).not.toHaveBeenCalled();
     }
-    const { db } = database([[{ campaignId: 'campaign' }], [{ advertiserId: 'owner' }]]);
-    await expect(new ModerationService(db).reviewCreative('creative', { reviewerId: 'owner', decision: 'approved' })).rejects.toBeInstanceOf(BadRequestException);
+    const { db } = database([[{ campaignId: campId }], [{ id: campId, advertiserId: 'owner' }]]);
+    db.execute = jest.fn();
+    db.transaction = (fn: any) => fn(db);
+    await expect(new ModerationService(db).reviewCreative('creative', { reviewerId: 'owner', decision: 'approved', expectedRevision: 1, submissionId: subId, requestId: reqId })).rejects.toBeInstanceOf(BadRequestException);
     expect(db.insert).not.toHaveBeenCalled();
   });
 });

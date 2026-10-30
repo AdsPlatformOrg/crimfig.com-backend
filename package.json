@@ -11,6 +11,8 @@
     "yarn": "PLEASE_USE_PNPM_INSTEAD"
   },
   "scripts": {
+    "api:generate": "node ../frontend/shared/api-client/scripts/contracts.mjs generate",
+    "api:check": "node ../frontend/shared/api-client/scripts/contracts.mjs check",
     "preinstall": "npx only-allow pnpm",
     "build": "turbo run build && node scripts/compiled-runtime-smoke.cjs",
     "db:generate": "pnpm --filter @crimfig/database db:generate",

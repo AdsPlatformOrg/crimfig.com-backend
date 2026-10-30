@@ -1,10 +1,14 @@
+import { MutationDto } from '../campaigns/campaigns.controller';
+import { IsUUID } from 'class-validator';
 import { AdsRoles } from '../security/ads-staff-grants';
-import { Controller, Get, Post, Body, Param, Req, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Req, UseGuards, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ModerationService } from './moderation.service';
 import { IsIn, IsOptional, IsString, IsBoolean } from 'class-validator';
+import { documentAdsController } from '../../contracts/ads-contract';
 
-export class ReviewDecisionDto {
+export class ReviewDecisionDto extends MutationDto {
+  @IsUUID() submissionId:string;
   @IsIn(['approved', 'rejected'])
   decision: 'approved' | 'rejected';
 
@@ -17,7 +21,8 @@ export class ReviewDecisionDto {
   note?: string;
 }
 
-export class EmergencyOverrideDto {
+export class EmergencyOverrideDto extends MutationDto {
+  @IsUUID() submissionId:string;
   @IsIn(['approved', 'rejected'])
   decision: 'approved' | 'rejected';
 
@@ -48,16 +53,24 @@ export class ModerationController {
     return { status: 'success', data: queue };
   }
 
+  @Get('campaigns/:id/submission')
+  async submissionDetail(@Param('id',new ParseUUIDPipe()) id:string) {return {status:'success',data:await this.moderationService.submissionDetail(id)};}
+
+  @AdsRoles('super_admin')
+  @Get('campaigns/:id/change-audit')
+  async changeAudit(@Param('id',new ParseUUIDPipe()) id:string,@Query('offset') offset?:string) {return {status:'success',data:await this.moderationService.changeAudit(id, Number(offset)||0)};}
+
   @AdsRoles('ads_reviewer')
   @Post('creatives/:id/decision')
   @ApiOperation({ summary: 'Approve or reject creative asset' })
   async reviewCreative(
-    @Param('id') creativeId: string,
+    @Param('id',new ParseUUIDPipe()) creativeId: string,
     @Body() dto: ReviewDecisionDto,
     @Req() req: any,
   ) {
     const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCreative(creativeId, {
+      ...dto,
       decision: dto.decision,
       reasonCode: dto.reasonCode,
       note: dto.note,
@@ -70,12 +83,13 @@ export class ModerationController {
   @Post('campaigns/:id/primary-review')
   @ApiOperation({ summary: 'Tier-1 primary review by ADS ADMIN Reviewer (under_review -> pending_manager_approval | rejected)' })
   async primaryReviewCampaign(
-    @Param('id') campaignId: string,
+    @Param('id',new ParseUUIDPipe()) campaignId: string,
     @Body() dto: ReviewDecisionDto,
     @Req() req: any,
   ) {
     const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCampaignPrimary(campaignId, {
+      ...dto,
       decision: dto.decision,
       reasonCode: dto.reasonCode,
       note: dto.note,
@@ -88,12 +102,13 @@ export class ModerationController {
   @Post('campaigns/:id/manager-approval')
   @ApiOperation({ summary: 'Tier-2 manager approval by ADS ADMIN Reviewer Manager (pending_manager_approval -> active | rejected)' })
   async managerApprovalCampaign(
-    @Param('id') campaignId: string,
+    @Param('id',new ParseUUIDPipe()) campaignId: string,
     @Body() dto: ReviewDecisionDto,
     @Req() req: any,
   ) {
     const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCampaignManager(campaignId, {
+      ...dto,
       decision: dto.decision,
       reasonCode: dto.reasonCode,
       note: dto.note,
@@ -106,13 +121,14 @@ export class ModerationController {
   @Post('campaigns/:id/emergency-override')
   @ApiOperation({ summary: 'Super Admin emergency override with mandatory documented reason and audit trail' })
   async emergencyOverride(
-    @Param('id') campaignId: string,
+    @Param('id',new ParseUUIDPipe()) campaignId: string,
     @Body() dto: EmergencyOverrideDto,
     @Req() req: any,
   ) {
     const reviewerId = req.user.sub;
     const result = await this.moderationService.emergencyOverride(campaignId, {
       reviewerId,
+      ...dto,
       decision: dto.decision,
       overrideReason: dto.overrideReason,
     });
@@ -123,12 +139,13 @@ export class ModerationController {
   @Post('campaigns/:id/decision')
   @ApiOperation({ summary: 'Legacy campaign review fallback (calls primary review)' })
   async reviewCampaign(
-    @Param('id') campaignId: string,
+    @Param('id',new ParseUUIDPipe()) campaignId: string,
     @Body() dto: ReviewDecisionDto,
     @Req() req: any,
   ) {
     const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCampaign(campaignId, {
+      ...dto,
       decision: dto.decision,
       reasonCode: dto.reasonCode,
       note: dto.note,
@@ -141,7 +158,7 @@ export class ModerationController {
   @Post('promoters/:id/suspend')
   @ApiOperation({ summary: 'Suspend or unsuspend promoter account' })
   async suspendPromoter(
-    @Param('id') promoterId: string,
+    @Param('id',new ParseUUIDPipe()) promoterId: string,
     @Body() dto: SuspendPromoterDto,
   ) {
     const result = await this.moderationService.setPromoterSuspension(
@@ -152,3 +169,5 @@ export class ModerationController {
     return { status: 'success', data: result };
   }
 }
+
+documentAdsController(ModerationController);

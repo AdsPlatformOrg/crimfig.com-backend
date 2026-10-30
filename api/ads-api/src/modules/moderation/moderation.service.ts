@@ -1,337 +1,95 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
-import {
-  adsCampaigns,
-  adsCreatives,
-  adsModerationDecisions,
-  adsPromoters,
-} from '@crimfig/database/schema';
-import { eq, desc, and } from 'drizzle-orm';
-
-export interface ReviewDecisionParams {
-  decision: 'approved' | 'rejected';
-  reasonCode?: string;
-  note?: string;
-  reviewerId: string;
+import { adsCampaigns, adsCreatives, adsModerationDecisions, adsPromoters, adsCampaignSubmissions, adsCampaignMutations, adsCampaignChanges } from '@crimfig/database/schema';
+import { eq, desc, and, sql } from 'drizzle-orm';
+import { CampaignWorkflow, controlRequired, fingerprint, uuidPattern, type ReviewControl } from '../campaigns/campaign-workflow';
+export interface ReviewDecisionParams extends ReviewControl {
+  decision:'approved'|'rejected'; reasonCode?:string; note?:string; reviewerId:string; overrideReason?:string;
 }
-
 @Injectable()
 export class ModerationService {
-  private readonly logger = new Logger(ModerationService.name);
-
-  constructor(
-    @Inject(DATABASE_TOKEN)
-    private readonly db: NodePgDatabase<typeof schema>,
-  ) {}
-
-  /**
-   * Get queue of items pending compliance / moderation review
-   */
-  async getQueue(stage?: 'reviewer' | 'manager') {
-    let statusFilter = eq(adsCampaigns.moderationStatus, 'pending_primary_review');
-    if (stage === 'manager') {
-      statusFilter = eq(adsCampaigns.moderationStatus, 'pending_manager_approval');
-    }
-
-    const pendingCampaigns = await this.db
-      .select({
-        id: adsCampaigns.id,
-        advertiserId: adsCampaigns.advertiserId,
-        title: adsCampaigns.title,
-        status: adsCampaigns.status,
-        moderationStatus: adsCampaigns.moderationStatus,
-        pricingModel: adsCampaigns.pricingModel,
-        budgetUsdCents: adsCampaigns.budgetUsdCents,
-        createdAt: adsCampaigns.createdAt,
-      })
-      .from(adsCampaigns)
-      .where(stage ? statusFilter : and(eq(adsCampaigns.moderationStatus, 'pending_primary_review')))
-      .orderBy(desc(adsCampaigns.createdAt))
-      .limit(50);
-
-    const pendingCreatives = await this.db
-      .select({
-        id: adsCreatives.id,
-        campaignId: adsCreatives.campaignId,
-        headline: adsCreatives.headline,
-        bodyText: adsCreatives.bodyText,
-        ctaText: adsCreatives.ctaText,
-        imageUrl: adsCreatives.imageUrl,
-        videoUrl: adsCreatives.videoUrl,
-        destinationUrl: adsCreatives.destinationUrl,
-        mediaFormat: adsCreatives.mediaFormat,
-        adFormat: adsCreatives.adFormat,
-        adType: adsCreatives.adType,
-        adStackId: adsCreatives.adStackId,
-        reviewStatus: adsCreatives.reviewStatus,
-        createdAt: adsCreatives.createdAt,
-      })
-      .from(adsCreatives)
-      .where(eq(adsCreatives.reviewStatus, 'pending'))
-      .orderBy(desc(adsCreatives.createdAt))
-      .limit(50);
-
-    return {
-      campaigns: pendingCampaigns,
-      creatives: pendingCreatives,
-      totalPending: pendingCampaigns.length + pendingCreatives.length,
-    };
+  constructor(@Inject(DATABASE_TOKEN) private readonly db:NodePgDatabase<typeof schema>) {}
+  private get workflow() { return new CampaignWorkflow(this.db); }
+  async getQueue(stage:'reviewer'|'manager'='reviewer') {
+    if(!['reviewer','manager'].includes(stage)) throw new BadRequestException('Unsupported review stage.');
+    const status=stage==='manager'?'pending_manager_approval':'pending_primary_review';
+    const campaigns=await this.db.select().from(adsCampaigns).where(and(eq(adsCampaigns.moderationStatus,status),sql`${adsCampaigns.currentSubmissionId} IS NOT NULL`,sql`${adsCampaigns.submissionIntentId} IS NULL`)).orderBy(desc(adsCampaigns.submittedAt)).limit(50);
+    const rows=stage==='manager'?[]:await this.db.select({creative:adsCreatives,submissionId:adsCampaigns.currentSubmissionId,contentRevision:adsCampaigns.contentRevision}).from(adsCreatives)
+      .innerJoin(adsCampaigns,eq(adsCreatives.campaignId,adsCampaigns.id)).where(and(eq(adsCampaigns.moderationStatus,'pending_primary_review'),sql`${adsCampaigns.currentSubmissionId} IS NOT NULL`,eq(adsCreatives.reviewStatus,'pending'),eq(adsCreatives.status,'active'))).orderBy(desc(adsCampaigns.submittedAt)).limit(100);
+    return {campaigns:campaigns.map(c=>({...c,submissionId:c.currentSubmissionId})),creatives:rows.map(r=>({...r.creative,submissionId:r.submissionId,contentRevision:r.contentRevision})),totalPending:campaigns.length+rows.length};
   }
-
-  /**
-   * Submit moderation decision for a creative asset
-   */
-  async reviewCreative(creativeId: string, params: ReviewDecisionParams) {
-    const [creative] = await this.db
-      .select()
-      .from(adsCreatives)
-      .where(eq(adsCreatives.id, creativeId))
-      .limit(1);
-
-    if (!creative) {
-      throw new NotFoundException('Creative not found');
-    }
-
-    const [ownerCampaign] = await this.db.select().from(adsCampaigns).where(eq(adsCampaigns.id, creative.campaignId)).limit(1);
-    if (!ownerCampaign) throw new NotFoundException('Campaign not found');
-    if (ownerCampaign.advertiserId === params.reviewerId) throw new BadRequestException('Creative owners cannot review their own assets');
-
-    if (params.decision === 'rejected' && !params.reasonCode) {
-      throw new BadRequestException('A reasonCode is mandatory when rejecting a creative');
-    }
-
-    // Record formal audit decision
-    const [decisionRecord] = await this.db
-      .insert(adsModerationDecisions)
-      .values({
-        targetType: 'creative',
-        targetId: creativeId,
-        reviewerId: params.reviewerId,
-        decision: params.decision,
-        reasonCode: params.reasonCode || null,
-        note: params.note || null,
-      })
-      .returning();
-
-    // Update creative status
-    const [updatedCreative] = await this.db
-      .update(adsCreatives)
-      .set({
-        reviewStatus: params.decision,
-        rejectionReason: params.decision === 'rejected' ? params.reasonCode : null,
-        reviewedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(adsCreatives.id, creativeId))
-      .returning();
-
-    return {
-      creative: updatedCreative,
-      decision: decisionRecord,
-    };
+  async submissionDetail(id:string) {
+    const [c]=await this.db.select().from(adsCampaigns).where(eq(adsCampaigns.id,id)).limit(1);
+    if(!c?.currentSubmissionId) throw new NotFoundException('No current submission.');
+    const [submission]=await this.db.select().from(adsCampaignSubmissions).where(and(eq(adsCampaignSubmissions.id,c.currentSubmissionId),eq(adsCampaignSubmissions.state,'submitted'))).limit(1);
+    if(!submission || submission.contentRevision!==c.contentRevision) throw new ConflictException('This submission changed. Reload the queue.');
+    // Current full immutable content only. No edit history/diffs for ordinary reviewers.
+    return {campaign:c,submissionId:submission.id,contentRevision:submission.contentRevision,snapshot:submission.snapshot};
   }
-
-  /**
-   * Tier-1 Primary Review: by ads_reviewer
-   * Transitions campaign: moderationStatus 'pending_primary_review' -> 'pending_manager_approval' or 'rejected'
-   */
-  async reviewCampaignPrimary(campaignId: string, params: ReviewDecisionParams) {
-    const [campaign] = await this.db
-      .select()
-      .from(adsCampaigns)
-      .where(eq(adsCampaigns.id, campaignId))
-      .limit(1);
-
-    if (!campaign) {
-      throw new NotFoundException('Campaign not found');
-    }
-
-    if (campaign.advertiserId === params.reviewerId) throw new BadRequestException('Campaign owners cannot review their own campaigns');
-
-    if (campaign.moderationStatus !== 'pending_primary_review' && campaign.status !== 'under_review') {
-      throw new BadRequestException(
-        `Campaign cannot undergo primary review from moderation status '${campaign.moderationStatus}'. Expected 'pending_primary_review'.`,
-      );
-    }
-
-    const nextModStatus = params.decision === 'approved' ? 'pending_manager_approval' : 'rejected';
-
-    const [decisionRecord] = await this.db
-      .insert(adsModerationDecisions)
-      .values({
-        targetType: 'campaign',
-        targetId: campaignId,
-        reviewerId: params.reviewerId,
-        decision: params.decision,
-        reasonCode: params.reasonCode || 'TIER1_PRIMARY_REVIEW',
-        note: params.note ? `[Tier-1 Primary Review] ${params.note}` : '[Tier-1 Primary Review]',
-      })
-      .returning();
-
-    const [updatedCampaign] = await this.db
-      .update(adsCampaigns)
-      .set({
-        moderationStatus: nextModStatus,
-        status: nextModStatus === 'rejected' ? 'rejected' : campaign.status,
-        updatedAt: new Date(),
-      })
-      .where(eq(adsCampaigns.id, campaignId))
-      .returning();
-
-    return {
-      campaign: updatedCampaign,
-      decision: decisionRecord,
-      stage: 'tier1_primary_completed',
-      nextStage: nextModStatus === 'pending_manager_approval' ? 'manager_approval_required' : 'archived_rejected',
-    };
+  async changeAudit(id:string,offset=0) {
+    const rows=await this.db.select({id:adsCampaignChanges.id,actorId:adsCampaignChanges.actorId,action:adsCampaignChanges.action,requestId:adsCampaignChanges.requestId,
+      priorRevision:adsCampaignChanges.priorRevision,contentRevision:adsCampaignChanges.contentRevision,previousSubmissionId:adsCampaignChanges.previousSubmissionId,submissionId:adsCampaignChanges.submissionId,
+      beforeHash:adsCampaignChanges.beforeHash,afterHash:adsCampaignChanges.afterHash,changedFields:adsCampaignChanges.changedFields,entityIds:adsCampaignChanges.entityIds,createdAt:adsCampaignChanges.createdAt})
+      .from(adsCampaignChanges).where(eq(adsCampaignChanges.campaignId,id)).orderBy(desc(adsCampaignChanges.createdAt)).limit(50).offset(Math.max(0,Math.min(100000,offset)));
+    return rows;
   }
-
-  /**
-   * Tier-2 Manager Sign-off: by ads_manager
-   * Transitions campaign: moderationStatus 'pending_manager_approval' -> 'approved' or 'rejected'
-   * If approved: operational status transitions to 'active' (Eligible for ad serving auction)
-   * Strictly enforces Segregation of Duties: Manager cannot be the Primary Reviewer.
-   */
-  async reviewCampaignManager(campaignId: string, params: ReviewDecisionParams) {
-    const [campaign] = await this.db
-      .select()
-      .from(adsCampaigns)
-      .where(eq(adsCampaigns.id, campaignId))
-      .limit(1);
-
-    if (!campaign) {
-      throw new NotFoundException('Campaign not found');
-    }
-
-    if (campaign.advertiserId === params.reviewerId) throw new BadRequestException('Campaign owners cannot approve their own campaigns');
-
-    if (campaign.moderationStatus !== 'pending_manager_approval' && campaign.status !== 'pending_manager_approval') {
-      throw new BadRequestException(
-        `Campaign cannot undergo manager sign-off from moderation status '${campaign.moderationStatus}'. Expected 'pending_manager_approval'.`,
-      );
-    }
-
-    // Verify segregation of duties: Primary reviewer != Reviewer Manager
-    const [primaryDecision] = await this.db
-      .select()
-      .from(adsModerationDecisions)
-      .where(
-        and(
-          eq(adsModerationDecisions.targetType, 'campaign'),
-          eq(adsModerationDecisions.targetId, campaignId),
-          eq(adsModerationDecisions.decision, 'approved'),
-        ),
-      )
-      .orderBy(desc(adsModerationDecisions.createdAt))
-      .limit(1);
-
-    if (primaryDecision && primaryDecision.reviewerId === params.reviewerId) {
-      throw new BadRequestException(
-        'Segregation of duties violation: The Reviewer Manager cannot be the same user who performed the primary review.',
-      );
-    }
-
-    const nextModStatus = params.decision === 'approved' ? 'approved' : 'rejected';
-    // Approval permits activation; Billing must atomically confirm funding and status.
-    const nextOpStatus = params.decision === 'approved' ? 'paused' : 'rejected';
-
-    const [decisionRecord] = await this.db
-      .insert(adsModerationDecisions)
-      .values({
-        targetType: 'campaign',
-        targetId: campaignId,
-        reviewerId: params.reviewerId,
-        decision: params.decision,
-        reasonCode: params.reasonCode || 'TIER2_MANAGER_SIGNOFF',
-        note: params.note ? `[Tier-2 Manager Approval] ${params.note}` : '[Tier-2 Manager Approval]',
-      })
-      .returning();
-
-    const [updatedCampaign] = await this.db
-      .update(adsCampaigns)
-      .set({
-        moderationStatus: nextModStatus,
-        status: nextOpStatus,
-        updatedAt: new Date(),
-      })
-      .where(eq(adsCampaigns.id, campaignId))
-      .returning();
-
-    return {
-      campaign: updatedCampaign,
-      decision: decisionRecord,
-      stage: 'tier2_manager_completed',
-      live: false,
-    };
+  private async decide(campaignId:string,creativeId:string|null,stage:'primary'|'manager'|'creative'|'override',params:ReviewDecisionParams) {
+    controlRequired(params);
+    if(!params.submissionId || !uuidPattern.test(params.submissionId)) throw new BadRequestException('A current submission ID is required.');
+    if(!['approved','rejected'].includes(params.decision)) throw new BadRequestException('Invalid decision.');
+    if(params.decision==='rejected' && !params.reasonCode && stage!=='override') throw new BadRequestException('A rejection reason is required.');
+    if((params.note?.length??0)>2000 || (params.reasonCode?.length??0)>50) throw new BadRequestException('Review text is too long.');
+    if(stage==='override' && (params.overrideReason?.trim().length??0)<10) throw new BadRequestException('Explain the emergency override in at least 10 characters.');
+    const hash=fingerprint({stage,creativeId,...params});
+    return this.db.transaction(async(tx)=>{
+      const c=await this.workflow.lock(tx,campaignId);
+      if(c.advertiserId===params.reviewerId) throw new BadRequestException('Owners cannot review their own campaigns.');
+      const [prior]=await tx.select().from(adsCampaignMutations).where(and(eq(adsCampaignMutations.campaignId,campaignId),eq(adsCampaignMutations.actorId,params.reviewerId),eq(adsCampaignMutations.requestId,params.requestId))).limit(1);
+      if(prior) {if(prior.fingerprint!==hash) throw new ConflictException('This decision request changed.');return prior.result;}
+      if(c.currentSubmissionId!==params.submissionId || c.contentRevision!==params.expectedRevision || c.submissionIntentId || ['suspended','trash','cancelled','completed','draft'].includes(c.status)) throw new ConflictException('This submission changed. Reload before reviewing.');
+      const [submission]=await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,params.submissionId)).limit(1);
+      if(submission?.state!=='submitted'||submission.contentRevision!==c.contentRevision) throw new ConflictException('This review is no longer current.');
+      const expected=stage==='manager'?'pending_manager_approval':'pending_primary_review';
+      if(stage!=='override' && c.moderationStatus!==expected) throw new ConflictException('This review stage changed. Reload the submission.');
+      if(stage==='override' && !['pending_primary_review','pending_manager_approval'].includes(c.moderationStatus)) throw new ConflictException('Only a current submitted review can be overridden.');
+      if(stage==='manager' && (!c.primaryReviewerId || c.primaryReviewerId===params.reviewerId)) throw new BadRequestException('A different primary reviewer and manager are required for this submission.');
+      const before=await this.workflow.snapshot(tx,c);
+      let creative:any;
+      if(stage==='creative') {
+        const [current]=await tx.select().from(adsCreatives).where(and(eq(adsCreatives.id,creativeId!),eq(adsCreatives.campaignId,campaignId),eq(adsCreatives.status,'active'))).limit(1);
+        if(!current || current.reviewStatus!=='pending') throw new ConflictException('This creative is no longer pending.');
+        [creative]=await tx.update(adsCreatives).set({reviewStatus:params.decision,rejectionReason:params.decision==='rejected'?params.reasonCode:null,reviewedAt:new Date(),updatedAt:new Date()}).where(eq(adsCreatives.id,creativeId!)).returning();
+      }
+      if(stage!=='creative' && params.decision==='approved') {
+        const ads=await tx.select().from(adsCreatives).where(and(eq(adsCreatives.campaignId,campaignId),eq(adsCreatives.status,'active')));
+        if(!ads.length || ads.some(a=>a.reviewStatus!=='approved')) throw new ConflictException('Review all current creatives before approving the campaign.');
+      }
+      const [decision]=await tx.insert(adsModerationDecisions).values({targetType:creativeId?'creative':'campaign',targetId:creativeId||campaignId,reviewerId:params.reviewerId,
+        decision:params.decision,reasonCode:stage==='override'?'SUPER_ADMIN_EMERGENCY_OVERRIDE':params.reasonCode||null,note:params.note||null,
+        submissionId:params.submissionId,contentRevision:c.contentRevision,stage,requestId:params.requestId,isEmergencyOverride:stage==='override',overrideReason:params.overrideReason||null}).returning();
+      let updated=c;
+      if(stage!=='creative') {
+        const approved=params.decision==='approved';const final=stage==='manager'||stage==='override';
+        [updated]=await tx.update(adsCampaigns).set({moderationStatus:approved?(final?'approved':'pending_manager_approval'):'rejected',status:approved?'paused':'rejected',
+          ...(stage==='primary'?{primaryReviewerId:params.reviewerId,primaryReviewedAt:new Date()}:{}),
+          ...(final?{managerReviewerId:params.reviewerId,managerReviewedAt:new Date(),approvedSubmissionId:approved?params.submissionId:null,approvedRevision:approved?c.contentRevision:null}:{}),updatedAt:new Date()}).where(eq(adsCampaigns.id,campaignId)).returning();
+      }
+      const after=await this.workflow.snapshot(tx,updated);
+      await this.workflow.audit(tx,before,after,params.reviewerId,`review_${stage}_${params.decision}`,params.requestId,[creativeId?`creative:${creativeId}:reviewStatus`:'moderationStatus']);
+      const output=creativeId?{creative,decision}:{campaign:updated,decision,stage,nextStage:updated.moderationStatus,live:false,isEmergencyOverride:stage==='override'};
+      await tx.insert(adsCampaignMutations).values({campaignId,actorId:params.reviewerId,requestId:params.requestId,action:`review_${stage}`,fingerprint:hash,result:output});return output;
+    });
   }
-
-  /**
-   * Super Admin Emergency Override
-   * Bypasses dual review only in emergencies with mandatory documented reason and immutable audit log.
-   */
-  async emergencyOverride(campaignId: string, params: { reviewerId: string; decision: 'approved' | 'rejected'; overrideReason: string }) {
-    if (!params.overrideReason || params.overrideReason.trim().length < 10) {
-      throw new BadRequestException('A substantive overrideReason (minimum 10 characters) is mandatory for emergency super_admin override.');
-    }
-
-    const [campaign] = await this.db
-      .select()
-      .from(adsCampaigns)
-      .where(eq(adsCampaigns.id, campaignId))
-      .limit(1);
-
-    if (!campaign) {
-      throw new NotFoundException('Campaign not found');
-    }
-
-    const nextModStatus = params.decision === 'approved' ? 'approved' : 'rejected';
-    // Approval permits activation; Billing must atomically confirm funding and status.
-    const nextOpStatus = params.decision === 'approved' ? 'paused' : 'rejected';
-
-    const [decisionRecord] = await this.db
-      .insert(adsModerationDecisions)
-      .values({
-        targetType: 'campaign',
-        targetId: campaignId,
-        reviewerId: params.reviewerId,
-        decision: params.decision,
-        reasonCode: 'SUPER_ADMIN_EMERGENCY_OVERRIDE',
-        note: `[EMERGENCY OVERRIDE] ${params.overrideReason}`,
-        isEmergencyOverride: true,
-        overrideReason: params.overrideReason,
-      })
-      .returning();
-
-    const [updatedCampaign] = await this.db
-      .update(adsCampaigns)
-      .set({
-        moderationStatus: nextModStatus,
-        status: nextOpStatus,
-        updatedAt: new Date(),
-      })
-      .where(eq(adsCampaigns.id, campaignId))
-      .returning();
-
-    return {
-      campaign: updatedCampaign,
-      decision: decisionRecord,
-      isEmergencyOverride: true,
-      live: false,
-    };
+  async reviewCreative(id:string,params:ReviewDecisionParams) {
+    const [ad]=await this.db.select({campaignId:adsCreatives.campaignId}).from(adsCreatives).where(eq(adsCreatives.id,id)).limit(1);
+    if(!ad) throw new NotFoundException('Creative not found.');return this.decide(ad.campaignId,id,'creative',params);
   }
-
-  /**
-   * Submit moderation decision for an ad campaign (legacy single-step shim fallback)
-   */
-  async reviewCampaign(campaignId: string, params: ReviewDecisionParams) {
-    return this.reviewCampaignPrimary(campaignId, params);
-  }
-
-  /**
-   * Suspend or unsuspend a promoter profile
-   */
+  reviewCampaignPrimary(id:string,params:ReviewDecisionParams) {return this.decide(id,null,'primary',params);}
+  reviewCampaignManager(id:string,params:ReviewDecisionParams) {return this.decide(id,null,'manager',params);}
+  reviewCampaign(id:string,params:ReviewDecisionParams) {return this.reviewCampaignPrimary(id,params);}
+  emergencyOverride(id:string,params:ReviewDecisionParams) {return this.decide(id,null,'override',params);}
   async setPromoterSuspension(promoterId: string, suspend: boolean, reason?: string) {
     const [updated] = await this.db
       .update(adsPromoters)

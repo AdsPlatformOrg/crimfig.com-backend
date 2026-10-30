@@ -194,14 +194,28 @@ export class AdstationService {
    * Enforces: CANNOT bind direct campaign to a Consideration Slot! (PLAN-0018 Section 2.1)
    */
   async createDirectCampaign(promoterId: string, dto: CreateDirectCampaignDto) {
+    const [website] = await this.db
+      .select()
+      .from(adsPromoterWebsites)
+      .where(and(eq(adsPromoterWebsites.id, dto.websiteId), eq(adsPromoterWebsites.promoterId, promoterId)))
+      .limit(1);
+
+    if (!website) {
+      throw new NotFoundException('Promoter website not found or unauthorized');
+    }
+
     if (dto.slotId) {
       const [slot] = await this.db
         .select()
         .from(adstationSlots)
-        .where(eq(adstationSlots.id, dto.slotId))
+        .where(and(eq(adstationSlots.id, dto.slotId), eq(adstationSlots.promoterId, promoterId), eq(adstationSlots.websiteId, dto.websiteId)))
         .limit(1);
 
-      if (slot && (slot.isConsiderationSlot || slot.slotType === 'consideration')) {
+      if (!slot) {
+        throw new NotFoundException('AdStation slot not found or unauthorized');
+      }
+
+      if (slot.isConsiderationSlot || slot.slotType === 'consideration') {
         throw new BadRequestException('Direct deals cannot be assigned to a Consideration Slot. Consideration slots serve exclusively CrimFig network ads.');
       }
     }
@@ -232,6 +246,7 @@ export class AdstationService {
    * Ensures 0% platform fee and zero leak to promoter cash balance.
    */
   async recordDirectEvent(dto: {
+    promoterId?: string;
     directCampaignId: string;
     websiteId: string;
     slotId?: string;
@@ -242,6 +257,24 @@ export class AdstationService {
     ipHash?: string;
     userAgent?: string;
   }) {
+    if (dto.promoterId) {
+      const [campaign] = await this.db
+        .select()
+        .from(adstationDirectCampaigns)
+        .where(
+          and(
+            eq(adstationDirectCampaigns.id, dto.directCampaignId),
+            eq(adstationDirectCampaigns.promoterId, dto.promoterId),
+            eq(adstationDirectCampaigns.websiteId, dto.websiteId),
+          ),
+        )
+        .limit(1);
+
+      if (!campaign) {
+        throw new NotFoundException('Direct campaign not found or unauthorized');
+      }
+    }
+
     // Deduplication check via unique idempotencyKey
     const existing = await this.db
       .select({ id: schema.adstationAdEvents.id })
@@ -311,11 +344,15 @@ export class AdstationService {
    * Audits presence of verified consideration slot. If missing or broken,
    * starts/checks 48-hour grace period before automated suspension of direct deals.
    */
-  async checkConsiderationSlotHealth(websiteId: string) {
+  async checkConsiderationSlotHealth(websiteId: string, promoterId?: string) {
     const [website] = await this.db
       .select()
       .from(adsPromoterWebsites)
-      .where(eq(adsPromoterWebsites.id, websiteId))
+      .where(
+        promoterId
+          ? and(eq(adsPromoterWebsites.id, websiteId), eq(adsPromoterWebsites.promoterId, promoterId))
+          : eq(adsPromoterWebsites.id, websiteId),
+      )
       .limit(1);
 
     if (!website) {

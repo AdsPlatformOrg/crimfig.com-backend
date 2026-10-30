@@ -18,16 +18,21 @@ import { AdsSettlementService } from '../../../api/ads-api/src/modules/billing/a
 import { DeferredAuditService } from '../../../api/ads-api/src/modules/billing/deferred-audit.service';
 import { ConversionsController } from '../../../api/ads-api/src/modules/conversions/conversions.controller';
 import { ConversionsService } from '../../../api/ads-api/src/modules/conversions/conversions.service';
+import { AdstationController } from '../../../api/ads-api/src/modules/adstation/adstation.controller';
+import { AdstationService } from '../../../api/ads-api/src/modules/adstation/adstation.service';
+import { PromotersService } from '../../../api/ads-api/src/modules/promoters/promoters.service';
 import { DATABASE_TOKEN } from '../../../api/ads-api/src/modules/database/database.module';
 
 const secret = 'test-only-ads-access-secret';
 const id = 'e68f2fac-09d2-481b-85b2-896300cd169e';
 const config = (raw: string) => ({ get: () => raw }) as any;
-const moderation = { getQueue: jest.fn(async () => ({})), reviewCreative: jest.fn(), reviewCampaignPrimary: jest.fn(), reviewCampaignManager: jest.fn(), emergencyOverride: jest.fn(), reviewCampaign: jest.fn(), setPromoterSuspension: jest.fn() };
+const moderation = { getQueue: jest.fn(async () => ({})), submissionDetail: jest.fn(async () => ({})), changeAudit: jest.fn(async () => []), reviewCreative: jest.fn(), reviewCampaignPrimary: jest.fn(), reviewCampaignManager: jest.fn(), emergencyOverride: jest.fn(), reviewCampaign: jest.fn(), setPromoterSuspension: jest.fn() };
 const escrow = { getBillingOverview: jest.fn(async (userId: string) => ({ userId })), getCampaignEscrow: jest.fn(async () => null), lockCampaignBudget: jest.fn(), releaseCampaignBudget: jest.fn() };
 const settlement = { getHistoricalBatches: jest.fn(async () => []), processPendingSettlement: jest.fn(), settleFundedCampaign: jest.fn(async () => ({ status: 'completed' })) };
 const conversions = { getPixelScript: jest.fn(() => '// pixel'), ingestConversion: jest.fn(), getConversions: jest.fn(async () => []) };
 const uploads = { getMediaStream: jest.fn(async () => ({ stream: Readable.from('preview'), contentType: 'image/png', contentLength: 7 })) };
+const adstation = { updateWebsiteAdstationStatus: jest.fn(async () => ({ status: 'suspended' })), checkConsiderationSlotHealth: jest.fn(async () => ({ status: 'healthy' })), recordDirectEvent: jest.fn(async () => ({ status: 'recorded' })) };
+const promoters = { getOrCreatePromoter: jest.fn(async (userId: string) => ({ id: `promoter-${userId}` })) };
 let status = 'ACTIVE';
 const database = { query: { users: { findFirst: jest.fn(async () => ({ id, email: 'current@example.test', status })) } } };
 
@@ -53,7 +58,7 @@ describe('Ads production guards and controllers over HTTP', () => {
     try {
       module = await Test.createTestingModule({
         imports: [DashboardAuthModule],
-        controllers: [ModerationController, AdsBillingController, ConversionsController, UploadsController],
+        controllers: [ModerationController, AdsBillingController, ConversionsController, UploadsController, AdstationController],
         providers: [
           { provide: DATABASE_TOKEN, useValue: database },
           { provide: ConfigService, useValue: { get: () => undefined } }, AdsStaffGrants,
@@ -62,6 +67,8 @@ describe('Ads production guards and controllers over HTTP', () => {
           { provide: AdsSettlementService, useValue: settlement }, { provide: DeferredAuditService, useValue: {} },
           { provide: ConversionsService, useValue: conversions },
           { provide: UploadsService, useValue: uploads },
+          { provide: AdstationService, useValue: adstation },
+          { provide: PromotersService, useValue: promoters },
         ],
       }).compile();
     } finally { if (previous === undefined) delete process.env.JWT_ACCESS_SECRET; else process.env.JWT_ACCESS_SECRET = previous; }
@@ -105,16 +112,30 @@ describe('Ads production guards and controllers over HTTP', () => {
   });
 
   it.each([
-    ['ads_support', 'creatives/c/decision', 403], ['ads_reviewer', 'creatives/c/decision', 201],
-    ['ads_reviewer', 'campaigns/c/manager-approval', 403], ['ads_manager', 'campaigns/c/manager-approval', 201],
-    ['ads_manager', 'campaigns/c/primary-review', 403], ['ads_finance', 'campaigns/c/primary-review', 403],
-    ['ads_admin', 'campaigns/c/emergency-override', 403], ['super_admin', 'campaigns/c/emergency-override', 201],
-    ['super_admin', 'campaigns/c/primary-review', 403], ['ads_support', 'promoters/p/suspend', 403],
-    ['ads_admin', 'promoters/p/suspend', 201],
+    ['ads_support', `creatives/${id}/decision`, 403], ['ads_reviewer', `creatives/${id}/decision`, 201],
+    ['ads_reviewer', `campaigns/${id}/manager-approval`, 403], ['ads_manager', `campaigns/${id}/manager-approval`, 201],
+    ['ads_manager', `campaigns/${id}/primary-review`, 403], ['ads_finance', `campaigns/${id}/primary-review`, 403],
+    ['ads_admin', `campaigns/${id}/emergency-override`, 403], ['super_admin', `campaigns/${id}/emergency-override`, 201],
+    ['super_admin', `campaigns/${id}/primary-review`, 403], ['ads_support', `promoters/${id}/suspend`, 403],
+    ['ads_admin', `promoters/${id}/suspend`, 201],
   ])('enforces %s on %s', async (role, route, expected) => {
     jest.spyOn(grants, 'rolesFor').mockReturnValue([role as any]);
     const res = await fetch(`${base}/api/v1/admin/ads/moderation/${route}`, { method: 'POST', headers: headers(), body: '{}' });
     expect(res.status).toBe(expected);
+  });
+
+  it('allows reviewers/managers to read current submission detail but restricts change-audit strictly to super_admin', async () => {
+    for (const [role, subStatus, auditStatus] of [
+      ['ads_reviewer', 200, 403],
+      ['ads_manager', 200, 403],
+      ['ads_support', 200, 403],
+      ['ads_finance', 403, 403],
+      ['super_admin', 200, 200],
+    ] as const) {
+      jest.spyOn(grants, 'rolesFor').mockReturnValue([role as any]);
+      expect((await fetch(`${base}/api/v1/admin/ads/moderation/campaigns/${id}/submission`, { headers: headers() })).status).toBe(subStatus);
+      expect((await fetch(`${base}/api/v1/admin/ads/moderation/campaigns/${id}/change-audit`, { headers: headers() })).status).toBe(auditStatus);
+    }
   });
 
   it('keeps support read-only and finance isolated from moderation', async () => {
@@ -159,5 +180,21 @@ describe('Ads production guards and controllers over HTTP', () => {
     expect(rejected.headers.get('access-control-allow-origin')).toBeNull();
     const allowed = await preflight('/api/v1/ads/billing/overview', 'https://ads.crimfig.com');
     expect(allowed.headers.get('access-control-allow-origin')).toBe('https://ads.crimfig.com');
+  });
+
+  it('requires ads_admin or super_admin for AdStation admin website suspend/reinstate and passes promoter identity for health/direct-events', async () => {
+    expect((await fetch(`${base}/api/v1/adstation/admin/websites/site-1/suspend`, { method: 'POST', headers: headers(), body: JSON.stringify({ reason: 'fraud' }) })).status).toBe(403);
+    expect((await fetch(`${base}/api/v1/adstation/admin/websites/site-1/reinstate`, { method: 'POST', headers: headers() })).status).toBe(403);
+    expect(adstation.updateWebsiteAdstationStatus).not.toHaveBeenCalled();
+
+    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_reviewer']);
+    expect((await fetch(`${base}/api/v1/adstation/admin/websites/site-1/suspend`, { method: 'POST', headers: headers(), body: JSON.stringify({ reason: 'fraud' }) })).status).toBe(403);
+
+    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_admin']);
+    expect((await fetch(`${base}/api/v1/adstation/admin/websites/site-1/suspend`, { method: 'POST', headers: headers(), body: JSON.stringify({ reason: 'fraud' }) })).status).toBe(201);
+    expect(adstation.updateWebsiteAdstationStatus).toHaveBeenCalledWith('site-1', true, 'fraud');
+
+    expect((await fetch(`${base}/api/v1/adstation/websites/site-1/health`, { headers: headers() })).status).toBe(200);
+    expect(adstation.checkConsiderationSlotHealth).toHaveBeenCalledWith('site-1', `promoter-${id}`);
   });
 });

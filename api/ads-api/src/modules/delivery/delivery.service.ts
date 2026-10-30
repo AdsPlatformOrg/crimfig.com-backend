@@ -1,3 +1,4 @@
+import { currentApproval } from '../campaigns/campaign-workflow';
 import { selectImageRendition } from "../uploads/prepared-image";
 import { resolvedSchedule, scheduleMatches } from "../campaigns/daily-schedule";
 import { Injectable, Inject, NotFoundException, Logger } from "@nestjs/common";
@@ -608,6 +609,8 @@ export class DeliveryService {
         status: adsPlacements.status,
         campaignStatus: adsCampaigns.status,
         campaignModeration: adsCampaigns.moderationStatus,
+        contentRevision: adsCampaigns.contentRevision, currentSubmissionId: adsCampaigns.currentSubmissionId,
+        approvedSubmissionId: adsCampaigns.approvedSubmissionId, approvedRevision: adsCampaigns.approvedRevision, submissionIntentId: adsCampaigns.submissionIntentId,
         creativeReview: adsCreatives.reviewStatus,
         creativeStatus: adsCreatives.status,
         campaignSchedule: adsCampaigns.schedule,
@@ -699,6 +702,7 @@ export class DeliveryService {
         destinationUrl: adsCreatives.destinationUrl,
         pricingModel: adsCampaigns.pricingModel,
         pricingVersion: adsCampaigns.pricingVersion,
+        contentRevision:adsCampaigns.contentRevision,currentSubmissionId:adsCampaigns.currentSubmissionId,
         costPerImpressionUsdCents: adsCampaigns.costPerImpressionUsdCents,
         costPerClickUsdCents: adsCampaigns.costPerClickUsdCents,
         remainingBudgetUsdCents: adsCampaigns.remainingBudgetUsdCents,
@@ -731,6 +735,9 @@ export class DeliveryService {
           eq(adsCampaigns.status, "active"),
           eq(adsCampaigns.pricingVersion, 2),
           eq(adsCampaigns.moderationStatus, "approved"),
+          sql`${adsCampaigns.currentSubmissionId} = ${adsCampaigns.approvedSubmissionId}`,
+          sql`${adsCampaigns.contentRevision} = ${adsCampaigns.approvedRevision}`,
+          sql`${adsCampaigns.submissionIntentId} IS NULL`,
           eq(adsCreatives.status, "active"),
           eq(adsCreatives.reviewStatus, "approved"),
           sql`${adsCampaigns.remainingBudgetUsdCents} > 0`,
@@ -812,7 +819,7 @@ export class DeliveryService {
 
     if (!auctionResult && placement) {
       if (
-        placement.campaignModeration !== "approved" ||
+        !currentApproval({...placement,moderationStatus:placement.campaignModeration}) ||
         placement.creativeReview !== "approved" ||
         placement.creativeStatus !== "active"
       )
@@ -866,7 +873,13 @@ export class DeliveryService {
     const ipHash = this.tokenService.hashIp(clientIp);
 
     // Record immutable ads_serves record for the auction allocation
-    const [serve] = await this.db
+    const [serve] = await this.db.transaction(async tx => {
+      await tx.execute(sql`set local lock_timeout = '5s'`);await tx.execute(sql`set local statement_timeout = '8s'`);
+      const [current]=await tx.select().from(adsCampaigns).where(eq(adsCampaigns.id,finalCampaignId)).for('update').limit(1);
+      if(!current || current.status!=='active' || !currentApproval(current) || current.contentRevision!==(winningCreative as any).contentRevision || current.currentSubmissionId!==(winningCreative as any).currentSubmissionId) throw new NotFoundException('The selected submission changed. Request another ad.');
+      const [creative]=await tx.select().from(adsCreatives).where(and(eq(adsCreatives.id,finalCreativeId),eq(adsCreatives.campaignId,finalCampaignId),eq(adsCreatives.status,'active'),eq(adsCreatives.reviewStatus,'approved'))).limit(1);
+      if(!creative) throw new NotFoundException('The selected creative is unavailable.');
+      return tx
       .insert(adsServes)
       .values({
         placementId: placement ? placement.id : null,
@@ -890,6 +903,7 @@ export class DeliveryService {
         userAgentHash: userAgent ? this.tokenService.hashIp(userAgent) : null,
       })
       .returning();
+    });
 
     // Generate cryptographic signed impression token binding this serve
     const impToken = this.tokenService.generateToken({
@@ -1022,7 +1036,8 @@ export class DeliveryService {
     // Verify campaign is active with budget
     const [campaign] = await this.db
       .select({
-        status: adsCampaigns.status,
+        status: adsCampaigns.status,moderationStatus:adsCampaigns.moderationStatus,contentRevision:adsCampaigns.contentRevision,
+        currentSubmissionId:adsCampaigns.currentSubmissionId,approvedSubmissionId:adsCampaigns.approvedSubmissionId,approvedRevision:adsCampaigns.approvedRevision,submissionIntentId:adsCampaigns.submissionIntentId,
         remainingBudget: adsCampaigns.remainingBudgetUsdCents,
       })
       .from(adsCampaigns)
@@ -1032,6 +1047,7 @@ export class DeliveryService {
     if (
       !campaign ||
       campaign.status !== "active" ||
+      !currentApproval(campaign) ||
       campaign.remainingBudget <= 0
     ) {
       throw new NotFoundException("Campaign inactive or budget exhausted");

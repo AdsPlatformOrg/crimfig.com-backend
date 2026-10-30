@@ -150,6 +150,10 @@ export const adsModerationDecisions = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     targetType: moderationTargetTypeEnum("target_type").notNull(),
     targetId: uuid("target_id").notNull(),
+    submissionId: uuid('submission_id'),
+    contentRevision: bigint('content_revision', { mode: 'number' }),
+    stage: varchar('stage', { length: 30 }),
+    requestId: uuid('request_id'),
     reviewerId: uuid("reviewer_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),

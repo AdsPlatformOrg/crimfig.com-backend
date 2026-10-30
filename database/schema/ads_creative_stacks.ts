@@ -8,6 +8,7 @@ import {
   timestamp,
   index,
   uniqueIndex,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { adsCampaigns } from "./ads_campaigns";
 
@@ -33,6 +34,7 @@ export const adsCreativeStacks = pgTable(
 
     name: varchar("name", { length: 100 }).notNull(),
     position: integer("position").notNull(),
+    archived: boolean('archived').notNull().default(false),
 
     // Optional non-financial overrides. Null means inherit the campaign value.
     geoMode: varchar("geo_mode", { length: 16 }).notNull().default("inherit"),

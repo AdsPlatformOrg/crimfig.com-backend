@@ -9,8 +9,10 @@ import {
   Put,
   Query,
   Req,
+  ParseUUIDPipe,
 } from "@nestjs/common";
 import { ApiTags, ApiOperation, ApiQuery } from "@nestjs/swagger";
+import { documentAdsController } from '../../contracts/ads-contract';
 import {
   ArrayMaxSize,
   IsArray,
@@ -28,6 +30,30 @@ import {
 } from "class-validator";
 import { CampaignsService } from "./campaigns.service";
 import { Public } from "@crimfig/shared";
+
+export class MutationDto {
+  @IsInt() @Min(1) expectedRevision: number;
+  @IsUUID() requestId: string;
+}
+export class BeginEditDto extends MutationDto { @IsOptional() @IsUUID() submissionId?:string; }
+export class SaveCampaignDto extends MutationDto {
+  @IsOptional() @IsString() @MaxLength(255) title?:string;
+  @IsOptional() @IsString() @MaxLength(5000) description?:string;
+  @IsOptional() @IsString() @MaxLength(80) category?:string;
+  @IsOptional() @IsArray() @IsIn(['websites','individuals','mobile_apps'],{each:true}) channels?:string[];
+  @IsOptional() @IsNumber() @Min(5) budgetUsd?:number;
+  @IsOptional() @IsNumber() @Min(1) dailyBudgetUsd?:number|null;
+  @IsOptional() @IsInt() @Min(50) costPerImpressionCents?:number;
+  @IsOptional() @IsInt() @Min(10) costPerClickCents?:number;
+  @IsOptional() @IsIn(['cpm','cpc']) pricingModel?:'cpm'|'cpc';
+  @IsOptional() @IsIn(['banner','card','video','interstitial']) format?:'banner'|'card'|'video'|'interstitial';
+  @IsOptional() @IsArray() @IsString({each:true}) targetDevices?:string[];
+  @IsOptional() @IsObject() schedule?:object;
+  @IsOptional() @IsInt() @Min(1) @Max(100) frequencyCapPerDay?:number;
+  @IsOptional() @IsIn(['global','targeted']) geoMode?:'global'|'targeted';
+  @IsOptional() @IsArray() @IsString({each:true}) locations?:string[];
+  @IsOptional() @IsArray() @ArrayMaxSize(30) stacks?:object[];
+}
 
 export class CreateCampaignDto {
   @IsString()
@@ -124,7 +150,7 @@ export class CreateCampaignDto {
   locations?: string[];
 }
 
-export class AddCreativeDto {
+export class AddCreativeDto extends MutationDto {
   @IsOptional()
   @IsUUID()
   adStackId?: string;
@@ -175,7 +201,7 @@ export class AddCreativeDto {
   mediaAssetId?: string;
 }
 
-export class ReplaceCreativeDto {
+export class ReplaceCreativeDto extends MutationDto {
   @IsOptional()
   @IsUUID()
   adStackId?: string;
@@ -227,14 +253,14 @@ export class ReplaceCreativeDto {
   mediaAssetId?: string;
 }
 
-export class CreateStackDto {
+export class CreateStackDto extends MutationDto {
   @IsOptional()
   @IsString()
   @MaxLength(100)
   name?: string;
 }
 
-export class UpdateStackDto {
+export class UpdateStackDto extends MutationDto {
   @IsOptional()
   @IsString()
   @MinLength(1)
@@ -361,11 +387,28 @@ export class CampaignsController {
     };
   }
 
+  @Get(':id/mutations/:requestId')
+  async mutationResult(@Param('id',new ParseUUIDPipe()) id:string,@Param('requestId',new ParseUUIDPipe()) requestId:string,@Req() req:any) {
+    return {status:'success',data:await this.campaignsService.mutationResult(id,req.user.sub,requestId)};
+  }
+  @Patch(':id')
+  async saveCampaign(@Param('id',new ParseUUIDPipe()) id:string,@Req() req:any,@Body() dto:SaveCampaignDto) {
+    return {status:'success',data:await this.campaignsService.saveCampaign(id,req.user.sub,dto)};
+  }
+  @Post(':id/begin-edit')
+  async beginEdit(@Param('id',new ParseUUIDPipe()) id:string,@Req() req:any,@Body() dto:BeginEditDto) {
+    return {status:'success',data:await this.campaignsService.beginEdit(id,req.user.sub,dto)};
+  }
+  @Delete(':id/creatives/:creativeId')
+  async deleteCreative(@Param('id',new ParseUUIDPipe()) id:string,@Param('creativeId',new ParseUUIDPipe()) creativeId:string,@Req() req:any,@Body() dto:MutationDto) {
+    return {status:'success',data:await this.campaignsService.deleteCreative(id,creativeId,req.user.sub,dto)};
+  }
+
   @Get(":id")
   @ApiOperation({
     summary: "Get campaign details with ordered ad stacks and creatives",
   })
-  async getCampaignDetails(@Param("id") id: string, @Req() req: any) {
+  async getCampaignDetails(@Param("id", new ParseUUIDPipe()) id: string, @Req() req: any) {
     return {
       status: "success",
       data: await this.campaignsService.getCampaignDetails(id, req.user.sub),
@@ -375,7 +418,7 @@ export class CampaignsController {
   @Post(":id/ad-stacks")
   @ApiOperation({ summary: "Create an additional ad stack" })
   async createStack(
-    @Param("id") campaignId: string,
+    @Param("id", new ParseUUIDPipe()) campaignId: string,
     @Req() req: any,
     @Body() dto: CreateStackDto,
   ) {
@@ -385,6 +428,7 @@ export class CampaignsController {
         campaignId,
         req.user.sub,
         dto.name,
+        dto,
       ),
     };
   }
@@ -394,8 +438,8 @@ export class CampaignsController {
     summary: "Rename a stack or update its non-financial overrides",
   })
   async updateStack(
-    @Param("id") campaignId: string,
-    @Param("stackId") stackId: string,
+    @Param("id", new ParseUUIDPipe()) campaignId: string,
+    @Param("stackId", new ParseUUIDPipe()) stackId: string,
     @Req() req: any,
     @Body() dto: UpdateStackDto,
   ) {
@@ -413,6 +457,7 @@ export class CampaignsController {
           targetHours: dto.targetHours,
           schedule: dto.schedule,
         },
+        dto,
       ),
     };
   }
@@ -420,9 +465,10 @@ export class CampaignsController {
   @Delete(":id/ad-stacks/:stackId")
   @ApiOperation({ summary: "Remove an additional ad stack and its draft ads" })
   async deleteStack(
-    @Param("id") campaignId: string,
-    @Param("stackId") stackId: string,
+    @Param("id", new ParseUUIDPipe()) campaignId: string,
+    @Param("stackId", new ParseUUIDPipe()) stackId: string,
     @Req() req: any,
+    @Body() dto: MutationDto,
   ) {
     return {
       status: "success",
@@ -430,6 +476,7 @@ export class CampaignsController {
         campaignId,
         stackId,
         req.user.sub,
+        dto,
       ),
     };
   }
@@ -437,7 +484,7 @@ export class CampaignsController {
   @Post(":id/creatives")
   @ApiOperation({ summary: "Add a typed creative to an ad stack" })
   async addCreative(
-    @Param("id") campaignId: string,
+    @Param("id", new ParseUUIDPipe()) campaignId: string,
     @Req() req: any,
     @Body() dto: AddCreativeDto,
   ) {
@@ -455,7 +502,7 @@ export class CampaignsController {
         adFormat: dto.adFormat,
         mediaFormat: dto.mediaFormat,
         mediaAssetId: dto.mediaAssetId,
-      }),
+      }, dto),
     };
   }
 
@@ -464,7 +511,7 @@ export class CampaignsController {
     summary: "Replace or update a creative and re-submit it for review",
   })
   async replaceCreative(
-    @Param("id") creativeId: string,
+    @Param("id", new ParseUUIDPipe()) creativeId: string,
     @Req() req: any,
     @Body() dto: ReplaceCreativeDto,
   ) {
@@ -474,6 +521,7 @@ export class CampaignsController {
         creativeId,
         req.user.sub,
         dto,
+        dto,
       ),
     };
   }
@@ -482,17 +530,17 @@ export class CampaignsController {
   @ApiOperation({
     summary: "Validate stacks and submit the campaign for moderation review",
   })
-  async submitForReview(@Param("id") id: string, @Req() req: any) {
+  async submitForReview(@Param("id", new ParseUUIDPipe()) id: string, @Req() req: any, @Body() dto:MutationDto) {
     return {
       status: "success",
-      data: await this.campaignsService.submitForReview(id, req.user.sub),
+      data: await this.campaignsService.submitForReview(id, req.user.sub, dto),
     };
   }
 
   @Put(":id/status")
   @ApiOperation({ summary: "Update campaign status" })
   async updateStatus(
-    @Param("id") id: string,
+    @Param("id", new ParseUUIDPipe()) id: string,
     @Req() req: any,
     @Body("status")
     status:
@@ -510,3 +558,5 @@ export class CampaignsController {
     };
   }
 }
+
+documentAdsController(CampaignsController);

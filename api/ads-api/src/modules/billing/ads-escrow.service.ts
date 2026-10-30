@@ -41,7 +41,7 @@ export class AdsEscrowService {
     }
 
     // Billing commits wallet, reservation and durable receipt atomically. Ads never writes money.
-    return this.billingClient.reserveCampaignEscrow(userId, campaignId, amountUsdCents);
+    return this.billingClient.reserveCampaignEscrowReceipt(userId, campaignId, amountUsdCents);
   }
 
   /** Release only through Billing after serving has stopped. Repeated calls return the receipt. */

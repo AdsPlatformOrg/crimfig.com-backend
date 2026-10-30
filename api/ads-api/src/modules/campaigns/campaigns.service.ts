@@ -1,3 +1,4 @@
+import { CampaignWorkflow, campaignCapabilities, assertEditableCampaign, currentApproval, controlRequired, fingerprint, type MutationControl } from './campaign-workflow';
 import { imageSpecsView } from "../uploads/prepared-image";
 import { createHash } from "crypto";
 import {
@@ -14,11 +15,14 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from "@nestjs/common";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "@crimfig/database/schema";
 import {
   adsCampaigns,
+  adsCampaignSubmissions,
+  adsCampaignEscrows,
   adsCreatives,
   adsCreativeStacks,
   adsMediaAssets,
@@ -208,23 +212,8 @@ export class CampaignsService {
     return campaign;
   }
 
-  private assertEditable(campaign: typeof adsCampaigns.$inferSelect) {
-    if (
-      campaign.status === "trash" ||
-      campaign.status === "cancelled" ||
-      campaign.status === "completed"
-    ) {
-      throw new BadRequestException("This campaign can no longer be edited.");
-    }
-    if (
-      campaign.moderationStatus !== "draft" &&
-      campaign.moderationStatus !== "rejected"
-    ) {
-      throw new BadRequestException(
-        "This campaign is in review or approved; creative changes are closed.",
-      );
-    }
-  }
+  private get workflow() { return new CampaignWorkflow(this.db); }
+  private assertEditable(campaign: typeof adsCampaigns.$inferSelect) { assertEditableCampaign(campaign); }
 
   private async resolveGeo(
     geoMode: "global" | "targeted" | "inherit",
@@ -458,21 +447,8 @@ export class CampaignsService {
       return { campaign, stack };
     });
 
-    if ((created as any).reused)
-      return { ...created.campaign, defaultStackId: created.stack?.id };
-    try {
-      await this.escrowService.lockCampaignBudget({
-        campaignId: created.campaign.id,
-        userId: params.advertiserId,
-        amountUsdCents: budgetCents,
-        campaignTitle: title,
-      });
-    } catch (err: any) {
-      this.logger.warn(
-        `Campaign ${created.campaign.id} created; escrow lock deferred: ${err.message}`,
-      );
-    }
-
+    if ((created as any).reused) return { ...created.campaign, defaultStackId: created.stack?.id };
+    // A server draft never reserves money. Funding starts only after complete submission validation.
     return { ...created.campaign, defaultStackId: created.stack.id };
   }
 
@@ -499,8 +475,8 @@ export class CampaignsService {
     return { ...campaign, defaultStackId: stack?.id };
   }
 
-  async createStack(campaignId: string, advertiserId: string, name?: string) {
-    return this.db.transaction(async (tx) => {
+  async createStack(campaignId: string, advertiserId: string, name?: string, control?: MutationControl) {
+    return this.workflow.mutate(campaignId, advertiserId, "create_stack", control, { name }, async (tx) => {
       const campaign = await this.campaignForUpdate(
         tx,
         campaignId,
@@ -537,8 +513,9 @@ export class CampaignsService {
     stackId: string,
     advertiserId: string,
     input: StackSettingsInput,
+    control?: MutationControl,
   ) {
-    return this.db.transaction(async (tx) => {
+    return this.workflow.mutate(campaignId, advertiserId, "update_stack", control, { stackId, ...input }, async (tx) => {
       const campaign = await this.campaignForUpdate(
         tx,
         campaignId,
@@ -551,6 +528,7 @@ export class CampaignsService {
         .where(
           and(
             eq(adsCreativeStacks.id, stackId),
+            eq(adsCreativeStacks.archived, false),
             eq(adsCreativeStacks.campaignId, campaignId),
           ),
         )
@@ -607,8 +585,8 @@ export class CampaignsService {
     });
   }
 
-  async deleteStack(campaignId: string, stackId: string, advertiserId: string) {
-    return this.db.transaction(async (tx) => {
+  async deleteStack(campaignId: string, stackId: string, advertiserId: string, control?: MutationControl) {
+    return this.workflow.mutate(campaignId, advertiserId, "delete_stack", control, { stackId }, async (tx) => {
       const campaign = await this.campaignForUpdate(
         tx,
         campaignId,
@@ -618,17 +596,17 @@ export class CampaignsService {
       const stacks = await tx
         .select()
         .from(adsCreativeStacks)
-        .where(eq(adsCreativeStacks.campaignId, campaignId))
+        .where(and(eq(adsCreativeStacks.campaignId, campaignId), eq(adsCreativeStacks.archived, false)))
         .orderBy(asc(adsCreativeStacks.position));
       if (stacks.length <= 1)
         throw new BadRequestException("The last ad stack cannot be removed.");
-      const stack = stacks.find((s) => s.id === stackId);
+      const stack = stacks.find((s: typeof adsCreativeStacks.$inferSelect) => s.id === stackId);
       if (!stack) throw new NotFoundException("Ad stack not found.");
       if (stack.position === 1)
         throw new BadRequestException(
           "The default ad stack cannot be removed.",
         );
-      await tx.delete(adsCreatives).where(eq(adsCreatives.adStackId, stack.id));
+      await tx.update(adsCreatives).set({ status: 'archived' }).where(eq(adsCreatives.adStackId, stack.id));
       await tx
         .delete(crimfigGeoTargets)
         .where(
@@ -638,7 +616,7 @@ export class CampaignsService {
           ),
         );
       await tx
-        .delete(adsCreativeStacks)
+        .update(adsCreativeStacks).set({ archived: true })
         .where(eq(adsCreativeStacks.id, stack.id));
       return { deleted: true };
     });
@@ -650,6 +628,7 @@ export class CampaignsService {
     tx: any,
     advertiserId: string,
     input: CreativeInput,
+    partial = false,
   ): Promise<{
     adType: AdType;
     headline: string | null;
@@ -665,7 +644,7 @@ export class CampaignsService {
     width?: number | null;
     height?: number | null;
   }> {
-    const destinationUrl = assertHttpUrl(input.destinationUrl);
+    const destinationUrl = partial && !input.destinationUrl?.trim() ? "" : assertHttpUrl(input.destinationUrl);
     const adFormat = (input.adFormat || "card") as AdFormat;
     if (!AD_FORMATS.includes(adFormat))
       throw new BadRequestException("Unsupported display format.");
@@ -685,7 +664,7 @@ export class CampaignsService {
     const headline = input.headline?.trim()
       ? cleanString(input.headline, "Headline", 100)
       : null;
-    if (adType === "text" && !headline) {
+    if (!partial && adType === "text" && !headline) {
       throw new BadRequestException("A headline is required for text ads.");
     }
     const bodyText = input.bodyText?.trim()
@@ -751,8 +730,10 @@ export class CampaignsService {
         mediaFormat: "image",
       };
     }
-    if (!asset)
-      throw new BadRequestException(`A validated ${adType} asset is required.`);
+    if (!asset && partial && !input.mediaAssetId && !input.imageUrl && !input.videoUrl) return {
+      adType, headline, bodyText, ctaText, destinationUrl, adFormat, imageUrl: null, videoUrl: null, posterUrl: null, mediaAssetId: null, mediaFormat: 'image',
+    };
+    if (!asset) throw new BadRequestException(`A validated ${adType} asset is required.`);
     if (adType === "image" && asset.bytes > 200000)
       throw new BadRequestException(
         "Prepare this image to a delivered size of at most 200 KB.",
@@ -799,8 +780,9 @@ export class CampaignsService {
     campaignId: string,
     advertiserId: string,
     input: CreativeInput,
+    control?: MutationControl,
   ) {
-    return this.db.transaction(async (tx) => {
+    return this.workflow.mutate(campaignId, advertiserId, "add_creative", control, input, async (tx) => {
       const campaign = await this.campaignForUpdate(
         tx,
         campaignId,
@@ -814,6 +796,7 @@ export class CampaignsService {
             .where(
               and(
                 eq(adsCreativeStacks.id, input.adStackId),
+                eq(adsCreativeStacks.archived, false),
                 eq(adsCreativeStacks.campaignId, campaignId),
               ),
             )
@@ -821,7 +804,7 @@ export class CampaignsService {
         : await tx
             .select()
             .from(adsCreativeStacks)
-            .where(eq(adsCreativeStacks.campaignId, campaignId))
+            .where(and(eq(adsCreativeStacks.campaignId, campaignId), eq(adsCreativeStacks.archived, false)))
             .orderBy(asc(adsCreativeStacks.position))
             .limit(1);
       if (!stack)
@@ -857,8 +840,13 @@ export class CampaignsService {
     creativeId: string,
     advertiserId: string,
     input: Partial<CreativeInput>,
+    control?: MutationControl,
   ) {
-    return this.db.transaction(async (tx) => {
+    const [parent] = await this.db.select({ campaignId: adsCreatives.campaignId }).from(adsCreatives)
+      .innerJoin(adsCampaigns, eq(adsCreatives.campaignId, adsCampaigns.id))
+      .where(and(eq(adsCreatives.id, creativeId), eq(adsCampaigns.advertiserId, advertiserId))).limit(1);
+    if (!parent) throw new NotFoundException('Creative not found.');
+    return this.workflow.mutate(parent.campaignId, advertiserId, "replace_creative", control, { creativeId, ...input }, async (tx) => {
       const [existing] = await tx
         .select({ creative: adsCreatives, campaign: adsCampaigns })
         .from(adsCreatives)
@@ -909,6 +897,9 @@ export class CampaignsService {
         merged.imageUrl = undefined;
         merged.videoUrl = undefined;
       }
+      const [targetStack] = await tx.select().from(adsCreativeStacks).where(and(eq(adsCreativeStacks.id, merged.adStackId!), eq(adsCreativeStacks.campaignId, campaign.id), eq(adsCreativeStacks.archived, false))).limit(1);
+      if (!targetStack || existing.creative.status === 'archived') throw new BadRequestException('Choose a current stack in this campaign.');
+      merged.mediaAssetId = input.mediaAssetId === undefined ? existing.creative.mediaAssetId : input.mediaAssetId;
       const validated = await this.validateCreative(tx, advertiserId, merged);
       const [updated] = await tx
         .update(adsCreatives)
@@ -938,67 +929,120 @@ export class CampaignsService {
 
   // ── Review submission ───────────────────────────────────────────────────────
 
-  async submitForReview(campaignId: string, advertiserId: string) {
-    const [preflight] = await this.db
-      .select()
-      .from(adsCampaigns)
-      .where(
-        and(
-          eq(adsCampaigns.id, campaignId),
-          eq(adsCampaigns.advertiserId, advertiserId),
-        ),
-      )
-      .limit(1);
-    if (!preflight)
-      throw new NotFoundException("Campaign not found or unauthorized.");
-    if (
-      preflight.geoMode === "targeted" &&
-      process.env.GEO_TARGETING_ENABLED !== "true"
-    ) {
-      throw new BadRequestException(
-        "Location targeting is not available yet. Change this campaign to Global before submitting.",
-      );
-    }
-    if (
-      preflight.moderationStatus !== "draft" &&
-      preflight.moderationStatus !== "rejected"
-    ) {
-      throw new BadRequestException(
-        "This campaign has already been submitted or approved.",
-      );
-    }
+  async beginEdit(id: string, owner: string, control: MutationControl & { submissionId?: string }) {
+    return this.workflow.mutate(id, owner, 'begin_edit', control, { submissionId: control.submissionId }, async (tx,c) => {
+      if (['suspended','trash','cancelled','completed'].includes(c.status) || c.submissionIntentId) throw new ConflictException('This campaign cannot begin editing now.');
+      if (c.currentSubmissionId && c.currentSubmissionId !== control.submissionId) throw new ConflictException('The submission changed. Reload before editing.');
+      if (c.currentSubmissionId) await tx.update(adsCampaignSubmissions).set({ state:'superseded', updatedAt:new Date() }).where(eq(adsCampaignSubmissions.id,c.currentSubmissionId));
+      const [updated] = await tx.update(adsCampaigns).set({ status:'draft', moderationStatus:'draft', currentSubmissionId:null,
+        approvedSubmissionId:null, approvedRevision:null, primaryReviewerId:null, managerReviewerId:null, primaryReviewedAt:null, managerReviewedAt:null, updatedAt:new Date() }).where(eq(adsCampaigns.id,id)).returning();
+      await tx.update(adsCreatives).set({ reviewStatus:'pending', rejectionReason:null, reviewedAt:null }).where(eq(adsCreatives.campaignId,id));
+      return updated;
+    }, true);
+  }
 
-    const escrow = await this.escrowService.getCampaignEscrow(
-      campaignId,
-      advertiserId,
-    );
-    if (!escrow || escrow.status !== "active") {
-      await this.escrowService.lockCampaignBudget({
-        campaignId,
-        userId: advertiserId,
-        amountUsdCents: preflight.budgetUsdCents,
-        campaignTitle: preflight.title,
-      });
-    }
+  async deleteCreative(id: string, creativeId: string, owner: string, control: MutationControl) {
+    return this.workflow.mutate(id,owner,'delete_creative',control,{creativeId},async(tx) => {
+      const [creative] = await tx.update(adsCreatives).set({ status:'archived',updatedAt:new Date() })
+        .where(and(eq(adsCreatives.id,creativeId),eq(adsCreatives.campaignId,id))).returning();
+      if (!creative) throw new NotFoundException('Creative not found.');
+      return { deleted:true, creativeId };
+    });
+  }
 
-    return this.db.transaction(async (tx) => {
-      const campaign = await this.campaignForUpdate(
-        tx,
-        campaignId,
-        advertiserId,
-      );
-      if (
-        campaign.moderationStatus !== "draft" &&
-        campaign.moderationStatus !== "rejected"
-      ) {
-        throw new ConflictException(
-          "This campaign was already submitted by another request.",
-        );
+  /** Atomic full editor save. IDs supplied by clients are references, never ownership claims. */
+  async saveCampaign(id: string, owner: string, input: any) {
+    return this.workflow.mutate(id,owner,'save_campaign',input,input,async(tx,c) => {
+      const patch: any = {};
+      const allowed = ['expectedRevision','requestId','title','description','category','channels','budgetUsd','dailyBudgetUsd','costPerImpressionCents','costPerClickCents','pricingModel','format','targetDevices','schedule','frequencyCapPerDay','geoMode','locations','stacks'];
+      if (Object.keys(input).some(k => !allowed.includes(k))) throw new BadRequestException('Unsupported campaign field.');
+      for (const [field,max] of [['title',255],['description',5000],['category',80]] as const) if (input[field] !== undefined) patch[field] = cleanString(input[field],field,max,field==='title') || null;
+      if (input.channels !== undefined) {
+        if (!Array.isArray(input.channels) || input.channels.length>3 || input.channels.some((v: any)=>!['websites','individuals','mobile_apps'].includes(v))) throw new BadRequestException('Unsupported channel.');
+        patch.channels=JSON.stringify([...new Set(input.channels)]);
       }
+      if (input.budgetUsd !== undefined) {
+        if (!Number.isFinite(input.budgetUsd) || input.budgetUsd<5 || input.budgetUsd>21474836.47) throw new BadRequestException('Invalid campaign budget.');
+        const cents=Math.round(input.budgetUsd*100);
+        if (cents!==c.budgetUsdCents) {
+          const [escrow]=await tx.select().from(adsCampaignEscrows).where(eq(adsCampaignEscrows.campaignId,id)).limit(1);
+          if (escrow || c.budgetUsdCents!==c.remainingBudgetUsdCents) throw new ConflictException('A funded budget cannot be resized here. Keep the current budget or create another campaign.');
+          patch.budgetUsdCents=cents; patch.remainingBudgetUsdCents=cents;
+        }
+      }
+      const budget=patch.budgetUsdCents??c.budgetUsdCents;
+      if (input.dailyBudgetUsd !== undefined) {
+        if (input.dailyBudgetUsd===null) { patch.dailyBudgetUsdCents=null; patch.hourlyPacingUsdCents=null; }
+        else {
+          const cents=Math.round(input.dailyBudgetUsd*100);
+          if (!Number.isFinite(input.dailyBudgetUsd) || cents<100 || cents>budget) throw new BadRequestException('Daily budget must be between $1 and the total budget.');
+          patch.dailyBudgetUsdCents=cents;patch.hourlyPacingUsdCents=Math.ceil(cents/24);
+        }
+      } else if (c.dailyBudgetUsdCents>budget) throw new BadRequestException('Daily budget exceeds the new total.');
+      for(const [field,column,min] of [['costPerImpressionCents','costPerImpressionUsdCents',50],['costPerClickCents','costPerClickUsdCents',10]] as const) if(input[field]!==undefined) {
+        if(!Number.isSafeInteger(input[field]) || input[field]<min || input[field]>2147483647) throw new BadRequestException('The bid is below its floor or out of range.');
+        patch[column]=input[field];patch.pricingVersion=2;
+      }
+      if(input.pricingModel!==undefined) { if(!['cpm','cpc'].includes(input.pricingModel)) throw new BadRequestException('Unsupported pricing model.');patch.pricingModel=input.pricingModel; }
+      if(input.format!==undefined) { if(!AD_FORMATS.includes(input.format)) throw new BadRequestException('Unsupported format.');patch.format=input.format; }
+      if(input.targetDevices!==undefined) { const devices=cleanDevices(input.targetDevices);patch.targetDevices=devices?JSON.stringify(devices):null; }
+      if(input.schedule!==undefined) { try { patch.schedule=validateSchedule(input.schedule); } catch(e) { throw new BadRequestException((e as Error).message); } }
+      if(input.frequencyCapPerDay!==undefined) { if(!Number.isInteger(input.frequencyCapPerDay)||input.frequencyCapPerDay<1||input.frequencyCapPerDay>100) throw new BadRequestException('Invalid daily frequency cap.');patch.frequencyCapPerDay=input.frequencyCapPerDay; }
+      if(input.geoMode!==undefined) {
+        const geo=await this.resolveGeo(input.geoMode,input.locations);patch.geoMode=geo.mode;
+        await this.locations.replaceTargets(tx,'campaign',id,geo.targets);
+      } else if(input.locations!==undefined) throw new BadRequestException('Choose a geographic mode.');
+      if(Object.keys(patch).length) await tx.update(adsCampaigns).set({...patch,updatedAt:new Date()}).where(eq(adsCampaigns.id,id));
+      if(input.stacks!==undefined) {
+        if(!Array.isArray(input.stacks)||input.stacks.length<1||input.stacks.length>30) throw new BadRequestException('Save between one and 30 stacks.');
+        const oldStacks=await tx.select().from(adsCreativeStacks).where(eq(adsCreativeStacks.campaignId,id)).orderBy(asc(adsCreativeStacks.position));
+        const oldAds=await tx.select().from(adsCreatives).where(eq(adsCreatives.campaignId,id));
+        const keptStacks=new Set<string>(),keptAds=new Set<string>();let nextPosition=Math.max(0,...oldStacks.map((s:any)=>s.position))+1;
+        for(const stack of input.stacks) {
+          if(!stack || typeof stack!=='object' || Object.keys(stack).some(k=>!['id','name','geoMode','locations','targetDevices','schedule','ads'].includes(k))) throw new BadRequestException('Invalid stack fields.');
+          if(stack.id && (!oldStacks.some((s:any)=>s.id===stack.id&&!s.archived)||keptStacks.has(stack.id))) throw new BadRequestException('Choose a current stack in this campaign.');
+          const geo=await this.resolveGeo(stack.geoMode||'inherit',stack.locations);
+          const values={name:cleanString(stack.name,'Stack name',100,true),geoMode:geo.mode,targetDevices:cleanDevices(stack.targetDevices)?JSON.stringify(cleanDevices(stack.targetDevices)):null,schedule:validateSchedule(stack.schedule??inherited(),true)};
+          const [row]=stack.id ? await tx.update(adsCreativeStacks).set({...values,updatedAt:new Date()}).where(eq(adsCreativeStacks.id,stack.id)).returning():await tx.insert(adsCreativeStacks).values({...values,campaignId:id,position:nextPosition++}).returning();
+          keptStacks.add(row.id);await this.locations.replaceTargets(tx,'stack',row.id,geo.targets);
+          if(!Array.isArray(stack.ads)||stack.ads.length>100) throw new BadRequestException('Invalid ads.');
+          for(const ad of stack.ads) {
+            if(!ad||typeof ad!=='object'||Object.keys(ad).some(k=>!['id','adType','headline','bodyText','ctaText','destinationUrl','adFormat','mediaAssetId'].includes(k))) throw new BadRequestException('Invalid ad fields.');
+            if(ad.id&&(!oldAds.some((a:any)=>a.id===ad.id&&a.status!=='archived')||keptAds.has(ad.id))) throw new BadRequestException('Choose a current creative in this campaign.');
+            const valid=await this.validateCreative(tx,owner,ad,true);
+            const values={...valid,campaignId:id,adStackId:row.id,status:'active' as const};
+            const [saved]=ad.id?await tx.update(adsCreatives).set({...values,updatedAt:new Date()}).where(eq(adsCreatives.id,ad.id)).returning():await tx.insert(adsCreatives).values(values).returning();keptAds.add(saved.id);
+          }
+        }
+        const originalDefault=oldStacks.find((s:any)=>s.position===1&&!s.archived);
+        if(originalDefault && !keptStacks.has(originalDefault.id)) throw new BadRequestException('Keep the default stack; its ads can be changed.');
+        for(const ad of oldAds) if(!keptAds.has(ad.id)&&ad.status!=='archived') await tx.update(adsCreatives).set({status:'archived',updatedAt:new Date()}).where(eq(adsCreatives.id,ad.id));
+        for(const stack of oldStacks) if(!keptStacks.has(stack.id)&&!stack.archived) await tx.update(adsCreativeStacks).set({archived:true,updatedAt:new Date()}).where(eq(adsCreativeStacks.id,stack.id));
+      }
+      const [updated]=await tx.select().from(adsCampaigns).where(eq(adsCampaigns.id,id)).limit(1);return updated;
+    });
+  }
+
+  async submitForReview(campaignId: string, advertiserId: string, control?: MutationControl) {
+    controlRequired(control);
+    const hash=fingerprint({action:'submit',...control});
+    const intent=await this.db.transaction(async(tx)=>{
+      const campaign=await this.workflow.lock(tx,campaignId,advertiserId);
+      const [existing]=await tx.select().from(adsCampaignSubmissions).where(and(eq(adsCampaignSubmissions.campaignId,campaignId),eq(adsCampaignSubmissions.actorId,advertiserId),eq(adsCampaignSubmissions.requestId,control.requestId))).limit(1);
+      if(existing) {
+        if(existing.fingerprint!==hash || existing.state==='superseded') throw new ConflictException('This submission request changed or was superseded.');
+        if(existing.state==='submitted') return existing;
+        if(campaign.contentRevision!==existing.contentRevision || (campaign.submissionIntentId && campaign.submissionIntentId!==existing.id)) throw new ConflictException('This submission no longer matches the campaign.');
+        await tx.update(adsCampaigns).set({submissionIntentId:existing.id}).where(eq(adsCampaigns.id,campaignId));
+        return existing;
+      }
+      if(campaign.contentRevision!==control.expectedRevision) throw new ConflictException('This campaign changed. Reload before submitting.');
+      this.assertEditable(campaign);
+      if(campaign.geoMode==='targeted' && process.env.GEO_TARGETING_ENABLED!=='true') throw new BadRequestException('Select Global targeting before submitting.');
       const stacks = await tx
         .select()
         .from(adsCreativeStacks)
-        .where(eq(adsCreativeStacks.campaignId, campaignId))
+        .where(and(eq(adsCreativeStacks.campaignId, campaignId), eq(adsCreativeStacks.archived, false)))
         .orderBy(asc(adsCreativeStacks.position));
       for (const stack of stacks) {
         try {
@@ -1019,7 +1063,9 @@ export class CampaignsService {
       const creatives = await tx
         .select()
         .from(adsCreatives)
-        .where(eq(adsCreatives.campaignId, campaignId));
+        .where(and(eq(adsCreatives.campaignId, campaignId), sql`${adsCreatives.status} <> 'archived'`));
+      if (creatives.some(c => !stacks.some(s => s.id === c.adStackId))) throw new BadRequestException('An ad points to an unavailable stack.');
+      for (const creative of creatives) await this.validateCreative(tx, advertiserId, { ...creative, adType:creative.adType, adFormat:creative.adFormat, mediaAssetId:creative.mediaAssetId??undefined, imageUrl:creative.imageUrl??undefined,videoUrl:creative.videoUrl??undefined });
       for (const stack of stacks) {
         const stackCreatives = creatives.filter(
           (c) => c.adStackId === stack.id,
@@ -1102,17 +1148,53 @@ export class CampaignsService {
             "Choose at least one campaign location, or select Global.",
           );
       }
-      const [updated] = await tx
-        .update(adsCampaigns)
-        .set({
-          status: "paused",
-          moderationStatus: "pending_primary_review",
-          updatedAt: new Date(),
-        })
-        .where(eq(adsCampaigns.id, campaignId))
-        .returning();
+
+      const before=await this.workflow.snapshot(tx,campaign);
+      const [submission]=await tx.insert(adsCampaignSubmissions).values({campaignId,actorId:advertiserId,requestId:control.requestId,contentRevision:campaign.contentRevision,fingerprint:hash,snapshot:before,state:'funding_pending'}).returning();
+      await tx.update(adsCampaigns).set({submissionIntentId:submission.id}).where(eq(adsCampaigns.id,campaignId));
+      await this.workflow.audit(tx,before,{...before,campaign:{...before.campaign,submissionIntentId:submission.id}},advertiserId,'submission_prepared',control.requestId,['submissionIntentId']);
+      return submission;
+    });
+    if(intent.state==='submitted') {
+      const [c]=await this.db.select().from(adsCampaigns).where(and(eq(adsCampaigns.id,campaignId),eq(adsCampaigns.advertiserId,advertiserId))).limit(1);
+      if(c.currentSubmissionId!==intent.id) throw new ConflictException('This review was superseded.');return c;
+    }
+    let receipt:any;
+    try {
+      // Billing validates its durable receipt even when the same campaign was funded before.
+      const snapshot=intent.snapshot as any;
+      receipt=await this.escrowService.lockCampaignBudget({campaignId,userId:advertiserId,amountUsdCents:snapshot.campaign.budgetUsdCents,campaignTitle:snapshot.campaign.title});
+      if(!receipt?.transactionId || !receipt?.operationId || receipt?.escrow?.status!=='active') throw new ServiceUnavailableException('Funding needs reconciliation.');
+    } catch(error) {
+      const confirmed=error instanceof ConflictException || error instanceof BadRequestException;
+      await this.db.transaction(async(tx)=>{
+        const c=await this.workflow.lock(tx,campaignId,advertiserId);
+        const [record]=await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,intent.id)).limit(1);
+        if(record?.state==='submitted') return;
+        await tx.update(adsCampaignSubmissions).set({state:confirmed?'funding_rejected':'funding_unknown',updatedAt:new Date()}).where(eq(adsCampaignSubmissions.id,intent.id));
+        if(confirmed && c.submissionIntentId===intent.id) await tx.update(adsCampaigns).set({submissionIntentId:null}).where(eq(adsCampaigns.id,campaignId));
+      });
+      throw error;
+    }
+    return this.db.transaction(async(tx)=>{
+      const c=await this.workflow.lock(tx,campaignId,advertiserId);
+      const [submission]=await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,intent.id)).limit(1);
+      if(submission.state==='submitted' && c.currentSubmissionId===intent.id) return c;
+      if(c.contentRevision!==intent.contentRevision || c.submissionIntentId!==intent.id || ['suspended','trash','completed','cancelled'].includes(c.status)) throw new ConflictException('Funding is retained for reconciliation; this revision cannot enter review.');
+      const before=await this.workflow.snapshot(tx,c), now=new Date();
+      const [updated]=await tx.update(adsCampaigns).set({status:'paused',moderationStatus:'pending_primary_review',currentSubmissionId:intent.id,submissionIntentId:null,submittedAt:now,approvedSubmissionId:null,approvedRevision:null,primaryReviewerId:null,managerReviewerId:null,primaryReviewedAt:null,managerReviewedAt:null,updatedAt:now}).where(eq(adsCampaigns.id,campaignId)).returning();
+      await tx.update(adsCreatives).set({reviewStatus:'pending',rejectionReason:null,reviewedAt:null}).where(and(eq(adsCreatives.campaignId,campaignId),sql`${adsCreatives.status} <> 'archived'`));
+      await tx.update(adsCampaignSubmissions).set({state:'submitted',submittedAt:now,updatedAt:now,fundingReference:{transactionId:receipt.transactionId,operationId:receipt.operationId,escrowId:receipt.escrow.id}}).where(eq(adsCampaignSubmissions.id,intent.id));
+      await this.workflow.audit(tx,before,await this.workflow.snapshot(tx,updated),advertiserId,'submit_review',control.requestId,['currentSubmissionId','moderationStatus']);
       return updated;
     });
+  }
+
+  async mutationResult(campaignId:string,owner:string,requestId:string) {
+    await this.getCampaignDetails(campaignId,owner);
+    const [mutation]=await this.db.select().from(schema.adsCampaignMutations).where(and(eq(schema.adsCampaignMutations.campaignId,campaignId),eq(schema.adsCampaignMutations.actorId,owner),eq(schema.adsCampaignMutations.requestId,requestId))).limit(1);
+    const [submission]=await this.db.select({id:adsCampaignSubmissions.id,state:adsCampaignSubmissions.state,contentRevision:adsCampaignSubmissions.contentRevision}).from(adsCampaignSubmissions).where(and(eq(adsCampaignSubmissions.campaignId,campaignId),eq(adsCampaignSubmissions.actorId,owner),eq(adsCampaignSubmissions.requestId,requestId))).limit(1);
+    return { mutation:mutation?.result??null, submission:submission??null };
   }
 
   // ── Reads ───────────────────────────────────────────────────────────────────
@@ -1127,6 +1209,7 @@ export class CampaignsService {
       .where(and(...conditions))
       .orderBy(desc(adsCampaigns.createdAt));
     return campaigns.map((c) => ({
+      capabilities: campaignCapabilities(c),
       ...c,
       budgetUsd: c.budgetUsdCents / 100,
       dailyBudgetUsd: c.dailyBudgetUsdCents
@@ -1155,12 +1238,12 @@ export class CampaignsService {
       this.db
         .select()
         .from(adsCreativeStacks)
-        .where(eq(adsCreativeStacks.campaignId, campaignId))
+        .where(and(eq(adsCreativeStacks.campaignId, campaignId), eq(adsCreativeStacks.archived, false)))
         .orderBy(asc(adsCreativeStacks.position)),
       this.db
         .select()
         .from(adsCreatives)
-        .where(eq(adsCreatives.campaignId, campaignId))
+        .where(and(eq(adsCreatives.campaignId, campaignId), sql`${adsCreatives.status} <> 'archived'`))
         .orderBy(asc(adsCreatives.createdAt)),
       this.db
         .select()
@@ -1267,8 +1350,25 @@ export class CampaignsService {
       };
     });
 
+    const [submission] = campaign.currentSubmissionId
+      ? await this.db
+          .select({ requestId: adsCampaignSubmissions.requestId, state: adsCampaignSubmissions.state })
+          .from(adsCampaignSubmissions)
+          .where(eq(adsCampaignSubmissions.id, campaign.currentSubmissionId))
+          .limit(1)
+      : campaign.submissionIntentId
+        ? await this.db
+            .select({ requestId: adsCampaignSubmissions.requestId, state: adsCampaignSubmissions.state })
+            .from(adsCampaignSubmissions)
+            .where(eq(adsCampaignSubmissions.id, campaign.submissionIntentId))
+            .limit(1)
+        : [];
+
     return {
       ...campaign,
+      capabilities: campaignCapabilities(campaign),
+      submissionRequestId: submission?.requestId ?? null,
+      submissionState: submission?.state ?? null,
       budgetUsd: campaign.budgetUsdCents / 100,
       dailyBudgetUsd: campaign.dailyBudgetUsdCents
         ? campaign.dailyBudgetUsdCents / 100
@@ -1343,7 +1443,7 @@ export class CampaignsService {
       throw new BadRequestException(
         "A suspended campaign requires staff review.",
       );
-    if (status === "active" && campaign.moderationStatus !== "approved") {
+    if (status === "active" && !currentApproval(campaign)) {
       throw new BadRequestException(
         "Campaign must have completed moderation before activation.",
       );

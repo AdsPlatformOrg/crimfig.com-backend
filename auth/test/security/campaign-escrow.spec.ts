@@ -22,7 +22,7 @@ const stranger = '12345678-1234-4234-8234-123456789004';
 function database(balance = 2000) {
   const dialect = new PgDialect();
   let state: any = {
-    campaigns: [campaignId, secondCampaign].map(id => ({ id, advertiserId: owner, status: 'draft', moderationStatus: 'approved', remainingBudgetUsdCents: 1000 })),
+    campaigns: [campaignId, secondCampaign].map(id => ({ id, advertiserId: owner, status: 'draft', moderationStatus: 'approved', remainingBudgetUsdCents: 1000, contentRevision: 1, currentSubmissionId: id, approvedSubmissionId: id, approvedRevision: 1, submissionIntentId: null })),
     escrows: [], wallets: [{ id: 'wallet', userId: owner, balanceUsdCents: balance, lockedUsdCents: 0, version: 0 }], receipts: [],
   };
   const tables = new Map<any, string>([[schema.adsCampaigns, 'campaigns'], [schema.adsCampaignEscrows, 'escrows'], [schema.billingWallets, 'wallets'], [schema.billingTransactions, 'receipts']]);
@@ -243,4 +243,14 @@ test('trashed campaign cannot use an existing receipt to bypass activation rules
   store.state().campaigns[0].status = 'trash';
   await expect(service.change(owner, campaignId, 'reserve', undefined, 'active')).rejects.toBeInstanceOf(ConflictException);
   expect(store.state().campaigns[0].status).toBe('trash'); expect(store.state().receipts).toHaveLength(1);
+});
+
+test('stale or revised campaign without current approval cannot activate', async () => {
+  for (const patch of [{ contentRevision: 2 }, { currentSubmissionId: null }, { approvedSubmissionId: secondCampaign }, { submissionIntentId: secondCampaign }]) {
+    const store = database(); const service = new CampaignEscrowService(store.db);
+    Object.assign(store.state().campaigns[0], patch);
+    await expect(service.change(owner, campaignId, 'reserve', undefined, 'active')).rejects.toBeInstanceOf(ConflictException);
+    expect(store.state().campaigns[0].status).toBe('draft');
+    expect(store.state().receipts).toHaveLength(0);
+  }
 });

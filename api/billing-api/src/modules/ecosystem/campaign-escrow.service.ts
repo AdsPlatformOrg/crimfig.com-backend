@@ -1,3 +1,4 @@
+import { currentApproval } from '../../../../ads-api/src/modules/campaigns/campaign-workflow';
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -36,7 +37,7 @@ export class CampaignEscrowService {
       const [campaign] = await tx.select().from(adsCampaigns)
         .where(and(eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, userId))).for('update');
       if (!campaign) throw new NotFoundException('Campaign not found');
-      if (targetStatus && (campaign.status === 'suspended' || (targetStatus === 'active' && campaign.moderationStatus !== 'approved'))) {
+      if (targetStatus && (campaign.status === 'suspended' || (targetStatus === 'active' && !currentApproval(campaign)))) {
         throw new ConflictException('Campaign requires staff moderation before this transition');
       }
       const finish = async (result: any) => {
@@ -50,7 +51,7 @@ export class CampaignEscrowService {
       if (action === 'reserve' && (!Number.isSafeInteger(amountUsdCents) || amountUsdCents! < 500 || amountUsdCents! > MAX_CENTS)) {
         throw new BadRequestException('Campaign requires 500 to 2147483647 integer USD cents to activate');
       }
-      if (action === 'reserve' && (['suspended', 'trash'].includes(campaign.status) || amountUsdCents! > campaign.remainingBudgetUsdCents)) {
+      if (action === 'reserve' && (['suspended', 'trash', 'cancelled', 'completed'].includes(campaign.status))) {
         throw new ConflictException('Campaign cannot reserve this budget');
       }
       const rows = await tx.select().from(adsCampaignEscrows).where(eq(adsCampaignEscrows.campaignId, campaignId)).for('update');
@@ -99,6 +100,7 @@ export class CampaignEscrowService {
       if (action === 'release' && campaign.status === 'active' && !targetStatus) {
         throw new ConflictException('Pause the campaign before releasing its reservation');
       }
+      if(action === 'reserve' && amountUsdCents! > campaign.remainingBudgetUsdCents) throw new ConflictException('Campaign cannot reserve this budget');
       // Concurrent reservations for different campaigns serialize on this wallet row.
       await tx.insert(billingWallets).values({ userId, balanceUsdCents: 0, lockedUsdCents: 0 }).onConflictDoNothing({ target: billingWallets.userId });
       const [wallet] = await tx.select().from(billingWallets).where(eq(billingWallets.userId, userId)).for('update');

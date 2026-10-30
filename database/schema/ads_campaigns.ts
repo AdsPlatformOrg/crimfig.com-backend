@@ -10,6 +10,7 @@ import {
   timestamp,
   pgEnum,
   index,
+  integer,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 
@@ -64,6 +65,12 @@ export const adsCampaigns = pgTable(
 
     creationRequestId: uuid("creation_request_id"),
     creationFingerprint: varchar("creation_fingerprint", { length: 64 }),
+    contentRevision: integer('content_revision').notNull().default(1),
+    currentSubmissionId: uuid('current_submission_id'),
+    approvedSubmissionId: uuid('approved_submission_id'),
+    approvedRevision: integer('approved_revision'),
+    submissionIntentId: uuid('submission_intent_id'),
+    submittedAt: timestamp('submitted_at', { withTimezone: true }),
     title: varchar("title", { length: 255 }).notNull(),
     description: text("description"),
 
