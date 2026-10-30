@@ -41,8 +41,8 @@ export class TrackInteractionDto {
   placementToken?: string;
   @IsOptional() @IsString() @MaxLength(2048)
   impToken?: string;
-  @IsIn(['hover', 'touch', 'impression', 'viewable_impression', 'click', 'reels_view', 'video_q25', 'video_q50', 'video_q75', 'video_complete'])
-  type: 'hover' | 'touch' | 'impression' | 'viewable_impression' | 'click' | 'reels_view' | 'video_q25' | 'video_q50' | 'video_q75' | 'video_complete';
+  @IsIn(['hover', 'touch', 'render', 'impression', 'viewable_impression', 'click', 'reels_view', 'video_q25', 'video_q50', 'video_q75', 'video_complete'])
+  type: 'hover' | 'touch' | 'render' | 'impression' | 'viewable_impression' | 'click' | 'reels_view' | 'video_q25' | 'video_q50' | 'video_q75' | 'video_complete';
   @IsOptional() @IsIn(['embed', 'share_link', 'reels', 'direct'])
   source?: string;
 }
@@ -164,6 +164,12 @@ export class DeliveryController {
       mode,
       fill === 'true',
       req ? trustedClientGeo(req) : undefined,
+      req
+        ? {
+            origin: req.headers['origin'] as string | undefined,
+            referer: req.headers['referer'] as string | undefined,
+          }
+        : undefined,
     );
     return { status: 'success', data: ad };
   }

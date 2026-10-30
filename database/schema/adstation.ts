@@ -1,4 +1,4 @@
-import { pgTable, uuid, varchar, text, bigint, boolean, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, varchar, text, integer, bigint, boolean, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
 import { adsPromoters, adsPromoterWebsites } from './ads_promoters';
 
 /**
@@ -55,6 +55,19 @@ export const adstationSlots = pgTable(
 
     // HTML / Embed identifier
     slotTagId: varchar('slot_tag_id', { length: 64 }).notNull().unique(),
+
+    // PLAN-0047: Canonical slot lifecycle, dimensions & installation diagnostics
+    // 'draft' | 'installation_pending' | 'testing' | 'active' | 'paused' | 'suspended' | 'disabled'
+    lifecycleStatus: varchar('lifecycle_status', { length: 32 }).notNull().default('installation_pending'),
+    width: integer('width'),
+    height: integer('height'),
+    responsive: boolean('responsive').notNull().default(true),
+    allowedAdTypes: text('allowed_ad_types'), // JSON array of allowed ad types/formats
+    // 'unchecked' | 'verified' | 'failed' | 'missing'
+    installationStatus: varchar('installation_status', { length: 24 }).notNull().default('unchecked'),
+    installationCheckedAt: timestamp('installation_checked_at', { withTimezone: true }),
+    installationDiagnostic: text('installation_diagnostic'),
+    policyRevision: integer('policy_revision').notNull().default(1),
 
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

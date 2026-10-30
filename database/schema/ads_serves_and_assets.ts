@@ -113,6 +113,32 @@ export const adsServes = pgTable(
     geoRegion: varchar("geo_region", { length: 50 }),
     deviceType: varchar("device_type", { length: 20 }),
 
+    // PLAN-0047 / PLAN-0049: Supply admission, delivery mode, financial eligibility & decision links
+    requestId: uuid("request_id"),
+    websiteId: uuid("website_id"),
+    slotId: uuid("slot_id"),
+    // 'house' | 'shadow' | 'direct' | 'paid' | 'simulated_paid'
+    inventoryClass: varchar("inventory_class", { length: 24 })
+      .notNull()
+      .default("paid"),
+    // 'normal' | 'shadow' | 'no_fill'
+    deliveryMode: varchar("delivery_mode", { length: 20 })
+      .notNull()
+      .default("normal"),
+    // 'normal' | 'suspicious' | 'high_risk' | 'confirmed_fraud'
+    trafficRiskStatus: varchar("traffic_risk_status", { length: 24 })
+      .notNull()
+      .default("normal"),
+    // 'pending' | 'eligible' | 'quarantined' | 'invalid'
+    financialEligibility: varchar("financial_eligibility", { length: 24 })
+      .notNull()
+      .default("pending"),
+    auctionDecisionId: uuid("auction_decision_id"),
+    opportunityReservationId: uuid("opportunity_reservation_id"),
+    policyVersion: varchar("policy_version", { length: 32 })
+      .notNull()
+      .default("auction_v1"),
+
     servedAt: timestamp("served_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

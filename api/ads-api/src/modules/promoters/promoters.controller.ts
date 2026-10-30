@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { PromotersService } from './promoters.service';
 import { IsString, IsIn, IsOptional, IsBoolean } from 'class-validator';
@@ -61,7 +61,7 @@ export class PromotersController {
   @ApiOperation({ summary: 'Register/set promoter profile type' })
   async register(@Req() req: any, @Body() dto: RegisterPromoterDto) {
     const userId = req.user.sub;
-    const profile = await this.promotersService.getOrCreatePromoter(userId, dto.type, dto.displayName);
+    const profile = await this.promotersService.getOrCreatePromoter(userId, dto.type, dto.displayName, true);
     return { status: 'success', data: profile };
   }
 
@@ -80,6 +80,15 @@ export class PromotersController {
     const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(userId, 'WEBSITE');
     const website = await this.promotersService.addWebsite(promoter.id, dto);
+    return { status: 'success', data: website };
+  }
+
+  @Post('websites/:id/submit-review')
+  @ApiOperation({ summary: 'Submit verified website for policy approval' })
+  async submitWebsiteForReview(@Req() req: any, @Param('id') websiteId: string) {
+    const userId = req.user.sub;
+    const promoter = await this.promotersService.getOrCreatePromoter(userId, 'WEBSITE');
+    const website = await this.promotersService.submitWebsiteForReview(promoter.id, websiteId);
     return { status: 'success', data: website };
   }
 

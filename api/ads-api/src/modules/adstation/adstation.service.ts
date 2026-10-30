@@ -1,4 +1,11 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Logger,
+} from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -6,9 +13,12 @@ import {
   adstationSlots,
   adstationDirectCampaigns,
   adsPromoterWebsites,
-  adsPromoters,
+  adsServes,
+  adsInteractions,
+  adsAuctionDecisions,
+  adsSupplyStateHistory,
 } from '@crimfig/database/schema';
-import { and, eq, desc } from 'drizzle-orm';
+import { and, eq, desc, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
 
 export interface CreateAdstationSlotDto {
@@ -17,6 +27,21 @@ export interface CreateAdstationSlotDto {
   slotType: 'consideration' | 'direct' | 'network' | 'hybrid';
   format?: string;
   slotDeliveryPreference?: string;
+  width?: number;
+  height?: number;
+  responsive?: boolean;
+  allowedAdTypes?: string[];
+}
+
+export interface UpdateAdstationSlotDto {
+  name?: string;
+  format?: string;
+  slotDeliveryPreference?: string;
+  lifecycleStatus?: 'testing' | 'active' | 'paused' | 'disabled';
+  width?: number;
+  height?: number;
+  responsive?: boolean;
+  allowedAdTypes?: string[];
 }
 
 export interface CreateDirectCampaignDto {
@@ -48,47 +73,78 @@ export class AdstationService {
     return this.db
       .select()
       .from(adstationSlots)
-      .where(and(eq(adstationSlots.promoterId, promoterId), eq(adstationSlots.websiteId, websiteId)))
+      .where(
+        and(
+          eq(adstationSlots.promoterId, promoterId),
+          eq(adstationSlots.websiteId, websiteId),
+        ),
+      )
       .orderBy(desc(adstationSlots.createdAt));
   }
 
   /**
-   * Create an ad slot in AdStation
-   * Enforces that consideration slots are flagged and track verification status.
+   * Create a canonical ad slot in AdStation.
+   * Requires a verified promoter website owned by this promoter.
    */
   async createSlot(promoterId: string, dto: CreateAdstationSlotDto) {
-    // Verify website ownership
     const [website] = await this.db
       .select()
       .from(adsPromoterWebsites)
-      .where(and(eq(adsPromoterWebsites.id, dto.websiteId), eq(adsPromoterWebsites.promoterId, promoterId)))
+      .where(
+        and(
+          eq(adsPromoterWebsites.id, dto.websiteId),
+          eq(adsPromoterWebsites.promoterId, promoterId),
+        ),
+      )
       .limit(1);
 
     if (!website) {
       throw new NotFoundException('Promoter website not found or unauthorized');
     }
 
+    if (website.verificationStatus !== 'verified') {
+      throw new BadRequestException(
+        'Verify domain ownership first before creating ad slots for this website.',
+      );
+    }
+
+    if (website.isSuspended || website.policyStatus === 'suspended') {
+      throw new ForbiddenException(
+        'Cannot create ad slots on a suspended website.',
+      );
+    }
+
     const isConsideration = dto.slotType === 'consideration';
     const tagSuffix = crypto.randomBytes(8).toString('hex');
     const slotTagId = `cf-slot-${dto.slotType}-${tagSuffix}`;
+    const initialLifecycle =
+      website.policyStatus === 'approved' ? 'testing' : 'testing';
 
     const [slot] = await this.db
       .insert(adstationSlots)
       .values({
         promoterId,
         websiteId: dto.websiteId,
-        name: dto.name,
+        name: dto.name.trim(),
         slotType: dto.slotType,
         format: dto.format || 'banner',
         isConsiderationSlot: isConsideration,
         isConsiderationVerified: false,
         slotDeliveryPreference: dto.slotDeliveryPreference,
         slotTagId,
+        lifecycleStatus: initialLifecycle,
+        width: dto.width ?? null,
+        height: dto.height ?? null,
+        responsive: dto.responsive ?? true,
+        allowedAdTypes: dto.allowedAdTypes
+          ? JSON.stringify(dto.allowedAdTypes)
+          : null,
+        installationStatus: 'unchecked',
+        policyRevision: 1,
         isActive: true,
       })
       .returning();
 
-    // If marked consideration, activate consideration on website record
     if (isConsideration) {
       await this.db
         .update(adsPromoterWebsites)
@@ -99,18 +155,381 @@ export class AdstationService {
         .where(eq(adsPromoterWebsites.id, dto.websiteId));
     }
 
+    await this.db.insert(adsSupplyStateHistory).values({
+      entityType: 'slot',
+      entityId: slot.id,
+      dimension: 'lifecycle_status',
+      fromState: 'draft',
+      toState: slot.lifecycleStatus,
+      actorRole: 'promoter',
+      reason: `Created ${dto.slotType} slot ${slot.slotTagId}`,
+    });
+
     return slot;
   }
 
   /**
-   * Verify Consideration Slot (PLAN-0018 Section 2.1)
-   * Super Admin or automated crawler confirms consideration placement serves exclusively CrimFig network ads.
+   * Update an existing canonical AdStation slot (pause/resume/configure).
+   * Enforces that owners cannot clear an admin-imposed 'suspended' state.
    */
-  async verifyConsiderationSlot(promoterId: string, websiteId: string, slotId: string) {
+  async updateSlot(
+    promoterId: string,
+    slotId: string,
+    dto: UpdateAdstationSlotDto,
+  ) {
     const [slot] = await this.db
       .select()
       .from(adstationSlots)
-      .where(and(eq(adstationSlots.id, slotId), eq(adstationSlots.websiteId, websiteId), eq(adstationSlots.promoterId, promoterId)))
+      .where(
+        and(
+          eq(adstationSlots.id, slotId),
+          eq(adstationSlots.promoterId, promoterId),
+        ),
+      )
+      .limit(1);
+
+    if (!slot) {
+      throw new NotFoundException('AdStation slot not found or unauthorized');
+    }
+
+    if (slot.lifecycleStatus === 'suspended') {
+      throw new ForbiddenException(
+        'This ad slot is suspended by compliance moderation and cannot be modified or resumed without admin reinstatement.',
+      );
+    }
+
+    let nextLifecycle = slot.lifecycleStatus;
+    let nextIsActive = slot.isActive;
+    if (dto.lifecycleStatus) {
+      if (
+        !['testing', 'active', 'paused', 'disabled'].includes(
+          dto.lifecycleStatus,
+        )
+      ) {
+        throw new BadRequestException('Invalid slot lifecycle status');
+      }
+      if (
+        dto.lifecycleStatus === 'active' &&
+        slot.installationStatus !== 'verified' &&
+        !slot.isConsiderationVerified
+      ) {
+        // Keep in testing until installation check passes
+        nextLifecycle = 'testing';
+      } else {
+        nextLifecycle = dto.lifecycleStatus;
+      }
+      nextIsActive =
+        nextLifecycle !== 'paused' && nextLifecycle !== 'disabled';
+    }
+
+    const [updated] = await this.db
+      .update(adstationSlots)
+      .set({
+        ...(dto.name ? { name: dto.name.trim() } : {}),
+        ...(dto.format ? { format: dto.format } : {}),
+        ...(dto.slotDeliveryPreference !== undefined
+          ? { slotDeliveryPreference: dto.slotDeliveryPreference }
+          : {}),
+        ...(dto.width !== undefined ? { width: dto.width } : {}),
+        ...(dto.height !== undefined ? { height: dto.height } : {}),
+        ...(dto.responsive !== undefined ? { responsive: dto.responsive } : {}),
+        ...(dto.allowedAdTypes
+          ? { allowedAdTypes: JSON.stringify(dto.allowedAdTypes) }
+          : {}),
+        lifecycleStatus: nextLifecycle,
+        isActive: nextIsActive,
+        policyRevision: (slot.policyRevision || 1) + 1,
+        updatedAt: new Date(),
+      })
+      .where(eq(adstationSlots.id, slotId))
+      .returning();
+
+    if (nextLifecycle !== slot.lifecycleStatus) {
+      await this.db.insert(adsSupplyStateHistory).values({
+        entityType: 'slot',
+        entityId: slot.id,
+        dimension: 'lifecycle_status',
+        fromState: slot.lifecycleStatus,
+        toState: nextLifecycle,
+        actorRole: 'promoter',
+        reason: `Promoter updated slot lifecycle to ${nextLifecycle}`,
+      });
+    }
+
+    return updated;
+  }
+
+  /**
+   * Generate environment-safe HTML & Next.js/React embed snippet for a persisted slot.
+   */
+  async getSlotEmbedInstructions(promoterId: string, slotId: string) {
+    const [slot] = await this.db
+      .select()
+      .from(adstationSlots)
+      .where(
+        and(
+          eq(adstationSlots.id, slotId),
+          eq(adstationSlots.promoterId, promoterId),
+        ),
+      )
+      .limit(1);
+
+    if (!slot) {
+      throw new NotFoundException('AdStation slot not found or unauthorized');
+    }
+
+    const [website] = await this.db
+      .select()
+      .from(adsPromoterWebsites)
+      .where(eq(adsPromoterWebsites.id, slot.websiteId))
+      .limit(1);
+
+    const adsPublicUrl = (
+      process.env.ADS_PUBLIC_URL ||
+      process.env.NEXT_PUBLIC_ADS_API_URL ||
+      'https://api.ads.crimfig.com'
+    ).replace(/\/$/, '');
+
+    const htmlSnippet = [
+      `<!-- CrimFig Ad Slot: ${slot.name} (${slot.slotTagId}) -->`,
+      `<ins class="crimfig-pub-slot"`,
+      `     style="display:block;min-height:${slot.height || 250}px;"`,
+      `     data-ad-slot="${slot.slotTagId}"`,
+      `     data-ad-format="${slot.format || 'banner'}"`,
+      `     data-full-width-responsive="${slot.responsive ? 'true' : 'false'}"></ins>`,
+      `<script async src="${adsPublicUrl}/api/v1/delivery/embed.js?slot=${slot.slotTagId}"></script>`,
+    ].join('\n');
+
+    const nextJsSnippet = [
+      `// Next.js / React Component Usage (${website?.domain || 'your-domain.com'})`,
+      `<CrimFigAdSlot`,
+      `  slotId="${slot.slotTagId}"`,
+      `  format="${slot.format || 'banner'}"`,
+      `  apiBaseUrl="${adsPublicUrl}"`,
+      `/>`,
+    ].join('\n');
+
+    return {
+      slotId: slot.id,
+      slotTagId: slot.slotTagId,
+      websiteId: slot.websiteId,
+      domain: website?.domain || null,
+      lifecycleStatus: slot.lifecycleStatus,
+      installationStatus: slot.installationStatus,
+      adsPublicUrl,
+      htmlSnippet,
+      nextJsSnippet,
+    };
+  }
+
+  /**
+   * Evidence-driven installation check for a canonical slot (`POST /api/v1/adstation/slots/:id/check-installation`).
+   * Inspects recent serves and render/impression receipts from the registered website domain.
+   */
+  async checkSlotInstallation(promoterId: string, slotId: string) {
+    const [slot] = await this.db
+      .select()
+      .from(adstationSlots)
+      .where(
+        and(
+          eq(adstationSlots.id, slotId),
+          eq(adstationSlots.promoterId, promoterId),
+        ),
+      )
+      .limit(1);
+
+    if (!slot) {
+      throw new NotFoundException('AdStation slot not found or unauthorized');
+    }
+
+    const [website] = await this.db
+      .select()
+      .from(adsPromoterWebsites)
+      .where(eq(adsPromoterWebsites.id, slot.websiteId))
+      .limit(1);
+
+    if (!website) {
+      throw new NotFoundException('Website not found');
+    }
+
+    const [serveStats] = await this.db
+      .select({
+        serveCount: sql<number>`count(*)::int`,
+        lastServedAt: sql<Date | null>`max(${adsServes.servedAt})`,
+      })
+      .from(adsServes)
+      .where(eq(adsServes.slotHandle, slot.slotTagId));
+
+    const [interactionStats] = await this.db
+      .select({
+        renderCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'render')::int`,
+        impressionCount: sql<number>`count(*) filter (where ${adsInteractions.type} in ('impression', 'viewable_impression'))::int`,
+      })
+      .from(adsInteractions)
+      .where(eq(adsInteractions.slotId, slot.id));
+
+    const totalServes = serveStats?.serveCount || 0;
+    const totalRenders =
+      (interactionStats?.renderCount || 0) +
+      (interactionStats?.impressionCount || 0);
+    const isInstalled = totalServes > 0;
+
+    const nextInstallationStatus = isInstalled ? 'verified' : 'missing';
+    const nextLifecycleStatus =
+      slot.lifecycleStatus === 'suspended' ||
+      slot.lifecycleStatus === 'paused' ||
+      slot.lifecycleStatus === 'disabled'
+        ? slot.lifecycleStatus
+        : isInstalled
+          ? website.policyStatus === 'approved'
+            ? 'active'
+            : 'testing'
+          : 'testing';
+
+    const diagnostic = isInstalled
+      ? `Verified embed activity on ${website.domain}: ${totalServes} ad serve(s), ${totalRenders} render/impression beacon(s).`
+      : `No ad requests received yet for slot tag "${slot.slotTagId}" on https://${website.domain}. Install the snippet and load the page once, then re-run this check.`;
+
+    const [updatedSlot] = await this.db
+      .update(adstationSlots)
+      .set({
+        installationStatus: nextInstallationStatus,
+        installationCheckedAt: new Date(),
+        installationDiagnostic: diagnostic,
+        lifecycleStatus: nextLifecycleStatus,
+        isConsiderationVerified:
+          slot.isConsiderationSlot && isInstalled
+            ? true
+            : slot.isConsiderationVerified,
+        considerationLastCheckedAt: slot.isConsiderationSlot
+          ? new Date()
+          : slot.considerationLastCheckedAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(adstationSlots.id, slot.id))
+      .returning();
+
+    if (slot.isConsiderationSlot && isInstalled) {
+      await this.db
+        .update(adsPromoterWebsites)
+        .set({
+          considerationSlotActive: true,
+          considerationSlotVerifiedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(adsPromoterWebsites.id, website.id));
+    }
+
+    return {
+      isInstalled,
+      installationStatus: updatedSlot.installationStatus,
+      lifecycleStatus: updatedSlot.lifecycleStatus,
+      serveCount: totalServes,
+      renderBeaconCount: totalRenders,
+      lastServedAt: serveStats?.lastServedAt || null,
+      diagnostic,
+      slot: updatedSlot,
+    };
+  }
+
+  /**
+   * Slot diagnostics summary (`GET /api/v1/adstation/slots/:id/diagnostics`).
+   * Surfaces safe promoter-facing telemetry without exposing private fraud rules or thresholds.
+   */
+  async getSlotDiagnostics(promoterId: string, slotId: string) {
+    const [slot] = await this.db
+      .select()
+      .from(adstationSlots)
+      .where(
+        and(
+          eq(adstationSlots.id, slotId),
+          eq(adstationSlots.promoterId, promoterId),
+        ),
+      )
+      .limit(1);
+
+    if (!slot) {
+      throw new NotFoundException('AdStation slot not found or unauthorized');
+    }
+
+    const [website] = await this.db
+      .select()
+      .from(adsPromoterWebsites)
+      .where(eq(adsPromoterWebsites.id, slot.websiteId))
+      .limit(1);
+
+    const [serveMetrics] = await this.db
+      .select({
+        totalServes: sql<number>`count(*)::int`,
+        houseServes: sql<number>`count(*) filter (where ${adsServes.inventoryClass} in ('house', 'shadow'))::int`,
+        paidServes: sql<number>`count(*) filter (where ${adsServes.inventoryClass} in ('paid', 'simulated_paid'))::int`,
+        lastServedAt: sql<Date | null>`max(${adsServes.servedAt})`,
+      })
+      .from(adsServes)
+      .where(eq(adsServes.slotHandle, slot.slotTagId));
+
+    const [eventMetrics] = await this.db
+      .select({
+        renders: sql<number>`count(*) filter (where ${adsInteractions.type} = 'render')::int`,
+        impressions: sql<number>`count(*) filter (where ${adsInteractions.type} = 'impression')::int`,
+        viewableImpressions: sql<number>`count(*) filter (where ${adsInteractions.type} = 'viewable_impression' and ${adsInteractions.isValid} = true)::int`,
+        clicks: sql<number>`count(*) filter (where ${adsInteractions.type} = 'click' and ${adsInteractions.isValid} = true)::int`,
+        filteredInvalid: sql<number>`count(*) filter (where ${adsInteractions.isValid} = false)::int`,
+      })
+      .from(adsInteractions)
+      .where(eq(adsInteractions.slotId, slot.id));
+
+    return {
+      slotId: slot.id,
+      slotTagId: slot.slotTagId,
+      name: slot.name,
+      slotType: slot.slotType,
+      format: slot.format,
+      lifecycleStatus: slot.lifecycleStatus,
+      installationStatus: slot.installationStatus,
+      installationCheckedAt: slot.installationCheckedAt,
+      installationDiagnostic: slot.installationDiagnostic,
+      website: website
+        ? {
+            id: website.id,
+            domain: website.domain,
+            verificationStatus: website.verificationStatus,
+            policyStatus: website.policyStatus,
+            isSuspended: website.isSuspended,
+          }
+        : null,
+      telemetry: {
+        totalServes: serveMetrics?.totalServes || 0,
+        houseOrDefaultServes: serveMetrics?.houseServes || 0,
+        paidServes: serveMetrics?.paidServes || 0,
+        lastServedAt: serveMetrics?.lastServedAt || null,
+        renders: eventMetrics?.renders || 0,
+        impressions: eventMetrics?.impressions || 0,
+        viewableImpressions: eventMetrics?.viewableImpressions || 0,
+        clicks: eventMetrics?.clicks || 0,
+        filteredInvalidEvents: eventMetrics?.filteredInvalid || 0,
+      },
+    };
+  }
+
+  /**
+   * Verify Consideration Slot (PLAN-0018 Section 2.1)
+   */
+  async verifyConsiderationSlot(
+    promoterId: string,
+    websiteId: string,
+    slotId: string,
+  ) {
+    const [slot] = await this.db
+      .select()
+      .from(adstationSlots)
+      .where(
+        and(
+          eq(adstationSlots.id, slotId),
+          eq(adstationSlots.websiteId, websiteId),
+          eq(adstationSlots.promoterId, promoterId),
+        ),
+      )
       .limit(1);
 
     if (!slot) {
@@ -118,13 +537,17 @@ export class AdstationService {
     }
 
     if (!slot.isConsiderationSlot && slot.slotType !== 'consideration') {
-      throw new BadRequestException('Slot is not designated as a consideration slot');
+      throw new BadRequestException(
+        'Slot is not designated as a consideration slot',
+      );
     }
 
     const [updatedSlot] = await this.db
       .update(adstationSlots)
       .set({
         isConsiderationVerified: true,
+        installationStatus: 'verified',
+        installationCheckedAt: new Date(),
         considerationLastCheckedAt: new Date(),
         updatedAt: new Date(),
       })
@@ -148,16 +571,24 @@ export class AdstationService {
 
   /**
    * Update Account Delivery Preference (PLAN-0018 Section 2.2)
-   * High, Medium, Low allocation for CrimFig Network ads vs Direct Campaigns.
    */
-  async updateDeliveryPreference(promoterId: string, websiteId: string, preference: 'high' | 'medium' | 'low') {
+  async updateDeliveryPreference(
+    promoterId: string,
+    websiteId: string,
+    preference: 'high' | 'medium' | 'low',
+  ) {
     const [updated] = await this.db
       .update(adsPromoterWebsites)
       .set({
         deliveryPreference: preference,
         updatedAt: new Date(),
       })
-      .where(and(eq(adsPromoterWebsites.id, websiteId), eq(adsPromoterWebsites.promoterId, promoterId)))
+      .where(
+        and(
+          eq(adsPromoterWebsites.id, websiteId),
+          eq(adsPromoterWebsites.promoterId, promoterId),
+        ),
+      )
       .returning();
 
     if (!updated) {
@@ -178,7 +609,12 @@ export class AdstationService {
       return this.db
         .select()
         .from(adstationDirectCampaigns)
-        .where(and(eq(adstationDirectCampaigns.promoterId, promoterId), eq(adstationDirectCampaigns.websiteId, websiteId)))
+        .where(
+          and(
+            eq(adstationDirectCampaigns.promoterId, promoterId),
+            eq(adstationDirectCampaigns.websiteId, websiteId),
+          ),
+        )
         .orderBy(desc(adstationDirectCampaigns.createdAt));
     }
 
@@ -197,7 +633,12 @@ export class AdstationService {
     const [website] = await this.db
       .select()
       .from(adsPromoterWebsites)
-      .where(and(eq(adsPromoterWebsites.id, dto.websiteId), eq(adsPromoterWebsites.promoterId, promoterId)))
+      .where(
+        and(
+          eq(adsPromoterWebsites.id, dto.websiteId),
+          eq(adsPromoterWebsites.promoterId, promoterId),
+        ),
+      )
       .limit(1);
 
     if (!website) {
@@ -208,7 +649,13 @@ export class AdstationService {
       const [slot] = await this.db
         .select()
         .from(adstationSlots)
-        .where(and(eq(adstationSlots.id, dto.slotId), eq(adstationSlots.promoterId, promoterId), eq(adstationSlots.websiteId, dto.websiteId)))
+        .where(
+          and(
+            eq(adstationSlots.id, dto.slotId),
+            eq(adstationSlots.promoterId, promoterId),
+            eq(adstationSlots.websiteId, dto.websiteId),
+          ),
+        )
         .limit(1);
 
       if (!slot) {
@@ -216,7 +663,9 @@ export class AdstationService {
       }
 
       if (slot.isConsiderationSlot || slot.slotType === 'consideration') {
-        throw new BadRequestException('Direct deals cannot be assigned to a Consideration Slot. Consideration slots serve exclusively CrimFig network ads.');
+        throw new BadRequestException(
+          'Direct deals cannot be assigned to a Consideration Slot. Consideration slots serve exclusively CrimFig network ads.',
+        );
       }
     }
 
@@ -243,7 +692,6 @@ export class AdstationService {
 
   /**
    * Record Direct Deal Ad Event with Idempotency Deduplication (PLAN-0018 Phase 3)
-   * Ensures 0% platform fee and zero leak to promoter cash balance.
    */
   async recordDirectEvent(dto: {
     promoterId?: string;
@@ -275,7 +723,6 @@ export class AdstationService {
       }
     }
 
-    // Deduplication check via unique idempotencyKey
     const existing = await this.db
       .select({ id: schema.adstationAdEvents.id })
       .from(schema.adstationAdEvents)
@@ -301,8 +748,10 @@ export class AdstationService {
       })
       .returning();
 
-    // Increment aggregate counter on direct campaign
-    if (dto.eventType === 'impression' || dto.eventType === 'viewable_impression') {
+    if (
+      dto.eventType === 'impression' ||
+      dto.eventType === 'viewable_impression'
+    ) {
       const [camp] = await this.db
         .select({ delivered: adstationDirectCampaigns.deliveredImpressions })
         .from(adstationDirectCampaigns)
@@ -341,8 +790,6 @@ export class AdstationService {
 
   /**
    * Consideration Slot 48-Hour Grace State Machine (PLAN-0018 Phase 6)
-   * Audits presence of verified consideration slot. If missing or broken,
-   * starts/checks 48-hour grace period before automated suspension of direct deals.
    */
   async checkConsiderationSlotHealth(websiteId: string, promoterId?: string) {
     const [website] = await this.db
@@ -350,7 +797,10 @@ export class AdstationService {
       .from(adsPromoterWebsites)
       .where(
         promoterId
-          ? and(eq(adsPromoterWebsites.id, websiteId), eq(adsPromoterWebsites.promoterId, promoterId))
+          ? and(
+              eq(adsPromoterWebsites.id, websiteId),
+              eq(adsPromoterWebsites.promoterId, promoterId),
+            )
           : eq(adsPromoterWebsites.id, websiteId),
       )
       .limit(1);
@@ -362,12 +812,19 @@ export class AdstationService {
     const considerationSlots = await this.db
       .select()
       .from(adstationSlots)
-      .where(and(eq(adstationSlots.websiteId, websiteId), eq(adstationSlots.isConsiderationSlot, true), eq(adstationSlots.isActive, true)));
+      .where(
+        and(
+          eq(adstationSlots.websiteId, websiteId),
+          eq(adstationSlots.isConsiderationSlot, true),
+          eq(adstationSlots.isActive, true),
+        ),
+      );
 
-    const hasHealthyConsideration = considerationSlots.some(s => s.isConsiderationVerified);
+    const hasHealthyConsideration = considerationSlots.some(
+      (s) => s.isConsiderationVerified,
+    );
 
     if (hasHealthyConsideration) {
-      // Clear any past suspension warning
       if (website.considerationSlotActive === false) {
         await this.db
           .update(adsPromoterWebsites)
@@ -378,24 +835,33 @@ export class AdstationService {
           })
           .where(eq(adsPromoterWebsites.id, websiteId));
       }
-      return { status: 'healthy', considerationVerified: true, graceActive: false };
+      return {
+        status: 'healthy',
+        considerationVerified: true,
+        graceActive: false,
+      };
     }
 
-    // Unhealthy: Consideration slot is absent or unverified
-    // Evaluate 48-hour grace window based on verifiedAt or lastVerificationAttemptAt
-    const referenceTime = website.considerationSlotVerifiedAt || website.lastVerificationAttemptAt || website.createdAt;
+    const referenceTime =
+      website.considerationSlotVerifiedAt ||
+      website.lastVerificationAttemptAt ||
+      website.createdAt;
     const gracePeriodMs = 48 * 60 * 60 * 1000;
     const elapsedMs = Date.now() - new Date(referenceTime).getTime();
-    const graceRemainingHours = Math.max(0, Math.round((gracePeriodMs - elapsedMs) / (60 * 60 * 1000)));
+    const graceRemainingHours = Math.max(
+      0,
+      Math.round((gracePeriodMs - elapsedMs) / (60 * 60 * 1000)),
+    );
 
     if (elapsedMs > gracePeriodMs) {
-      // Grace period expired: automatically suspend direct deal serving
       await this.db
         .update(adsPromoterWebsites)
         .set({
           considerationSlotActive: false,
           isSuspended: true,
-          suspensionReason: 'Consideration slot requirement unfulfilled past 48-hour grace window.',
+          policyStatus: 'suspended',
+          suspensionReason:
+            'Consideration slot requirement unfulfilled past 48-hour grace window.',
           updatedAt: new Date(),
         })
         .where(eq(adsPromoterWebsites.id, websiteId));
@@ -405,7 +871,8 @@ export class AdstationService {
         considerationVerified: false,
         graceActive: false,
         graceRemainingHours: 0,
-        reason: 'Consideration slot requirement unfulfilled past 48-hour grace window.',
+        reason:
+          'Consideration slot requirement unfulfilled past 48-hour grace window.',
       };
     }
 
@@ -419,29 +886,140 @@ export class AdstationService {
   }
 
   /**
-   * Super Admin Enforcement: Suspend or Reinstate Website Direct Deals (PLAN-0018 Phase 6)
+   * Super Admin Enforcement: Suspend or Reinstate Website Direct Deals & Policy Status
    */
-  async updateWebsiteAdstationStatus(websiteId: string, isSuspended: boolean, reason?: string) {
+  async updateWebsiteAdstationStatus(
+    websiteId: string,
+    isSuspended: boolean,
+    reason?: string,
+    reviewerId?: string,
+  ) {
+    const [existing] = await this.db
+      .select()
+      .from(adsPromoterWebsites)
+      .where(eq(adsPromoterWebsites.id, websiteId))
+      .limit(1);
+
+    if (!existing) {
+      throw new NotFoundException('Website not found');
+    }
+
+    const nextPolicyStatus = isSuspended
+      ? 'suspended'
+      : existing.verificationStatus === 'verified'
+        ? 'approved'
+        : 'unverified';
+
     const [updated] = await this.db
       .update(adsPromoterWebsites)
       .set({
         isSuspended,
-        suspensionReason: isSuspended ? (reason || 'Super Admin moderation action') : null,
+        policyStatus: nextPolicyStatus,
+        policyRevision: (existing.policyRevision || 1) + 1,
+        suspensionReason: isSuspended
+          ? reason || 'Super Admin moderation action'
+          : null,
+        reviewNote: reason || null,
+        reviewedBy: reviewerId || null,
+        reviewedAt: new Date(),
         updatedAt: new Date(),
       })
       .where(eq(adsPromoterWebsites.id, websiteId))
       .returning();
 
-    if (!updated) {
-      throw new NotFoundException('Website not found');
-    }
+    await this.db.insert(adsSupplyStateHistory).values({
+      entityType: 'website',
+      entityId: websiteId,
+      dimension: 'policy_status',
+      fromState: existing.policyStatus,
+      toState: nextPolicyStatus,
+      actorId: reviewerId || null,
+      actorRole: 'ads_admin',
+      reason: reason || (isSuspended ? 'Suspended website' : 'Reinstated/approved website'),
+    });
 
     return {
       status: isSuspended ? 'suspended' : 'active',
       websiteId: updated.id,
       domain: updated.domain,
+      policyStatus: updated.policyStatus,
       isSuspended: updated.isSuspended,
       suspensionReason: updated.suspensionReason,
     };
+  }
+
+  /**
+   * Admin / Compliance: Review promoter website policy status ('approved' | 'rejected' | 'testing' | 'suspended')
+   */
+  async reviewWebsitePolicy(
+    websiteId: string,
+    decision: 'approved' | 'rejected' | 'testing' | 'suspended',
+    reason?: string,
+    reviewerId?: string,
+  ) {
+    const [existing] = await this.db
+      .select()
+      .from(adsPromoterWebsites)
+      .where(eq(adsPromoterWebsites.id, websiteId))
+      .limit(1);
+
+    if (!existing) {
+      throw new NotFoundException('Website not found');
+    }
+
+    if (decision === 'approved' && existing.verificationStatus !== 'verified') {
+      throw new BadRequestException(
+        'Cannot approve a website for paid ad serving before domain ownership is verified.',
+      );
+    }
+
+    const isSuspended = decision === 'suspended';
+    const [updated] = await this.db
+      .update(adsPromoterWebsites)
+      .set({
+        policyStatus: decision,
+        isSuspended,
+        policyRevision: (existing.policyRevision || 1) + 1,
+        reviewNote: reason || null,
+        suspensionReason: isSuspended ? reason || 'Policy suspension' : null,
+        reviewedBy: reviewerId || null,
+        reviewedAt: new Date(),
+        updatedAt: new Date(),
+      })
+      .where(eq(adsPromoterWebsites.id, websiteId))
+      .returning();
+
+    await this.db.insert(adsSupplyStateHistory).values({
+      entityType: 'website',
+      entityId: websiteId,
+      dimension: 'policy_status',
+      fromState: existing.policyStatus,
+      toState: decision,
+      actorId: reviewerId || null,
+      actorRole: 'ads_admin',
+      reason: reason || `Website policy set to ${decision}`,
+    });
+
+    return updated;
+  }
+
+  /**
+   * Admin / Compliance: Inspect recent auction decisions (`GET /api/v1/adstation/admin/auction-decisions`)
+   */
+  async listAuctionDecisions(limit = 50, slotTagId?: string) {
+    const safeLimit = Math.min(Math.max(1, Number(limit) || 50), 200);
+    if (slotTagId) {
+      return this.db
+        .select()
+        .from(adsAuctionDecisions)
+        .where(eq(adsAuctionDecisions.slotTagId, slotTagId))
+        .orderBy(desc(adsAuctionDecisions.createdAt))
+        .limit(safeLimit);
+    }
+    return this.db
+      .select()
+      .from(adsAuctionDecisions)
+      .orderBy(desc(adsAuctionDecisions.createdAt))
+      .limit(safeLimit);
   }
 }

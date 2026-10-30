@@ -34,6 +34,7 @@ export const interactionTypeEnum = pgEnum('ads_interaction_type', [
   'video_complete',
   'embed_ping',
   'conversion',
+  'render',
 ]);
 
 export const adsInteractions = pgTable(
@@ -62,6 +63,22 @@ export const adsInteractions = pgTable(
 
     // Referrer URL (where the click came from)
     referrer: text('referrer'),
+
+    // PLAN-0047 / PLAN-0049: Evidence collection, viewability persistence & GIVT/SIVT classification
+    eventId: uuid('event_id'),
+    websiteId: uuid('website_id'),
+    slotId: uuid('slot_id'),
+    visibleRatio: varchar('visible_ratio', { length: 16 }),
+    durationMs: integer('duration_ms'),
+    measurable: boolean('measurable').notNull().default(true),
+    // 'provisional' | 'validated' | 'suspicious' | 'invalidated' | 'unknown'
+    assessmentStatus: varchar('assessment_status', { length: 24 }).notNull().default('provisional'),
+    // 'unclassified' | 'GIVT' | 'SIVT'
+    ivtCategory: varchar('ivt_category', { length: 20 }).notNull().default('unclassified'),
+    // 'pending' | 'eligible' | 'quarantined' | 'invalid'
+    financialEligibility: varchar('financial_eligibility', { length: 24 }).notNull().default('pending'),
+    keyedIpHash: varchar('keyed_ip_hash', { length: 64 }),
+    keyId: varchar('key_id', { length: 32 }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

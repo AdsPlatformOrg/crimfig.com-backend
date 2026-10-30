@@ -21,29 +21,38 @@ export class AnalyticsService {
   ) {}
 
   /**
-   * Performance and earnings analytics for a promoter
+   * Performance and earnings analytics for a promoter.
+   * Separates validated paid events (`isValid = true`) from filtered invalid / house / shadow events (`PLAN-0047`).
    */
   async getPromoterAnalytics(promoterId: string) {
-    // Total impressions
+    // Validated impressions
     const [impressionsResult] = await this.db
-      .select({ count: sql<number>`count(*)` })
+      .select({
+        count: sql<number>`count(*) filter (where ${adsInteractions.isValid} = true)`,
+        grossCount: sql<number>`count(*)`,
+      })
       .from(adsInteractions)
       .where(and(eq(adsInteractions.promoterId, promoterId), eq(adsInteractions.type, 'impression')));
 
-    // Total clicks
+    // Validated clicks
     const [clicksResult] = await this.db
-      .select({ count: sql<number>`count(*)` })
+      .select({
+        count: sql<number>`count(*) filter (where ${adsInteractions.isValid} = true)`,
+        grossCount: sql<number>`count(*)`,
+      })
       .from(adsInteractions)
       .where(and(eq(adsInteractions.promoterId, promoterId), eq(adsInteractions.type, 'click')));
 
-    // Total earnings
+    // Total earnings (house/shadow serves produce zero rows in ads_promoter_earnings)
     const [earningsResult] = await this.db
       .select({ total: sql<number>`COALESCE(SUM(${adsPromoterEarnings.amountUsdCents}), 0)` })
       .from(adsPromoterEarnings)
       .where(eq(adsPromoterEarnings.promoterId, promoterId));
 
-    const totalImpressions = Number(impressionsResult?.count || 0);
-    const totalClicks = Number(clicksResult?.count || 0);
+    const totalImpressions = Number(impressionsResult?.count ?? 0);
+    const grossImpressions = Number((impressionsResult as any)?.grossCount ?? totalImpressions);
+    const totalClicks = Number(clicksResult?.count ?? 0);
+    const grossClicks = Number((clicksResult as any)?.grossCount ?? totalClicks);
     const totalEarningsCents = Number(earningsResult?.total || 0);
     const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
 
@@ -54,6 +63,8 @@ export class AnalyticsService {
         type: adsInteractions.type,
         source: adsInteractions.source,
         referrer: adsInteractions.referrer,
+        isValid: adsInteractions.isValid,
+        assessmentStatus: adsInteractions.assessmentStatus,
         createdAt: adsInteractions.createdAt,
       })
       .from(adsInteractions)
@@ -63,7 +74,9 @@ export class AnalyticsService {
 
     return {
       impressions: totalImpressions,
+      grossImpressions,
       clicks: totalClicks,
+      grossClicks,
       ctr: parseFloat(ctr.toFixed(2)),
       earningsUsd: totalEarningsCents / 100,
       recentActivity: recentLogs,
@@ -90,11 +103,16 @@ export class AnalyticsService {
       const counts = await this.db
         .select({
           type: adsInteractions.type,
-          count: sql<number>`count(*)`,
+          count: sql<number>`count(*) filter (where ${adsInteractions.isValid} = true)`,
         })
         .from(adsInteractions)
         .innerJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
-        .where(sql`${adsPlacements.campaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`)
+        .where(
+          and(
+            sql`${adsPlacements.campaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
+            eq(adsInteractions.isValid, true),
+          ),
+        )
         .groupBy(adsInteractions.type);
 
       for (const row of counts) {
@@ -173,13 +191,14 @@ export class AnalyticsService {
       const interactionCounts = await this.db
         .select({
           type: adsInteractions.type,
-          count: sql<number>`count(*)`,
+          count: sql<number>`count(*) filter (where ${adsInteractions.isValid} = true)`,
         })
         .from(adsInteractions)
         .innerJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
         .where(
           and(
             sql`${adsPlacements.campaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
+            eq(adsInteractions.isValid, true),
             gte(adsInteractions.createdAt, startDate),
           ),
         )

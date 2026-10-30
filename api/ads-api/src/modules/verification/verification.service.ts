@@ -55,13 +55,23 @@ export class VerificationService {
       errorMessage = 'Website verification failed. Check the HTTPS domain, public DNS and verification record.';
     }
 
+    const nextPolicyStatus = isVerified
+      ? website.policyStatus === 'approved' || website.policyStatus === 'pending_approval'
+        ? website.policyStatus
+        : 'testing'
+      : website.policyStatus === 'unverified'
+        ? 'unverified'
+        : website.policyStatus;
+
     const [updated] = await this.db
       .update(adsPromoterWebsites)
       .set({
         verificationStatus: isVerified ? 'verified' : 'failed',
         verifiedAt: isVerified ? new Date() : null,
+        policyStatus: nextPolicyStatus,
         lastVerificationAttemptAt: new Date(),
         verificationErrorMessage: errorMessage,
+        verificationFailures: isVerified ? 0 : (website.verificationFailures || 0) + 1,
         updatedAt: new Date(),
       })
       .where(and(eq(adsPromoterWebsites.id, websiteId), eq(adsPromoterWebsites.promoterId, promoterId)))

@@ -129,6 +129,18 @@ export const adsPromoterWebsites = pgTable(
       withTimezone: true,
     }),
 
+    // PLAN-0047: Website policy review & supply admission lifecycle
+    // 'unverified' | 'testing' | 'pending_approval' | 'approved' | 'rejected' | 'suspended'
+    policyStatus: varchar("policy_status", { length: 32 })
+      .notNull()
+      .default("unverified"),
+    policyRevision: integer("policy_revision").notNull().default(1),
+    reviewNote: text("review_note"),
+    reviewedBy: uuid("reviewed_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

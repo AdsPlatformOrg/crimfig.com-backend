@@ -155,6 +155,13 @@
       "when": 1793340000000,
       "tag": "0022_campaign_revision_workflow",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1793360000000,
+      "tag": "0023_promoter_supply_auction_and_evidence",
+      "breakpoints": true
     }
   ]
 }
