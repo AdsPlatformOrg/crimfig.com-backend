@@ -639,3 +639,6 @@ Recorded exact consent-unknown ad request and generic 500 response, request 1761
 ## 2026-10-31 — PLAN-0055 readiness correction pass
 Removed silent evidence secret fallback (controlled503 on missing dedicated key), fixed loader timeout/asset failure/late/disposed/retry cleanup and render-readiness telemetry, canonical zero-initial-height/CORS/React snippets and transactional recent-render installation/legacy consideration checks. Backend 83/83 tests in5 suites, contract37/37 and Ads build pass. Isolated candidate prepared; manual dedicated evidence key/history-safe rotation + staging rollout pending. No server env/deploy/financial/production changes. See docs/reviews/plan-0053/plan0055-readiness-review.md.
 
+
+## 2026-10-31 — PLAN-0061 corrective plan drafted
+Reviewed PLAN-0057/0058 source and drafted .agents/plans/PLAN-0061-house-ad-and-slot-analytics-monitoring-gap-fixes.md (DRAFT/PENDING): durable House creative attribution, schema-correct analytics, Platform Admin House/slot performance, delivery/creative safeguards and monitoring diagnostics. PLAN-0057 reformatted; PLAN-0058 historical evidence retained with gap amendment. Documentation only; no implementation/tests/deployment/config changes. Broader checks remain DEFERRED — OWNER REQUEST.
