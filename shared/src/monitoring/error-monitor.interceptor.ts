@@ -1,3 +1,4 @@
+import { captureDiagnostics } from './request-diagnostics';
 import {
   Injectable,
   NestInterceptor,
@@ -93,6 +94,7 @@ export class ErrorMonitorCaptureInterceptor implements NestInterceptor {
         }
       }),
       catchError((err: unknown) => {
+        try{if(req)req.__monitorException=captureDiagnostics(req,res,err).exception;}catch{/* Preserve the original application error. */}
         const statusCode =
           err instanceof HttpException
             ? err.getStatus()
@@ -130,6 +132,7 @@ export class ErrorMonitorCaptureInterceptor implements NestInterceptor {
     if (req && req.__crimfigErrorCaptured) {
       return;
     }
+    if (req?.__monitorBoundary) { req.__monitorPendingCapture=rawInput; return; }
     if (req) {
       req.__crimfigErrorCaptured = true;
     }
@@ -143,6 +146,7 @@ export class ErrorMonitorCaptureInterceptor implements NestInterceptor {
       const sanitized = redactAndSanitizeErrorEvent(
         {
           ...rawInput,
+          diagnostics: req?.__monitorException ? { version:1, exception:req.__monitorException, response:{status:rawInput.statusCode}, completeness:"Boundary response observer unavailable" } : undefined,
           environment: runtimeConfig.environment,
           deploymentId: this.env.RAILWAY_DEPLOYMENT_ID ?? null,
         },

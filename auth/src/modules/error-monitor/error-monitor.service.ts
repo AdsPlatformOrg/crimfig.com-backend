@@ -1,3 +1,5 @@
+import { getTableColumns } from 'drizzle-orm';
+import { diagnosticPolicy } from '@crimfig/shared';
 import {adDigest} from '@crimfig/shared';
 import {
   Injectable,
@@ -40,6 +42,8 @@ import { DATABASE_TOKEN } from '../database/database.module';
 import { EmailService } from '../email/email.service';
 import { config } from '../../config/config';
 import { randomUUID } from 'crypto';
+
+const {diagnostics: _diagnosticPayload, ...monitorOccurrenceSummaryColumns}=getTableColumns(errorMonitorOccurrences);
 
 export interface PlatformSourceDescriptor {
   service: string;
@@ -488,7 +492,7 @@ export class ErrorMonitorService implements ErrorMonitorSink {
       const shouldInsertSample =
         !existingGroup || existingGroup.sampledOccurrenceCount < MAX_OCCURRENCE_SAMPLES_PER_GROUP;
 
-      if (shouldInsertSample) {
+      if (shouldInsertSample || event.diagnostics) {
         await tx.insert(errorMonitorOccurrences).values({
           groupId: group.id,
           requestId: event.requestId,
@@ -507,6 +511,8 @@ export class ErrorMonitorService implements ErrorMonitorSink {
           actorUserId: event.actorUserId,
           deviceType: event.deviceType,
           countryCode: event.countryCode,
+          diagnostics: event.diagnostics || null,
+          diagnosticsExpiresAt: event.diagnostics ? new Date(Date.now()+diagnosticPolicy(env).retentionDays*86400000) : null,
           sanitizedContext: event.sanitizedContext,
           railwayLogUrl: event.railwayLogUrl,
           occurredAt: now,
@@ -798,11 +804,11 @@ export class ErrorMonitorService implements ErrorMonitorSink {
     }
 
     let requestMatchedGroupIds: string[] | null = null;
-    let correlatedChain: Array<typeof errorMonitorOccurrences.$inferSelect> = [];
+    let correlatedChain: Array<Omit<typeof errorMonitorOccurrences.$inferSelect, 'diagnostics'>> = [];
     if (filters.requestId && filters.requestId.trim()) {
       const targetId = filters.requestId.trim().toLowerCase();
       const matchingOccurrences = await this.db
-        .select()
+        .select(monitorOccurrenceSummaryColumns)
         .from(errorMonitorOccurrences)
         .where(
           or(
@@ -862,7 +868,7 @@ export class ErrorMonitorService implements ErrorMonitorSink {
     }
 
     const occurrences = await this.db
-      .select()
+      .select(monitorOccurrenceSummaryColumns)
       .from(errorMonitorOccurrences)
       .where(eq(errorMonitorOccurrences.groupId, group.id))
       .orderBy(desc(errorMonitorOccurrences.occurredAt))
@@ -899,7 +905,7 @@ export class ErrorMonitorService implements ErrorMonitorSink {
     const correlatedOccurrences =
       requestIds.length > 0
         ? await this.db
-            .select()
+            .select(monitorOccurrenceSummaryColumns)
             .from(errorMonitorOccurrences)
             .where(
               or(
@@ -938,15 +944,14 @@ export class ErrorMonitorService implements ErrorMonitorSink {
 
     // Key by composite environment:service to prevent multi-environment collisions
     const byKey = new Map(recordedSources.map((s) => [`${s.environment}:${s.service}`, s]));
-    const fallbackEnv = environment && environment !== 'all' ? environment : 'staging';
+    const environments = environment && environment !== 'all' ? [environment] : ['staging','production',...new Set(recordedSources.map(s=>s.environment).filter(e=>!['staging','production'].includes(e)))];
 
-    return PLATFORM_ERROR_MONITOR_SOURCES.map((descriptor) => {
-      const recorded =
-        byKey.get(`${fallbackEnv}:${descriptor.service}`) ||
-        recordedSources.find((s) => s.service === descriptor.service);
+    return environments.flatMap(currentEnvironment=>PLATFORM_ERROR_MONITOR_SOURCES.map((descriptor) => {
+      const recorded = byKey.get(`${currentEnvironment}:${descriptor.service}`);
 
       if (descriptor.defaultStatus === 'paused') {
         return {
+          environment:currentEnvironment,
           service: descriptor.service,
           displayName: descriptor.displayName,
           sourceType: descriptor.sourceType,
@@ -968,7 +973,8 @@ export class ErrorMonitorService implements ErrorMonitorSink {
       }
 
       return {
-        service: descriptor.service,
+        environment:currentEnvironment,
+          service: descriptor.service,
         displayName: descriptor.displayName,
         sourceType: descriptor.sourceType,
         status,
@@ -977,7 +983,7 @@ export class ErrorMonitorService implements ErrorMonitorSink {
         lastHeartbeatAt: recorded?.lastHeartbeatAt ?? null,
         lastEventAt: recorded?.lastEventAt ?? null,
       };
-    });
+    }));
   }
 
   private describeNotificationState(

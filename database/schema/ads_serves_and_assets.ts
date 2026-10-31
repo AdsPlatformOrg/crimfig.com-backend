@@ -154,6 +154,7 @@ export const adsServes = pgTable(
     slotId: uuid("slot_id"),
     houseCreativeId: uuid("house_creative_id"),
     houseCreativeVersion: integer("house_creative_version"),
+    houseDestinationUrl: text("house_destination_url"),
     // 'house' | 'shadow' | 'direct' | 'paid' | 'simulated_paid'
     inventoryClass: varchar("inventory_class", { length: 24 })
       .notNull()

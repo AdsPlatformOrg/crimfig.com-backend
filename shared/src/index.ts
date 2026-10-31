@@ -118,3 +118,5 @@ export * from './financial-security/executor';
 export * from './financial-security/paystack-adapter';
 export * from './financial-security/provider-approval';
 export * from './financial-security/provider-broker';
+
+export * from './monitoring/request-diagnostics';

@@ -199,11 +199,12 @@ export class UploadsController {
     @Req() req: Request,
     @Res() res: Response,
   ) {
+    res.setHeader("Cross-Origin-Resource-Policy","cross-origin");
     await this.sendMedia(
       req,
       res,
       storageKey,
-      "public, max-age=31536000, immutable",
+      "public, max-age=300",
     );
   }
 

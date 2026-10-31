@@ -1,3 +1,4 @@
+import { AdminPerformanceController } from './admin-performance.controller';
 import { EvidenceService } from './evidence.service';
 import { EvidenceController } from './evidence.controller';
 import { BillingModule } from '../billing/billing.module';
@@ -11,7 +12,7 @@ import { VerificationModule } from '../verification/verification.module';
 
 @Module({
   imports: [VerificationModule, BillingModule],
-  controllers: [DeliveryController, EvidenceController, AdminHouseAdsController],
+  controllers: [AdminPerformanceController, DeliveryController, EvidenceController, AdminHouseAdsController],
   providers: [EvidenceService, DeliveryService, ImpressionTokenService, AuctionEngineService],
   exports: [DeliveryService, ImpressionTokenService, AuctionEngineService],
 })

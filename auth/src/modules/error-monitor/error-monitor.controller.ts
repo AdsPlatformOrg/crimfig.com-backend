@@ -117,6 +117,8 @@ export class IngestInternalErrorEventDto {
   @IsOptional()
   @IsObject()
   context?: Record<string, unknown>;
+
+  @IsOptional() @IsObject() diagnostics?: Record<string, unknown>;
 }
 
 export class ReportBrowserErrorDto {

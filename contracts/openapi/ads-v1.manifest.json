@@ -42,6 +42,6 @@
     "PUT /api/v1/campaigns/creatives/{id}/replace",
     "PUT /api/v1/campaigns/{id}/status"
   ],
-  "sourceSha256": "711722c54763faedf978b09962edae698a5295ffb29ae8ce615c281f5e9cdccc",
+  "sourceSha256": "09e4be214f4c719dff9530d14e59063b73cf304c3f9a0785ffa2afdd30e5c445",
   "generator": "openapi-typescript@7.13.0"
 }

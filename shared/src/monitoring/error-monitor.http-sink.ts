@@ -19,7 +19,7 @@ export class HttpErrorMonitorSink implements ErrorMonitorSink {
         route:event.normalizedRoute,statusCode:event.statusCode,errorCategory:event.errorCategory,safeSummary:event.safeSummary,isFinancialRoute:event.isFinancialRoute,
         ...(event.financialCategory?{financialCategory:event.financialCategory}:{}),requestId:event.requestId,correlationId:event.correlationId,
         ...(event.deploymentId?{deploymentId:event.deploymentId}:{}),...(event.upstreamService?{upstreamService:event.upstreamService}:{}),
-        ...(event.upstreamStatusCode==null?{}:{upstreamStatusCode:event.upstreamStatusCode}),...(event.actorUserId?{actorUserId:event.actorUserId}:{}),context:event.sanitizedContext})})
+        ...(event.upstreamStatusCode==null?{}:{upstreamStatusCode:event.upstreamStatusCode}),...(event.actorUserId?{actorUserId:event.actorUserId}:{}),context:event.sanitizedContext, diagnostics:event.diagnostics})})
       .catch(()=>{throw new Error('Error monitor transport failed');});
     if(!response.ok) throw new Error('Error monitor ingestion rejected the event');
     const result:unknown=await response.json().catch(()=>null);

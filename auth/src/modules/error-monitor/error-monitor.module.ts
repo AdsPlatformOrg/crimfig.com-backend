@@ -1,3 +1,5 @@
+import { ErrorDiagnosticsRetentionWorker } from './error-diagnostics-retention.worker';
+import { ErrorDiagnosticsController } from './error-diagnostics.controller';
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR, APP_GUARD, Reflector } from '@nestjs/core';
 import { ErrorMonitorCaptureInterceptor, ErrorMonitorMetadataGuard } from '@crimfig/shared';
@@ -12,8 +14,9 @@ import {
 
 @Module({
   imports: [AuthModule],
-  controllers: [ErrorMonitorAdminController, ErrorMonitorIngestionController],
+  controllers: [ErrorDiagnosticsController, ErrorMonitorAdminController, ErrorMonitorIngestionController],
   providers: [
+    ErrorDiagnosticsRetentionWorker,
     ErrorMonitorService,
     {provide:APP_GUARD,useClass:ErrorMonitorMetadataGuard},
     ErrorMonitorWorker,

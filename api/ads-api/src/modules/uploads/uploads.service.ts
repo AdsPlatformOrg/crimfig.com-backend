@@ -612,55 +612,18 @@ export class UploadsService {
           ),
         )
         .limit(1);
-      if (!approved)
-        throw new NotFoundException("Public media asset not found");
-    }
-    const bucket = this.firebaseStorageService.getBucket();
-    if (!bucket) {
-      throw new NotFoundException("Storage bucket not initialized");
-    }
-
-    const fileRef = bucket.file(storageKey);
-    const [exists] = await fileRef.exists();
-    if (!exists) {
-      throw new NotFoundException(`Media asset '${storageKey}' not found`);
-    }
-
-    const [metadata] = await fileRef.getMetadata();
-    const totalSize = Number(metadata.size || asset.bytes || 0);
-    let start = 0;
-    let end = Math.max(0, totalSize - 1);
-    let partial = false;
-    if (range) {
-      if (
-        !Number.isSafeInteger(range.start) ||
-        range.start < 0 ||
-        range.start >= totalSize
-      ) {
-        return { rangeInvalid: true as const, totalSize };
+      if (!approved) {
+        const [house]=await this.db.select({id:schema.adsHouseCreatives.id}).from(schema.adsHouseCreatives).where(and(eq(schema.adsHouseCreatives.isActive,true),eq(schema.adsHouseCreatives.isArchived,false),or(eq(schema.adsHouseCreatives.imageAssetId,asset.id),eq(schema.adsHouseCreatives.videoAssetId,asset.id)))).limit(1);
+        if(!house)throw new NotFoundException("Public media asset not found");
       }
-      start = range.start;
-      end =
-        range.end !== undefined
-          ? Math.min(range.end, totalSize - 1)
-          : totalSize - 1;
-      if (!Number.isSafeInteger(end) || end < start)
-        return { rangeInvalid: true as const, totalSize };
-      partial = true;
     }
-    const stream = fileRef.createReadStream({ start, end });
-
-    return {
-      stream,
-      contentType:
-        (metadata.contentType as string) || "application/octet-stream",
-      contentLength: end - start + 1,
-      totalSize,
-      start,
-      end,
-      partial,
-      contentRange: `bytes ${start}-${end}/${totalSize}`,
-    };
+    if(!this.storageRouter.isConfigured())throw new ServiceUnavailableException('Media storage unavailable');
+    const stat=await this.storageRouter.statObject(storageKey);if(!stat)throw new NotFoundException('Media object not found');
+    const totalSize=stat.bytes;
+    if(range&&(!Number.isSafeInteger(range.start)||range.start<0||range.start>=totalSize||range.end!==undefined&&(!Number.isSafeInteger(range.end)||range.end<range.start)))return{rangeInvalid:true as const,totalSize};
+    const normalized=range?{start:range.start,end:Math.min(range.end??totalSize-1,totalSize-1)}:undefined;
+    const result=await this.storageRouter.getObjectStream(storageKey,normalized);
+    return{stream:result.stream,contentType:result.contentType,contentLength:result.contentLength,totalSize:result.totalSize,start:normalized?.start||0,end:normalized?.end??Math.max(0,totalSize-1),partial:!!normalized,contentRange:normalized?`bytes ${normalized.start}-${normalized.end}/${totalSize}`:undefined};
   }
 
   /**
@@ -682,13 +645,14 @@ export class UploadsService {
       throw new NotFoundException("Media asset not found or unauthorized");
     }
 
+    if(!this.storageRouter.isConfigured())throw new ServiceUnavailableException('Media storage unavailable');
     const stat = await this.storageRouter.statObject(asset.storageKey);
     if (!stat) {
       throw new BadRequestException(
         "Upload is incomplete. Upload the file before marking it complete.",
       );
     }
-    if (stat.bytes !== asset.bytes) {
+    if (stat.bytes !== asset.bytes || stat.contentType !== asset.mimeType) {
       throw new BadRequestException(
         "Uploaded file does not match the expected size or type. Please upload it again.",
       );

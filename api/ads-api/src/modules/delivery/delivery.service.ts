@@ -206,6 +206,7 @@ export class DeliveryService {
         ? !serve.campaignId &&
           !serve.creativeId &&
           payload.campaignId === HOUSE_CAMPAIGN_UUID &&
+          (!serve.houseCreativeId || serve.houseCreativeId === payload.creativeId) &&
           serve.billingPriceNanos === 0n
         : serve.campaignId === payload.campaignId &&
           serve.creativeId === payload.creativeId) &&
@@ -752,54 +753,6 @@ export class DeliveryService {
     const ipHash = this.tokenService.hashIp(params.clientIp);
     const tieSeed = crypto.createHash('sha256').update(`${params.requestId}:${params.slotTagId}`).digest('hex');
 
-    // 1. Resolve an eligible House creative BEFORE writing serve/evidence (PLAN-0061 P0)
-    let activeHouseCreative = CRIMFIG_HOUSE_CREATIVE;
-    let chosenHouseCreativeId: string | null = null;
-    let chosenHouseCreativeVersion = 1;
-
-    try {
-      const dbHouseCreatives = await this.db
-        .select()
-        .from(adsHouseCreatives)
-        .where(
-          and(
-            eq(adsHouseCreatives.isActive, true),
-            eq(adsHouseCreatives.isArchived, false)
-          )
-        )
-        .orderBy(desc(adsHouseCreatives.priority))
-        .limit(10);
-
-      if (dbHouseCreatives && dbHouseCreatives.length > 0) {
-        // Find first active creative that matches format or type
-        const preferred =
-          dbHouseCreatives.find((c) => c.adType === 'image' && c.imageUrl) ||
-          dbHouseCreatives[0];
-        if (preferred) {
-          chosenHouseCreativeId = preferred.id;
-          chosenHouseCreativeVersion = preferred.version || 1;
-          activeHouseCreative = {
-            campaignId: HOUSE_CAMPAIGN_UUID,
-            creativeId: preferred.id,
-            adType: (preferred.adType as 'image' | 'text' | 'video') || 'image',
-            format: preferred.format || params.format || 'banner',
-            headline: preferred.headline,
-            bodyText: preferred.bodyText,
-            ctaText: preferred.ctaText || 'Start Advertising',
-            imageUrl: preferred.imageUrl || null,
-            videoUrl: preferred.videoUrl || null,
-            posterUrl: preferred.posterUrl || null,
-            width: preferred.width || 1024,
-            height: preferred.height || 682,
-            durationSeconds: null,
-            destinationUrl: preferred.destinationUrl || 'https://ads.crimfig.com',
-          };
-        }
-      }
-    } catch {
-      // Fallback safely to static CRIMFIG_HOUSE_CREATIVE
-    }
-
     const decisionDraft = {
       requestId: params.requestId,
       slotHandle: params.slotTagId,
@@ -822,9 +775,55 @@ export class DeliveryService {
     };
     const recordHash = this.auctionEngine.computeDecisionHash(decisionDraft);
 
-    const {serveId,decisionId}=await this.db.transaction(async tx=>{
+    const issued=await this.db.transaction(async tx=>{
       if(params.serveBefore)requireDeliveryTime(params.serveBefore,'default_commit');
       await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+    // 1. Resolve an eligible House creative BEFORE writing serve/evidence (PLAN-0061 P0)
+    let activeHouseCreative = CRIMFIG_HOUSE_CREATIVE;
+    let chosenHouseCreativeId: string | null = null;
+    let chosenHouseCreativeVersion = 1;
+
+    try {
+      const dbHouseCreatives = await tx
+        .select()
+        .from(adsHouseCreatives)
+        .where(
+          and(
+            eq(adsHouseCreatives.isActive, true),
+            eq(adsHouseCreatives.isArchived, false)
+          )
+        )
+        .orderBy(desc(adsHouseCreatives.priority))
+        .for('share');
+
+      if (dbHouseCreatives && dbHouseCreatives.length > 0) {
+        const preferred = dbHouseCreatives.find(c => this.allowedAdTypes(params.format).includes(c.adType as any) && (c.format === params.format || c.format === 'any') && (c.adType === 'text' || c.adType === 'image' && !!c.imageUrl || c.adType === 'video' && !!c.videoUrl));
+        if (!preferred) return null;
+        if (preferred) {
+          chosenHouseCreativeId = preferred.id;
+          chosenHouseCreativeVersion = preferred.version || 1;
+          activeHouseCreative = {
+            campaignId: HOUSE_CAMPAIGN_UUID,
+            creativeId: preferred.id,
+            adType: (preferred.adType as 'image' | 'text' | 'video') || 'image',
+            format: preferred.format || params.format || 'banner',
+            headline: preferred.headline,
+            bodyText: preferred.bodyText,
+            ctaText: preferred.ctaText || 'Start Advertising',
+            imageUrl: preferred.imageUrl || null,
+            videoUrl: preferred.videoUrl || null,
+            posterUrl: preferred.posterUrl || null,
+            width: preferred.width || 1024,
+            height: preferred.height || 682,
+            durationSeconds: null,
+            destinationUrl: preferred.destinationUrl || 'https://ads.crimfig.com',
+          };
+        }
+      }
+      else return null;
+    } catch (error) { throw error; }
+
+
       if(params.slotId){
         const [supply]=await tx.select({slot:adstationSlots,site:adsPromoterWebsites,promoter:adsPromoters}).from(adstationSlots)
           .innerJoin(adsPromoterWebsites,eq(adsPromoterWebsites.id,adstationSlots.websiteId)).innerJoin(adsPromoters,eq(adsPromoters.id,adstationSlots.promoterId)).where(eq(adstationSlots.id,params.slotId)).for('share').limit(1);
@@ -868,6 +867,7 @@ export class DeliveryService {
           creativeId: null,
           houseCreativeId: chosenHouseCreativeId,
           houseCreativeVersion: chosenHouseCreativeVersion,
+          houseDestinationUrl: activeHouseCreative.destinationUrl,
           promoterId: params.promoterId,
           slotHandle: params.slotTagId,
           requestId: params.requestId,
@@ -917,9 +917,11 @@ export class DeliveryService {
         decision:stableAdValue(decisionDraft)
       },tx);
       if(params.serveBefore)requireDeliveryTime(params.serveBefore,'default_commit');
-      return {serveId:serve.id,decisionId};
+      return {serveId:serve.id,decisionId,activeHouseCreative};
     });
 
+    if (!issued) return null;
+    const {serveId,decisionId,activeHouseCreative}=issued;
     const tokenPlacementId = params.placementId || HOUSE_PLACEMENT_UUID;
     const impToken = this.tokenService.generateToken({
       servedId: serveId,
@@ -1631,18 +1633,8 @@ export class DeliveryService {
         referrer,
       });
 
-      // Lookup destinationUrl from house creative record if available
-      try {
-        const [houseRecord] = await this.db
-          .select({ destinationUrl: adsHouseCreatives.destinationUrl })
-          .from(adsHouseCreatives)
-          .where(eq(adsHouseCreatives.id, tokenPayload.creativeId))
-          .limit(1);
-        if (houseRecord?.destinationUrl) return houseRecord.destinationUrl;
-      } catch {
-        // Fallback to default
-      }
-      return CRIMFIG_HOUSE_CREATIVE.destinationUrl;
+      const [issuedServe] = await this.db.select({destinationUrl: adsServes.houseDestinationUrl}).from(adsServes).where(eq(adsServes.id,tokenPayload.servedId)).limit(1);
+      return issuedServe?.destinationUrl || CRIMFIG_HOUSE_CREATIVE.destinationUrl;
     }
 
     if (tokenPayload && !(await this.boundServe(tokenPayload))) {

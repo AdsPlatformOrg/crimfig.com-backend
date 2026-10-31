@@ -1,3 +1,4 @@
+import { diagnosticPolicy } from './request-diagnostics';
 import {Inject,Injectable,Logger,OnModuleInit,OnModuleDestroy} from '@nestjs/common';
 import {randomUUID} from 'crypto';
 import {sql} from 'drizzle-orm';
@@ -23,6 +24,8 @@ export class DurableErrorMonitorSink implements ErrorMonitorSink,OnModuleInit,On
   async flush(){
     if(this.busy||!resolveErrorMonitorConfig().captureEnabled)return;this.busy=true;
     try{
+      const retentionDays=diagnosticPolicy().retentionDays;
+      await this.db.execute(sql`UPDATE error_monitor_source_outbox SET payload=payload-'diagnostics' WHERE id IN (SELECT id FROM error_monitor_source_outbox WHERE service=${this.serviceName} AND environment=${resolveErrorMonitorConfig().environment} AND payload ? 'diagnostics' AND created_at<now()-${retentionDays}*interval '1 day' LIMIT 250)`);
       await this.db.execute(sql`UPDATE error_monitor_source_outbox SET status='dead',lease_id=NULL,lease_expires_at=NULL,last_error_code='RETRY_LIMIT_REACHED'
         WHERE service=${this.serviceName} AND environment=${resolveErrorMonitorConfig().environment} AND status='processing' AND attempts>=20 AND lease_expires_at<=now()`);
       const leaseId=randomUUID();

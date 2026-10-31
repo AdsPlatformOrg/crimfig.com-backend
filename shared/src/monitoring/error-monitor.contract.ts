@@ -1,3 +1,4 @@
+import { diagnosticPolicy, sanitizedDiagnostics } from './request-diagnostics';
 import { createHash, randomUUID } from 'crypto';
 import { SetMetadata } from '@nestjs/common';
 import {
@@ -392,6 +393,7 @@ export interface RawErrorCaptureInput {
   deviceType?: string | null;
   countryCode?: string | null;
   context?: Record<string, unknown> | null;
+  diagnostics?: unknown;
   occurredAt?: Date | string;
 }
 
@@ -420,6 +422,7 @@ export interface SanitizedErrorMonitorEvent {
   deviceType: string | null;
   countryCode: string | null;
   sanitizedContext: Record<string, unknown>;
+  diagnostics?: Record<string, unknown> | null;
   railwayLogUrl: string;
   occurredAt: Date;
 }
@@ -542,6 +545,7 @@ export function redactAndSanitizeErrorEvent(
     deviceType: input.deviceType ? sanitizeMonitorString(input.deviceType, 32) : null,
     countryCode: input.countryCode ? sanitizeMonitorString(input.countryCode, 8).toUpperCase() : null,
     sanitizedContext: sanitizeMonitorContext(input.context),
+    diagnostics: source === 'server' && diagnosticPolicy(env).enabled && input.diagnostics ? sanitizedDiagnostics(input.diagnostics) : null,
     railwayLogUrl,
     occurredAt,
   };

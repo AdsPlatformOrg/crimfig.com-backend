@@ -243,7 +243,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
             update: db.update,
             select: jest.fn((fields: any) => ({
               from: jest.fn((table: any) => {
-                const rows = table === require('@crimfig/database/schema').users
+                const rows = table === require('@crimfig/database/schema').adsHouseCreatives ? [{...CRIMFIG_HOUSE_CREATIVE,id:HOUSE_CREATIVE_UUID,version:1,format:'any'}] : table === require('@crimfig/database/schema').users
                   ? [{ status: ownerStatus }]
                   : table === require('@crimfig/database/schema').adstationSlots && slotRow ? [{
                     slot: { ...slotRow.slot, promoterId: slotRow.promoter.id },
@@ -254,6 +254,8 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
                 query.innerJoin = jest.fn(() => query);
                 query.where = jest.fn(() => query);
                 query.for = jest.fn(() => query);
+                query.orderBy=jest.fn(()=>query);
+                query.then=(resolve:any)=>Promise.resolve(rows).then(resolve);
                 query.limit = jest.fn(async () => rows);
                 return query;
               }),
@@ -399,6 +401,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
         { origin: 'https://jed.com.ng' },
       );
 
+      if(!ad)throw new Error('Expected seeded House creative');
       expect(ad.isHouseAd).toBe(true);
       expect(ad.headline).toBe(CRIMFIG_HOUSE_CREATIVE.headline);
       expect(insertedServes).toHaveLength(1);
@@ -464,6 +467,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
         { origin: 'https://jed.com.ng' },
       );
 
+      if(!shadowAd)throw new Error('Expected seeded Shadow creative');
       expect(shadowAd.headline).toBe(CRIMFIG_HOUSE_CREATIVE.headline);
       expect(insertedServes).toHaveLength(1);
       expect(insertedServes[0].inventoryClass).toBe('shadow');

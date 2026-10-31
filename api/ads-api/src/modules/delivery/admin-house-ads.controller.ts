@@ -7,6 +7,7 @@ import {
   Body,
   Param,
   Req,
+  Query,
   Inject,
   ParseUUIDPipe,
   NotFoundException,
@@ -21,6 +22,7 @@ import { adsHouseCreatives, adsServes, adsInteractions } from '@crimfig/database
 import { eq, desc, sql, and } from 'drizzle-orm';
 import {
   IsString,
+  IsUUID,
   IsOptional,
   IsBoolean,
   IsInt,
@@ -53,12 +55,15 @@ export class CreateHouseCreativeDto {
   adType?: 'image' | 'text' | 'video';
 
   @IsOptional()
-  @IsString()
+  @IsIn(['banner','square','interstitial','card','video','any','sidebar_sticky','in_content_mid','in_content_end'])
   format?: string;
 
   @IsOptional()
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
   imageUrl?: string;
+
+  @IsOptional() @IsUUID() imageAssetId?:string;
+  @IsOptional() @IsUUID() videoAssetId?:string;
 
   @IsOptional()
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
@@ -113,12 +118,15 @@ export class UpdateHouseCreativeDto {
   adType?: 'image' | 'text' | 'video';
 
   @IsOptional()
-  @IsString()
+  @IsIn(['banner','square','interstitial','card','video','any','sidebar_sticky','in_content_mid','in_content_end'])
   format?: string;
 
   @IsOptional()
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
   imageUrl?: string;
+
+  @IsOptional() @IsUUID() imageAssetId?:string;
+  @IsOptional() @IsUUID() videoAssetId?:string;
 
   @IsOptional()
   @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
@@ -156,121 +164,30 @@ export class AdminHouseAdsController {
     private readonly db: NodePgDatabase<typeof schema>,
   ) {}
 
-  @Get('analytics')
-  @ApiOperation({ summary: 'Get aggregated house ad performance breakdown' })
-  async getHouseAnalytics() {
-    const [serveTotals] = await this.db
-      .select({
-        totalServes: sql<number>`count(*)::int`,
-      })
-      .from(adsServes)
-      .where(eq(adsServes.inventoryClass, 'house'));
-
-    const [interactionTotals] = await this.db
-      .select({
-        totalClicks: sql<number>`count(*) filter (where ${adsInteractions.type} = 'click')::int`,
-        totalRenders: sql<number>`count(*) filter (where ${adsInteractions.type} = 'render')::int`,
-        totalImpressions: sql<number>`count(*) filter (where ${adsInteractions.type} = 'impression')::int`,
-        totalViewable: sql<number>`count(*) filter (where ${adsInteractions.type} = 'viewable_impression')::int`,
-      })
-      .from(adsInteractions)
-      .innerJoin(adsServes, eq(adsInteractions.serveId, adsServes.id))
-      .where(eq(adsServes.inventoryClass, 'house'));
-
-    // Per-creative attribution breakdown
-    const creativeBreakdown = await this.db
-      .select({
-        houseCreativeId: adsServes.houseCreativeId,
-        title: adsHouseCreatives.title,
-        adType: adsHouseCreatives.adType,
-        format: adsHouseCreatives.format,
-        serves: sql<number>`count(distinct ${adsServes.id})::int`,
-        clicks: sql<number>`count(distinct case when ${adsInteractions.type} = 'click' then ${adsInteractions.id} end)::int`,
-      })
-      .from(adsServes)
-      .leftJoin(adsHouseCreatives, eq(adsServes.houseCreativeId, adsHouseCreatives.id))
-      .leftJoin(adsInteractions, eq(adsInteractions.serveId, adsServes.id))
-      .where(eq(adsServes.inventoryClass, 'house'))
-      .groupBy(adsServes.houseCreativeId, adsHouseCreatives.title, adsHouseCreatives.adType, adsHouseCreatives.format);
-
-    const totalServes = serveTotals?.totalServes || 0;
-    const totalClicks = interactionTotals?.totalClicks || 0;
-    const totalRenders = interactionTotals?.totalRenders || 0;
-    const totalImpressions = interactionTotals?.totalImpressions || 0;
-    const totalViewable = interactionTotals?.totalViewable || 0;
-
-    return {
-      status: 'success',
-      data: {
-        funnel: {
-          serves: totalServes,
-          renders: totalRenders,
-          impressions: totalImpressions,
-          viewableImpressions: totalViewable,
-          clicks: totalClicks,
-          ctr: totalImpressions > 0 ? Number((totalClicks / totalImpressions) * 100).toFixed(2) + '%' : null,
-          renderRate: totalServes > 0 ? Number((totalRenders / totalServes) * 100).toFixed(2) + '%' : null,
-        },
-        creatives: creativeBreakdown.map((row) => ({
-          houseCreativeId: row.houseCreativeId,
-          title: row.title || 'Default House Ad',
-          adType: row.adType || 'image',
-          format: row.format || 'banner',
-          serves: row.serves,
-          clicks: row.clicks,
-          ctr: row.serves > 0 ? Number((row.clicks / row.serves) * 100).toFixed(2) + '%' : '0.00%',
-        })),
-        asOf: new Date().toISOString(),
-      },
-    };
+  private async validateAssets(dto:CreateHouseCreativeDto|UpdateHouseCreativeDto,actor:string){
+    for(const [field,type]of [['imageAssetId','image'],['videoAssetId','video']] as const){const id=dto[field];if(!id)continue;const [asset]=await this.db.select().from(schema.adsMediaAssets).where(and(eq(schema.adsMediaAssets.id,id),eq(schema.adsMediaAssets.ownerId,actor),eq(schema.adsMediaAssets.status,'ready'))).limit(1);if(!asset||!asset.mimeType.startsWith(type+'/'))throw new BadRequestException('Uploaded media must be a ready asset owned by the acting administrator');const fieldUrl=type==='image'?'imageUrl':'videoUrl';const provided=dto[fieldUrl];if(!provided)throw new BadRequestException('Uploaded media URL is required');let path:string;try{path=new URL(provided).pathname;}catch{throw new BadRequestException('Invalid media URL');}if(path!==asset.cdnUrl)throw new BadRequestException('Uploaded media URL does not match asset');}
   }
 
   @Get()
   @ApiOperation({ summary: 'List all house creatives with analytics' })
-  async listHouseCreatives() {
+  async listHouseCreatives(@Query() query:Record<string,string> = {}) {
+    if(Object.values(query).some(value=>typeof value!=='string'))throw new BadRequestException('Catalog query values must be strings');
+    const page=Number(query.page||1),limit=Number(query.limit||25);
+    if(!Number.isInteger(page)||page<1||page>10000||!Number.isInteger(limit)||limit<1||limit>100)throw new BadRequestException('Invalid pagination');
     const creatives = await this.db
       .select()
       .from(adsHouseCreatives)
       .where(eq(adsHouseCreatives.isArchived, false))
-      .orderBy(desc(adsHouseCreatives.priority), desc(adsHouseCreatives.createdAt));
+      .orderBy(desc(adsHouseCreatives.priority), desc(adsHouseCreatives.createdAt),desc(adsHouseCreatives.id)).limit(limit+1).offset((page-1)*limit);
 
-    // Aggregate house ad metrics (serves & clicks) using explicit relational joins
-    const [serveStats] = await this.db
-      .select({
-        totalServes: sql<number>`count(*)::int`,
-      })
-      .from(adsServes)
-      .where(eq(adsServes.inventoryClass, 'house'));
-
-    const [clickStats] = await this.db
-      .select({
-        totalClicks: sql<number>`count(*)::int`,
-      })
-      .from(adsInteractions)
-      .innerJoin(adsServes, eq(adsInteractions.serveId, adsServes.id))
-      .where(and(
-        eq(adsServes.inventoryClass, 'house'),
-        eq(adsInteractions.type, 'click')
-      ));
-
-    return {
-      status: 'success',
-      data: creatives,
-      analytics: {
-        totalHouseServes: serveStats?.totalServes || 0,
-        totalHouseClicks: clickStats?.totalClicks || 0,
-        ctr:
-          serveStats?.totalServes && serveStats.totalServes > 0
-            ? Number(((clickStats?.totalClicks || 0) / serveStats.totalServes) * 100).toFixed(2) + '%'
-            : '0.00%',
-      },
-    };
+    return { status: 'success', data: creatives.slice(0,limit), analytics: null, meta:{page,limit,hasNext:creatives.length>limit} };
   }
 
   @Post()
   @ApiOperation({ summary: 'Create a new house ad creative' })
   async createHouseCreative(@Body() dto: CreateHouseCreativeDto, @Req() req: any) {
-    if (dto.adType === 'image' && !dto.imageUrl) {
+    await this.validateAssets(dto,req.user.sub);
+    if ((dto.adType || 'image') === 'image' && !dto.imageUrl) {
       throw new BadRequestException('Image creative requires imageUrl');
     }
     if (dto.adType === 'video' && !dto.videoUrl) {
@@ -287,6 +204,8 @@ export class AdminHouseAdsController {
         destinationUrl: dto.destinationUrl || 'https://ads.crimfig.com',
         adType: dto.adType || 'image',
         format: dto.format || 'banner',
+        imageAssetId:dto.imageAssetId||null,
+        videoAssetId:dto.videoAssetId||null,
         imageUrl: dto.imageUrl || null,
         videoUrl: dto.videoUrl || null,
         width: dto.width || (dto.adType === 'image' ? 1024 : 728),
@@ -309,7 +228,9 @@ export class AdminHouseAdsController {
   async updateHouseCreative(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateHouseCreativeDto,
+    @Req() req:any,
   ) {
+    await this.validateAssets(dto,req.user.sub);
     const [existing] = await this.db
       .select()
       .from(adsHouseCreatives)
@@ -341,8 +262,10 @@ export class AdminHouseAdsController {
         ...(dto.destinationUrl !== undefined ? { destinationUrl: dto.destinationUrl } : {}),
         ...(dto.adType !== undefined ? { adType: dto.adType } : {}),
         ...(dto.format !== undefined ? { format: dto.format } : {}),
-        ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl } : {}),
-        ...(dto.videoUrl !== undefined ? { videoUrl: dto.videoUrl } : {}),
+        ...(dto.imageAssetId!==undefined?{imageAssetId:dto.imageAssetId}:{}),
+        ...(dto.videoAssetId!==undefined?{videoAssetId:dto.videoAssetId}:{}),
+        ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl, imageAssetId:dto.imageAssetId||null } : {}),
+        ...(dto.videoUrl !== undefined ? { videoUrl: dto.videoUrl, videoAssetId:dto.videoAssetId||null } : {}),
         ...(dto.width !== undefined ? { width: dto.width } : {}),
         ...(dto.height !== undefined ? { height: dto.height } : {}),
         ...(dto.priority !== undefined ? { priority: dto.priority } : {}),

@@ -1,3 +1,4 @@
+import {adsMediaAssets} from './ads_serves_and_assets';
 import { pgTable, uuid, varchar, text, integer, boolean, timestamp, index } from 'drizzle-orm/pg-core';
 
 /**
@@ -18,6 +19,8 @@ export const adsHouseCreatives = pgTable(
     destinationUrl: text('destination_url').notNull().default('https://ads.crimfig.com'),
     adType: varchar('ad_type', { length: 32 }).notNull().default('image'), // 'image' | 'text' | 'video'
     format: varchar('format', { length: 64 }).notNull().default('banner'), // 'banner' | 'square' | 'interstitial' | 'any'
+    imageAssetId: uuid('image_asset_id').references(()=>adsMediaAssets.id,{onDelete:'restrict'}),
+    videoAssetId: uuid('video_asset_id').references(()=>adsMediaAssets.id,{onDelete:'restrict'}),
     imageUrl: text('image_url'),
     videoUrl: text('video_url'),
     posterUrl: text('poster_url'),

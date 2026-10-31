@@ -1,3 +1,4 @@
+import { appendDiagnosticLog, sanitizeDiagnosticValue } from '../monitoring/request-diagnostics';
 import { Injectable, LoggerService, Scope } from '@nestjs/common';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -44,14 +45,15 @@ export class CrimfigLogger implements LoggerService {
   ) {}
 
   private emit(level: LogLevel, message: string, meta?: Record<string, unknown>): void {
-    const entry: LogEntry = {
+    const entry: LogEntry = sanitizeDiagnosticValue({
       level,
       timestamp: new Date().toISOString(),
       service: this.service,
       context: this.context,
       message,
       ...meta,
-    };
+    });
+    appendDiagnosticLog(entry);
 
     // In production, emit clean JSON for log drains.
     // In dev, pretty-print with colors for readability.
@@ -67,7 +69,7 @@ export class CrimfigLogger implements LoggerService {
       }[level];
       const reset = '\x1b[0m';
       const prefix = `${color}[${level.toUpperCase()}]${reset} [${entry.service}/${entry.context}]`;
-      console.log(`${prefix} ${message}`, meta ?? '');
+      console.log(`${prefix} ${entry.message}`, sanitizeDiagnosticValue(meta ?? {}));
     }
   }
 

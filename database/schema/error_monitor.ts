@@ -73,6 +73,8 @@ export const errorMonitorOccurrences = pgTable(
     deviceType: varchar('device_type', { length: 32 }),
     countryCode: varchar('country_code', { length: 8 }),
     sanitizedContext: jsonb('sanitized_context').$type<Record<string, unknown>>().notNull().default({}),
+    diagnostics: jsonb('diagnostics').$type<Record<string, unknown>>(),
+    diagnosticsExpiresAt: timestamp('diagnostics_expires_at', { withTimezone: true }),
     railwayLogUrl: varchar('railway_log_url', { length: 512 }),
     occurredAt: timestamp('occurred_at', { withTimezone: true }).defaultNow().notNull(),
   },

@@ -1,3 +1,6 @@
+## 2026-10-31 - PLAN-0064 local repair implementation
+Approved by JED (proceed). Reports/drill-downs, catalog/theme/error-state fixes, nested permission-aware navigation, retained masked request diagnostics and media/snapshot corrections implemented. Evidence: docs/reviews/2026-10-31-plan0064-implementation.md. Backend 89/89 (7 suites); targeted 35/35 rerun is a subset. Frontend 14/14. Migrations 0030/0031 registered, not applied. No deployment, DB/config writes or commits/pushes. Live 500 cause and browser acceptance unverified; broader checks DEFERRED - OWNER REQUEST. Owner requested round-up. PLAN-0064 remains IN_PROGRESS for release acceptance.
+
 # crimfig-backend — Serial Activity Log
 
 All significant changes, decisions, and agent actions are recorded here in reverse chronological order.
@@ -642,3 +645,8 @@ Removed silent evidence secret fallback (controlled503 on missing dedicated key)
 
 ## 2026-10-31 — PLAN-0061 corrective plan drafted
 Reviewed PLAN-0057/0058 source and drafted .agents/plans/PLAN-0061-house-ad-and-slot-analytics-monitoring-gap-fixes.md (DRAFT/PENDING): durable House creative attribution, schema-correct analytics, Platform Admin House/slot performance, delivery/creative safeguards and monitoring diagnostics. PLAN-0057 reformatted; PLAN-0058 historical evidence retained with gap amendment. Documentation only; no implementation/tests/deployment/config changes. Broader checks remain DEFERRED — OWNER REQUEST.
+## 2026-10-31 — PLAN-0063 diagnostic capture plan
+Drafted PLAN-0063 (DRAFT/PENDING): typed masked request/response/stack/cause and request-log capture, complete transport support, retained diagnostic records beyond group sampling, guarded search/detail/export and bounded retention. Current source review confirms metadata-only capture and 25-sample storage. Documentation only; no backend changes/tests/deployment or secret values recorded.
+
+## 2026-10-31 — PLAN-0064 admin repair plan
+Drafted PLAN-0064 DRAFT/PENDING after reviewing PLAN-0061–0063 source and owner screenshots: diagnose House list 500/migration registration, complete bounded reporting scopes and missing diagnostic pipeline. Source does not establish deployed schema or 500 root cause. Required API/page/unit coverage matrix included. Documentation only; no tests, runtime changes or deployments.
