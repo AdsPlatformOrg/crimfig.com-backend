@@ -33,8 +33,9 @@ import {
   adsAuctionDecisions,
   adsOpportunityReservations,
   crimfigGeoTargets,
+  adsHouseCreatives,
 } from '@crimfig/database/schema';
-import { eq, sql, and, or, inArray } from 'drizzle-orm';
+import { eq, sql, and, or, inArray, desc } from 'drizzle-orm';
 import {
   ImpressionTokenService,
   ImpressionTokenPayload,
@@ -47,20 +48,36 @@ export const HOUSE_CAMPAIGN_UUID = '00000000-0000-4000-8000-00000000cf01';
 export const HOUSE_CREATIVE_UUID = '00000000-0000-4000-8000-00000000cf02';
 export const HOUSE_PLACEMENT_UUID = '00000000-0000-4000-8000-00000000cf03';
 
-export const CRIMFIG_HOUSE_CREATIVE = {
+export interface HouseCreativeResolved {
+  campaignId: string;
+  creativeId: string;
+  adType: 'image' | 'text' | 'video';
+  format: string;
+  headline: string;
+  bodyText: string;
+  ctaText: string;
+  imageUrl: string | null;
+  videoUrl: string | null;
+  posterUrl: string | null;
+  width: number | null;
+  height: number | null;
+  durationSeconds: number | null;
+  destinationUrl: string;
+}
+
+export const CRIMFIG_HOUSE_CREATIVE: HouseCreativeResolved = {
   campaignId: HOUSE_CAMPAIGN_UUID,
   creativeId: HOUSE_CREATIVE_UUID,
-  adType: 'text' as const,
+  adType: 'image',
   format: 'banner',
-  headline: 'Advertise or Monetize with CrimFig Ads',
-  bodyText:
-    'Reach verified audiences across Websites, Reels & Mobile Apps with transparent pricing and instant escrow protection.',
-  ctaText: 'Explore CrimFig Ads',
-  imageUrl: null,
+  headline: 'Advertise with CrimFig',
+  bodyText: 'Reach real people. Grow your business.',
+  ctaText: 'Start Advertising',
+  imageUrl: 'https://media.crimfig.com/house-ads/crimfig-advertise-hero-1024x682.jpg',
   videoUrl: null,
   posterUrl: null,
-  width: 728,
-  height: 90,
+  width: 1024,
+  height: 682,
   durationSeconds: null,
   destinationUrl: 'https://ads.crimfig.com',
 };
@@ -180,7 +197,13 @@ export class DeliveryService {
 
     return (
       placementMatches &&
-      ((serve.inventoryClass==='house'||serve.inventoryClass==='shadow') ? !serve.campaignId&&!serve.creativeId&&payload.campaignId===HOUSE_CAMPAIGN_UUID&&payload.creativeId===HOUSE_CREATIVE_UUID&&serve.billingPriceNanos===0n : serve.campaignId===payload.campaignId&&serve.creativeId===payload.creativeId) &&
+      ((serve.inventoryClass === 'house' || serve.inventoryClass === 'shadow')
+        ? !serve.campaignId &&
+          !serve.creativeId &&
+          payload.campaignId === HOUSE_CAMPAIGN_UUID &&
+          serve.billingPriceNanos === 0n
+        : serve.campaignId === payload.campaignId &&
+          serve.creativeId === payload.creativeId) &&
       (serve.promoterId === payload.promoterId || !serve.promoterId) &&
       serve.ipHash === payload.ipHash &&
       serve.servedAt.getTime() <= payload.timestamp &&
@@ -812,12 +835,50 @@ export class DeliveryService {
       return {serveId:serve.id,decisionId};
     });
 
+    // Dynamically query active house creative from database (with priority DESC), falling back to static in-memory default
+    let activeHouseCreative = CRIMFIG_HOUSE_CREATIVE;
+    try {
+      const dbHouseCreatives = await this.db
+        .select()
+        .from(adsHouseCreatives)
+        .where(eq(adsHouseCreatives.isActive, true))
+        .orderBy(desc(adsHouseCreatives.priority))
+        .limit(5);
+
+      if (dbHouseCreatives && dbHouseCreatives.length > 0) {
+        // Prefer image ad if available, else first active candidate
+        const preferred =
+          dbHouseCreatives.find((c) => c.adType === 'image' && c.imageUrl) ||
+          dbHouseCreatives[0];
+        if (preferred) {
+          activeHouseCreative = {
+            campaignId: HOUSE_CAMPAIGN_UUID,
+            creativeId: preferred.id,
+            adType: (preferred.adType as 'image' | 'text' | 'video') || 'image',
+            format: preferred.format || params.format || 'banner',
+            headline: preferred.headline,
+            bodyText: preferred.bodyText,
+            ctaText: preferred.ctaText || 'Start Advertising',
+            imageUrl: preferred.imageUrl || null,
+            videoUrl: preferred.videoUrl || null,
+            posterUrl: preferred.posterUrl || null,
+            width: preferred.width || 1024,
+            height: preferred.height || 682,
+            durationSeconds: null,
+            destinationUrl: preferred.destinationUrl || 'https://ads.crimfig.com',
+          };
+        }
+      }
+    } catch {
+      // Fallback silently to static CRIMFIG_HOUSE_CREATIVE
+    }
+
     const tokenPlacementId = params.placementId || HOUSE_PLACEMENT_UUID;
     const impToken = this.tokenService.generateToken({
       servedId: serveId,
       placementId: tokenPlacementId,
       campaignId: HOUSE_CAMPAIGN_UUID,
-      creativeId: HOUSE_CREATIVE_UUID,
+      creativeId: activeHouseCreative.creativeId,
       promoterId: params.promoterId,
       ipHash,
     });
@@ -826,16 +887,16 @@ export class DeliveryService {
     const clickUrl = `${baseUrl}/api/v1/delivery/go/${impToken}?pid=${params.promoterId}`;
 
     return {
-      adType: CRIMFIG_HOUSE_CREATIVE.adType,
-      format: params.format || CRIMFIG_HOUSE_CREATIVE.format,
-      headline: CRIMFIG_HOUSE_CREATIVE.headline,
-      bodyText: CRIMFIG_HOUSE_CREATIVE.bodyText,
-      ctaText: CRIMFIG_HOUSE_CREATIVE.ctaText,
-      imageUrl: null,
-      videoUrl: null,
-      posterUrl: null,
-      width: CRIMFIG_HOUSE_CREATIVE.width,
-      height: CRIMFIG_HOUSE_CREATIVE.height,
+      adType: activeHouseCreative.adType,
+      format: params.format || activeHouseCreative.format,
+      headline: activeHouseCreative.headline,
+      bodyText: activeHouseCreative.bodyText,
+      ctaText: activeHouseCreative.ctaText,
+      imageUrl: activeHouseCreative.imageUrl,
+      videoUrl: activeHouseCreative.videoUrl,
+      posterUrl: activeHouseCreative.posterUrl,
+      width: activeHouseCreative.width,
+      height: activeHouseCreative.height,
       durationSeconds: null,
       isHouseAd: params.inventoryClass === 'house',
       impToken,
@@ -1509,13 +1570,29 @@ export class DeliveryService {
     const tokenPayload = this.tokenService.verifyToken(token, clientIp);
 
     // Zero-charge CrimFig House/Shadow Ad click path (`G11`)
-    if (
-      tokenPayload &&
-      tokenPayload.campaignId === HOUSE_CAMPAIGN_UUID &&
-      tokenPayload.creativeId === HOUSE_CREATIVE_UUID
-    ) {
-      if(!(await this.boundServe(tokenPayload)))throw new NotFoundException('House click attribution is unavailable');
-      await this.logInteraction({impToken:token,type:'click',source:'embed',clientIp,userAgent,referrer});
+    if (tokenPayload && tokenPayload.campaignId === HOUSE_CAMPAIGN_UUID) {
+      if (!(await this.boundServe(tokenPayload)))
+        throw new NotFoundException('House click attribution is unavailable');
+      await this.logInteraction({
+        impToken: token,
+        type: 'click',
+        source: 'embed',
+        clientIp,
+        userAgent,
+        referrer,
+      });
+
+      // Lookup destinationUrl from house creative record if available
+      try {
+        const [houseRecord] = await this.db
+          .select({ destinationUrl: adsHouseCreatives.destinationUrl })
+          .from(adsHouseCreatives)
+          .where(eq(adsHouseCreatives.id, tokenPayload.creativeId))
+          .limit(1);
+        if (houseRecord?.destinationUrl) return houseRecord.destinationUrl;
+      } catch {
+        // Fallback to default
+      }
       return CRIMFIG_HOUSE_CREATIVE.destinationUrl;
     }
 

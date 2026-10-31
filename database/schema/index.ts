@@ -37,6 +37,7 @@ export * from './billing_withdrawal_requests';
 export * from './ads_campaigns';
 export * from './ads_creative_stacks';
 export * from './ads_creatives';
+export * from './ads_house_creatives';
 export * from './crimfig_geo';
 export * from './ads_promoters';                // includes: adsPromoters, adsPromoterWebsites, adsPromoterApps, adsPlacements
 export * from './ads_interactions';             // includes: adsInteractions, adsPromoterEarnings, adsReelsConsents, adsEmbedRunAudits
