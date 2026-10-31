@@ -7,6 +7,7 @@ import {
   text,
   bigint,
   smallint,
+  integer,
   boolean,
   timestamp,
   pgEnum,
@@ -151,6 +152,8 @@ export const adsServes = pgTable(
     requestId: uuid("request_id"),
     websiteId: uuid("website_id"),
     slotId: uuid("slot_id"),
+    houseCreativeId: uuid("house_creative_id"),
+    houseCreativeVersion: integer("house_creative_version"),
     // 'house' | 'shadow' | 'direct' | 'paid' | 'simulated_paid'
     inventoryClass: varchar("inventory_class", { length: 24 })
       .notNull()

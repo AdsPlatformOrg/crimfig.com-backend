@@ -25,13 +25,16 @@ export const adsHouseCreatives = pgTable(
     height: integer('height'),
     priority: integer('priority').notNull().default(10), // Higher priority evaluated first
     isActive: boolean('is_active').notNull().default(true),
+    isArchived: boolean('is_archived').notNull().default(false),
+    version: integer('version').notNull().default(1),
     createdBy: uuid('created_by'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => ({
-    priorityIdx: index('idx_ads_house_creatives_priority').on(table.priority, table.isActive),
-    adTypeIdx: index('idx_ads_house_creatives_ad_type').on(table.adType, table.isActive),
+    priorityIdx: index('idx_ads_house_creatives_priority').on(table.priority, table.isActive, table.isArchived),
+    adTypeIdx: index('idx_ads_house_creatives_ad_type').on(table.adType, table.isActive, table.isArchived),
   }),
 );
 

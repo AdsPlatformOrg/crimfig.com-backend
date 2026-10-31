@@ -751,6 +751,55 @@ export class DeliveryService {
   }) {
     const ipHash = this.tokenService.hashIp(params.clientIp);
     const tieSeed = crypto.createHash('sha256').update(`${params.requestId}:${params.slotTagId}`).digest('hex');
+
+    // 1. Resolve an eligible House creative BEFORE writing serve/evidence (PLAN-0061 P0)
+    let activeHouseCreative = CRIMFIG_HOUSE_CREATIVE;
+    let chosenHouseCreativeId: string | null = null;
+    let chosenHouseCreativeVersion = 1;
+
+    try {
+      const dbHouseCreatives = await this.db
+        .select()
+        .from(adsHouseCreatives)
+        .where(
+          and(
+            eq(adsHouseCreatives.isActive, true),
+            eq(adsHouseCreatives.isArchived, false)
+          )
+        )
+        .orderBy(desc(adsHouseCreatives.priority))
+        .limit(10);
+
+      if (dbHouseCreatives && dbHouseCreatives.length > 0) {
+        // Find first active creative that matches format or type
+        const preferred =
+          dbHouseCreatives.find((c) => c.adType === 'image' && c.imageUrl) ||
+          dbHouseCreatives[0];
+        if (preferred) {
+          chosenHouseCreativeId = preferred.id;
+          chosenHouseCreativeVersion = preferred.version || 1;
+          activeHouseCreative = {
+            campaignId: HOUSE_CAMPAIGN_UUID,
+            creativeId: preferred.id,
+            adType: (preferred.adType as 'image' | 'text' | 'video') || 'image',
+            format: preferred.format || params.format || 'banner',
+            headline: preferred.headline,
+            bodyText: preferred.bodyText,
+            ctaText: preferred.ctaText || 'Start Advertising',
+            imageUrl: preferred.imageUrl || null,
+            videoUrl: preferred.videoUrl || null,
+            posterUrl: preferred.posterUrl || null,
+            width: preferred.width || 1024,
+            height: preferred.height || 682,
+            durationSeconds: null,
+            destinationUrl: preferred.destinationUrl || 'https://ads.crimfig.com',
+          };
+        }
+      }
+    } catch {
+      // Fallback safely to static CRIMFIG_HOUSE_CREATIVE
+    }
+
     const decisionDraft = {
       requestId: params.requestId,
       slotHandle: params.slotTagId,
@@ -817,6 +866,8 @@ export class DeliveryService {
           placementId: params.placementId,
           campaignId: null,
           creativeId: null,
+          houseCreativeId: chosenHouseCreativeId,
+          houseCreativeVersion: chosenHouseCreativeVersion,
           promoterId: params.promoterId,
           slotHandle: params.slotTagId,
           requestId: params.requestId,
@@ -839,53 +890,35 @@ export class DeliveryService {
           geoCountry: params.clientGeo?.country || null,
           geoRegion: params.clientGeo?.region || null,
           deviceType: params.clientGeo?.device || null,
+          contentSnapshot: {
+            destinationUrl: activeHouseCreative.destinationUrl,
+            adType: activeHouseCreative.adType,
+            headline: activeHouseCreative.headline,
+            imageUrl: activeHouseCreative.imageUrl,
+            houseCreativeId: chosenHouseCreativeId,
+          },
         })
 .returning({id:adsServes.id});
       if(!serve?.id)throw new Error('House serve could not be recorded');
       await tx.update(adsAuctionDecisions).set({serveId:serve.id}).where(eq(adsAuctionDecisions.id,decisionId));
       if(!this.evidence)throw new Error('Durable decision recording is unavailable');
-      await this.evidence.append(params.requestId,{version:1,stage:'issued',serveId:serve.id,inventoryClass:params.inventoryClass,deliveryMode:params.deliveryMode,slotId:params.slotId,websiteId:params.websiteId,decisionId,parentOpportunityId:params.parentOpportunityId??null,runtimeVersion:DELIVERY_RUNTIME.version,decision:stableAdValue(decisionDraft)},tx);
+      await this.evidence.append(params.requestId,{
+        version:1,
+        stage:'issued',
+        serveId:serve.id,
+        inventoryClass:params.inventoryClass,
+        deliveryMode:params.deliveryMode,
+        slotId:params.slotId,
+        websiteId:params.websiteId,
+        decisionId,
+        houseCreativeId: chosenHouseCreativeId,
+        parentOpportunityId:params.parentOpportunityId??null,
+        runtimeVersion:DELIVERY_RUNTIME.version,
+        decision:stableAdValue(decisionDraft)
+      },tx);
       if(params.serveBefore)requireDeliveryTime(params.serveBefore,'default_commit');
       return {serveId:serve.id,decisionId};
     });
-
-    // Dynamically query active house creative from database (with priority DESC), falling back to static in-memory default
-    let activeHouseCreative = CRIMFIG_HOUSE_CREATIVE;
-    try {
-      const dbHouseCreatives = await this.db
-        .select()
-        .from(adsHouseCreatives)
-        .where(eq(adsHouseCreatives.isActive, true))
-        .orderBy(desc(adsHouseCreatives.priority))
-        .limit(5);
-
-      if (dbHouseCreatives && dbHouseCreatives.length > 0) {
-        // Prefer image ad if available, else first active candidate
-        const preferred =
-          dbHouseCreatives.find((c) => c.adType === 'image' && c.imageUrl) ||
-          dbHouseCreatives[0];
-        if (preferred) {
-          activeHouseCreative = {
-            campaignId: HOUSE_CAMPAIGN_UUID,
-            creativeId: preferred.id,
-            adType: (preferred.adType as 'image' | 'text' | 'video') || 'image',
-            format: preferred.format || params.format || 'banner',
-            headline: preferred.headline,
-            bodyText: preferred.bodyText,
-            ctaText: preferred.ctaText || 'Start Advertising',
-            imageUrl: preferred.imageUrl || null,
-            videoUrl: preferred.videoUrl || null,
-            posterUrl: preferred.posterUrl || null,
-            width: preferred.width || 1024,
-            height: preferred.height || 682,
-            durationSeconds: null,
-            destinationUrl: preferred.destinationUrl || 'https://ads.crimfig.com',
-          };
-        }
-      }
-    } catch {
-      // Fallback silently to static CRIMFIG_HOUSE_CREATIVE
-    }
 
     const tokenPlacementId = params.placementId || HOUSE_PLACEMENT_UUID;
     const impToken = this.tokenService.generateToken({
