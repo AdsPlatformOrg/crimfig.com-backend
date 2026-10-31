@@ -7,11 +7,12 @@ import { WithdrawalsController } from './withdrawals.controller';
 import { WalletModule } from '../wallet/wallet.module';
 import { ExchangeRateModule } from '../exchange-rate/exchange-rate.module';
 import { ProvidersModule } from '../providers/providers.module';
+import { WithdrawalAuthorityClient } from './withdrawal-authority.client';
 
 @Module({
   imports: [WalletModule, ExchangeRateModule, ProvidersModule],
   controllers: [WithdrawalsController],
-  providers: [RefundReviewService, WithdrawalsService, WithdrawalLedgerService, WithdrawalDispatchService],
+  providers: [RefundReviewService, WithdrawalsService, WithdrawalLedgerService, WithdrawalDispatchService, WithdrawalAuthorityClient],
   exports: [WithdrawalsService, WithdrawalLedgerService, WithdrawalDispatchService],
 })
 export class WithdrawalsModule {}

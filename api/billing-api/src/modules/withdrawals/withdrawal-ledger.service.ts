@@ -63,7 +63,7 @@ export class WithdrawalLedgerService {
     });
   }
 
-  async reserve(userId: string, requestId: string, bankAccountId: string, cents: number, confirmedQuoteId?: string) {
+  async reserve(userId: string, requestId: string, bankAccountId: string, cents: number, confirmedQuoteId?: string, authorityDigest?: string) {
     const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const identity = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
     if (!identity.test(userId) || !uuid.test(requestId) || !identity.test(bankAccountId) ||
@@ -79,7 +79,8 @@ export class WithdrawalLedgerService {
         if (existing.userId !== userId || existing.type !== 'wallet_withdraw' || existing.provider !== 'paystack' ||
             existing.amountUsdCents !== cents || metadata.withdrawalVersion !== 2 ||
             metadata.bankAccountId !== bankAccountId || metadata.domain !== this.paystack.paymentDomain() ||
-            (confirmedQuoteId && metadata.payoutQuote?.quoteId !== confirmedQuoteId)) {
+            (confirmedQuoteId && metadata.payoutQuote?.quoteId !== confirmedQuoteId) ||
+            (authorityDigest && metadata.authorityDigest !== authorityDigest)) {
           throw new ConflictException('Withdrawal request is already bound to different details');
         }
         const [prior] = await tx.select().from(billingWithdrawalRequests).where(eq(billingWithdrawalRequests.transactionId, existing.id));
@@ -123,7 +124,7 @@ export class WithdrawalLedgerService {
       const [intent] = await tx.insert(billingTransactions).values({ userId, type: 'wallet_withdraw', status: 'pending',
         amountUsdCents: cents, amountNgnKobo: amountKobo, exchangeRateId: rate.id, provider: 'paystack', reference,
         balanceBeforeUsdCents: wallet.balanceUsdCents, balanceAfterUsdCents: balances.available,
-        metadata: JSON.stringify({ withdrawalVersion: 2, requestId: requestId.toLowerCase(), bankAccountId,
+        metadata: JSON.stringify({ withdrawalVersion: 2, requestId: requestId.toLowerCase(), bankAccountId, authorityDigest,
           recipientCode: bank.recipientCode, domain: this.paystack.paymentDomain(), dispatch: 'not_started',
           ...(confirmedQuote ? { payoutQuote: confirmedQuote } : {}) }) }).returning();
       const [withdrawal] = await tx.insert(billingWithdrawalRequests).values({ userId, bankAccountId,
@@ -179,6 +180,7 @@ export class WithdrawalLedgerService {
           retainedUsdCents: reconciliation.retainedUsdCents, retainedKobo: reconciliation.retainedKobo };
       }
       return { claimed, userId, reference, withdrawalId: withdrawal.id, status: claimed ? 'processing' : withdrawal.status,
+        authorityDigest: typeof metadata.authorityDigest === 'string' ? metadata.authorityDigest : undefined,
         amountKobo: intent.amountNgnKobo!, recipientCode: metadata.recipientCode as string,
         domain: metadata.domain as 'test' | 'live', transferCode: withdrawal.paystackTransferCode,
         dispatchStarted: metadata.dispatch === 'started', refund };

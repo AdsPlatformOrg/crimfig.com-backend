@@ -14,7 +14,7 @@ import { EcosystemModule } from './modules/ecosystem/ecosystem.module';
 import { HealthModule } from './modules/health/health.module';
 import { RewardsModule } from './modules/rewards/rewards.module';
 import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
-import { DashboardAuthModule, ErrorMonitorCaptureInterceptor } from '@crimfig/shared';
+import { DashboardAuthModule, ErrorMonitorCaptureInterceptor, DurableErrorMonitorSink, ErrorMonitorMetadataGuard } from '@crimfig/shared';
 import { BillingAccessGuard } from './modules/security/billing-access.guard';
 
 @Module({
@@ -36,12 +36,14 @@ import { BillingAccessGuard } from './modules/security/billing-access.guard';
     RewardsModule,
   ],
   providers: [
+    {provide:DurableErrorMonitorSink,useFactory:(db:any)=>new DurableErrorMonitorSink(db,'billing-api'),inject:['DATABASE_CONNECTION']},
+    {provide:APP_GUARD,useClass:ErrorMonitorMetadataGuard},
     { provide: APP_GUARD, useClass: BillingAccessGuard },
     {
       provide: APP_INTERCEPTOR,
-      useFactory: (reflector: Reflector) =>
-        new ErrorMonitorCaptureInterceptor('billing-api', reflector),
-      inject: [Reflector],
+      useFactory: (reflector: Reflector, sink:DurableErrorMonitorSink) =>
+        new ErrorMonitorCaptureInterceptor('billing-api', reflector, sink),
+      inject: [Reflector,DurableErrorMonitorSink],
     },
   ],
 })

@@ -9,12 +9,12 @@ import * as schema from '@crimfig/database/schema';
 import { DATABASE_TOKEN } from '../database/database.module';
 import { EmailService } from '../email/email.service';
 import { config } from '../../config/config';
-import { CrimfigLogger } from '@crimfig/shared';
+import { CrimfigLogger, FINANCIAL_SECURITY_POLICY } from '@crimfig/shared';
 
 import { TokensService } from '../tokens/tokens.service';
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { authenticator } = require('otplib');
+const { generateSecret, generateURI, verifySync } = require('otplib');
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MfaService — TOTP (RFC 6238) Two-Factor Authentication
@@ -26,6 +26,12 @@ const { authenticator } = require('otplib');
 
 const BACKUP_CODE_COUNT = 8;
 const BACKUP_CODE_LENGTH = 8;
+
+function validTotp(code: string, secret: string, now = Date.now()): boolean {
+  if (!/^\d{6}$/.test(code)) return false;
+  try { return verifySync({ token: code, secret, epoch: Math.floor(now / 1000), epochTolerance: 0, period: 30, digits: 6 }).valid === true; }
+  catch { return false; }
+}
 
 @Injectable()
 export class MfaService {
@@ -92,8 +98,8 @@ export class MfaService {
     });
     if (existingActive) throw new ConflictException('TOTP is already enabled on this account');
 
-    const secret = authenticator.generateSecret();
-    const otpauthUrl = authenticator.keyuri(userEmail, 'CrimFig', secret);
+    const secret = generateSecret();
+    const otpauthUrl = generateURI({ issuer: 'CrimFig', label: userEmail, secret });
     const qrCodeDataUrl = await QRCode.toDataURL(otpauthUrl);
 
     // Store encrypted secret — not yet verified
@@ -121,7 +127,7 @@ export class MfaService {
     if (!device) throw new BadRequestException('No pending TOTP enrollment found. Call /mfa/totp/enroll first.');
 
     const plainSecret = this.decryptSecret(device.secretOrPublicKey);
-    const isValid = authenticator.check(code, plainSecret);
+    const isValid = validTotp(code, plainSecret);
     if (!isValid) throw new BadRequestException('Invalid TOTP code. Please try again.');
 
     // Mark device as verified + primary
@@ -171,7 +177,7 @@ export class MfaService {
 
     if (totpDevice) {
       const plainSecret = this.decryptSecret(totpDevice.secretOrPublicKey);
-      if (authenticator.check(code, plainSecret)) {
+      if (validTotp(code, plainSecret)) {
         await this.db.update(schema.mfaDevices)
           .set({ lastUsedAt: new Date() })
           .where(eq(schema.mfaDevices.id, totpDevice.id));
@@ -209,6 +215,28 @@ export class MfaService {
   }
 
   // ── Disable MFA ───────────────────────────────────────────────────────────
+  /** Financial authorization uses a fresh TOTP only and consumes its device/time step in the caller's transaction. */
+  async consumeFinancialTotp(tx: any, userId: string, code: string, now: number): Promise<boolean> {
+    if (!/^\d{6}$/.test(code) || !Number.isSafeInteger(now) || now <= 0) return false;
+    const devices = await tx.select().from(schema.mfaDevices).where(and(
+      eq(schema.mfaDevices.userId, userId), eq(schema.mfaDevices.type, 'TOTP'),
+      eq(schema.mfaDevices.isVerified, true), isNull(schema.mfaDevices.revokedAt),
+    )).for('update');
+    const step = Math.floor(now / 30_000);
+    for (const device of devices) {
+      // An MFA reset/new device cannot immediately authorize a money movement.
+      const enrolledAt = new Date(device.createdAt).getTime();
+      if (!Number.isFinite(enrolledAt) || now - enrolledAt < FINANCIAL_SECURITY_POLICY.recoveryCooldownMs) continue;
+      if (!validTotp(code, this.decryptSecret(device.secretOrPublicKey), now)) continue;
+      const inserted = await tx.insert(schema.financialTotpUses).values({ deviceId: device.id, step })
+        .onConflictDoNothing().returning({ deviceId: schema.financialTotpUses.deviceId });
+      if (inserted.length !== 1) return false;
+      await tx.update(schema.mfaDevices).set({ lastUsedAt: new Date(now) }).where(eq(schema.mfaDevices.id, device.id));
+      return true;
+    }
+    return false;
+  }
+
 
   async disableMfa(userId: string, confirmCode: string): Promise<{ message: string }> {
     const isValid = await this.verifyTotpCode(userId, confirmCode);

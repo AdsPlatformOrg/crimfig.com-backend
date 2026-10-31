@@ -1278,6 +1278,1018 @@
         ],
         "type": "object"
       },
+      "Campaigns_campaignPageResponse": {
+        "properties": {
+          "data": {
+            "allOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "counts": {
+                    "additionalProperties": {
+                      "type": "integer"
+                    },
+                    "type": "object"
+                  },
+                  "items": {
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "adStacks": {
+                          "items": {
+                            "additionalProperties": true,
+                            "properties": {
+                              "campaignId": {
+                                "type": "string"
+                              },
+                              "creatives": {
+                                "items": {
+                                  "additionalProperties": true,
+                                  "properties": {
+                                    "adFormat": {
+                                      "enum": [
+                                        "banner",
+                                        "card",
+                                        "video",
+                                        "interstitial"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "adStackId": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "adType": {
+                                      "enum": [
+                                        "text",
+                                        "image",
+                                        "video"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "bodyText": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "campaignId": {
+                                      "type": "string"
+                                    },
+                                    "ctaText": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "destinationUrl": {
+                                      "type": "string"
+                                    },
+                                    "headline": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "imageSpecs": {
+                                      "additionalProperties": true,
+                                      "nullable": true,
+                                      "properties": {
+                                        "bytes": {
+                                          "type": "number"
+                                        },
+                                        "height": {
+                                          "type": "number"
+                                        },
+                                        "mimeType": {
+                                          "type": "string"
+                                        },
+                                        "preparation": {
+                                          "additionalProperties": true,
+                                          "nullable": true,
+                                          "type": "object"
+                                        },
+                                        "renditions": {
+                                          "items": {
+                                            "additionalProperties": true,
+                                            "type": "object"
+                                          },
+                                          "type": "array"
+                                        },
+                                        "sha256": {
+                                          "nullable": true,
+                                          "type": "string"
+                                        },
+                                        "width": {
+                                          "type": "number"
+                                        }
+                                      },
+                                      "required": [],
+                                      "type": "object"
+                                    },
+                                    "imageUrl": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "mediaAssetId": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "mediaFormat": {
+                                      "enum": [
+                                        "image",
+                                        "gif",
+                                        "video"
+                                      ],
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "posterUrl": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "rejectionReason": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
+                                    "reviewStatus": {
+                                      "enum": [
+                                        "pending",
+                                        "approved",
+                                        "rejected"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "status": {
+                                      "type": "string"
+                                    },
+                                    "videoUrl": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "campaignId",
+                                    "destinationUrl"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              "effectiveSettings": {
+                                "additionalProperties": true,
+                                "properties": {
+                                  "geoMode": {
+                                    "enum": [
+                                      "inherit",
+                                      "global",
+                                      "targeted"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "locations": {
+                                    "items": {
+                                      "additionalProperties": true,
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "schedule": {
+                                    "oneOf": [
+                                      {
+                                        "additionalProperties": true,
+                                        "properties": {
+                                          "mode": {
+                                            "enum": [
+                                              "inherit"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "version": {
+                                            "enum": [
+                                              1
+                                            ],
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "version",
+                                          "mode"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": true,
+                                        "properties": {
+                                          "mode": {
+                                            "enum": [
+                                              "round_the_clock",
+                                              "custom"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "ranges": {
+                                            "items": {
+                                              "additionalProperties": true,
+                                              "properties": {
+                                                "endMinute": {
+                                                  "maximum": 1439,
+                                                  "minimum": 0,
+                                                  "type": "integer"
+                                                },
+                                                "startMinute": {
+                                                  "maximum": 1439,
+                                                  "minimum": 0,
+                                                  "type": "integer"
+                                                }
+                                              },
+                                              "required": [
+                                                "startMinute",
+                                                "endMinute"
+                                              ],
+                                              "type": "object"
+                                            },
+                                            "type": "array"
+                                          },
+                                          "timezone": {
+                                            "enum": [
+                                              "Africa/Lagos"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "version": {
+                                            "enum": [
+                                              1
+                                            ],
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "version",
+                                          "mode",
+                                          "timezone",
+                                          "ranges"
+                                        ],
+                                        "type": "object"
+                                      }
+                                    ]
+                                  },
+                                  "targetDevices": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "targetHours": {
+                                    "items": {
+                                      "type": "number"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [],
+                                "type": "object"
+                              },
+                              "geoMode": {
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "position": {
+                                "type": "number"
+                              },
+                              "schedule": {
+                                "nullable": true,
+                                "oneOf": [
+                                  {
+                                    "additionalProperties": true,
+                                    "properties": {
+                                      "mode": {
+                                        "enum": [
+                                          "inherit"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "version": {
+                                        "enum": [
+                                          1
+                                        ],
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "version",
+                                      "mode"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  {
+                                    "additionalProperties": true,
+                                    "properties": {
+                                      "mode": {
+                                        "enum": [
+                                          "round_the_clock",
+                                          "custom"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "ranges": {
+                                        "items": {
+                                          "additionalProperties": true,
+                                          "properties": {
+                                            "endMinute": {
+                                              "maximum": 1439,
+                                              "minimum": 0,
+                                              "type": "integer"
+                                            },
+                                            "startMinute": {
+                                              "maximum": 1439,
+                                              "minimum": 0,
+                                              "type": "integer"
+                                            }
+                                          },
+                                          "required": [
+                                            "startMinute",
+                                            "endMinute"
+                                          ],
+                                          "type": "object"
+                                        },
+                                        "type": "array"
+                                      },
+                                      "timezone": {
+                                        "enum": [
+                                          "Africa/Lagos"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "version": {
+                                        "enum": [
+                                          1
+                                        ],
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "version",
+                                      "mode",
+                                      "timezone",
+                                      "ranges"
+                                    ],
+                                    "type": "object"
+                                  }
+                                ]
+                              },
+                              "settings": {
+                                "additionalProperties": true,
+                                "properties": {
+                                  "geoMode": {
+                                    "enum": [
+                                      "inherit",
+                                      "global",
+                                      "targeted"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "locations": {
+                                    "items": {
+                                      "additionalProperties": true,
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "schedule": {
+                                    "oneOf": [
+                                      {
+                                        "additionalProperties": true,
+                                        "properties": {
+                                          "mode": {
+                                            "enum": [
+                                              "inherit"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "version": {
+                                            "enum": [
+                                              1
+                                            ],
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "version",
+                                          "mode"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": true,
+                                        "properties": {
+                                          "mode": {
+                                            "enum": [
+                                              "round_the_clock",
+                                              "custom"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "ranges": {
+                                            "items": {
+                                              "additionalProperties": true,
+                                              "properties": {
+                                                "endMinute": {
+                                                  "maximum": 1439,
+                                                  "minimum": 0,
+                                                  "type": "integer"
+                                                },
+                                                "startMinute": {
+                                                  "maximum": 1439,
+                                                  "minimum": 0,
+                                                  "type": "integer"
+                                                }
+                                              },
+                                              "required": [
+                                                "startMinute",
+                                                "endMinute"
+                                              ],
+                                              "type": "object"
+                                            },
+                                            "type": "array"
+                                          },
+                                          "timezone": {
+                                            "enum": [
+                                              "Africa/Lagos"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "version": {
+                                            "enum": [
+                                              1
+                                            ],
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "version",
+                                          "mode",
+                                          "timezone",
+                                          "ranges"
+                                        ],
+                                        "type": "object"
+                                      }
+                                    ]
+                                  },
+                                  "targetDevices": {
+                                    "items": {
+                                      "type": "string"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "targetHours": {
+                                    "items": {
+                                      "type": "number"
+                                    },
+                                    "type": "array"
+                                  }
+                                },
+                                "required": [],
+                                "type": "object"
+                              },
+                              "targetDevices": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "targetHours": {
+                                "nullable": true,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "campaignId",
+                              "name"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "advertiserId": {
+                          "type": "string"
+                        },
+                        "approvedRevision": {
+                          "nullable": true,
+                          "type": "integer"
+                        },
+                        "approvedSubmissionId": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "budgetUsd": {
+                          "type": "number"
+                        },
+                        "budgetUsdCents": {
+                          "type": "number"
+                        },
+                        "capabilities": {
+                          "additionalProperties": true,
+                          "properties": {
+                            "blocker": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "canActivate": {
+                              "type": "boolean"
+                            },
+                            "canBeginEdit": {
+                              "type": "boolean"
+                            },
+                            "canEdit": {
+                              "type": "boolean"
+                            },
+                            "canPause": {
+                              "type": "boolean"
+                            },
+                            "canSubmit": {
+                              "type": "boolean"
+                            },
+                            "canTrash": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": [
+                            "canEdit",
+                            "canBeginEdit",
+                            "canSubmit",
+                            "canActivate",
+                            "canPause",
+                            "canTrash",
+                            "blocker"
+                          ],
+                          "type": "object"
+                        },
+                        "category": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "channels": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "clicksCount": {
+                          "type": "number"
+                        },
+                        "contentRevision": {
+                          "type": "integer"
+                        },
+                        "costPerClickUsdCents": {
+                          "type": "number"
+                        },
+                        "costPerImpressionUsdCents": {
+                          "type": "number"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "creatives": {
+                          "items": {
+                            "additionalProperties": true,
+                            "properties": {
+                              "adFormat": {
+                                "enum": [
+                                  "banner",
+                                  "card",
+                                  "video",
+                                  "interstitial"
+                                ],
+                                "type": "string"
+                              },
+                              "adStackId": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "adType": {
+                                "enum": [
+                                  "text",
+                                  "image",
+                                  "video"
+                                ],
+                                "type": "string"
+                              },
+                              "bodyText": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "campaignId": {
+                                "type": "string"
+                              },
+                              "ctaText": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "destinationUrl": {
+                                "type": "string"
+                              },
+                              "headline": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "imageSpecs": {
+                                "additionalProperties": true,
+                                "nullable": true,
+                                "properties": {
+                                  "bytes": {
+                                    "type": "number"
+                                  },
+                                  "height": {
+                                    "type": "number"
+                                  },
+                                  "mimeType": {
+                                    "type": "string"
+                                  },
+                                  "preparation": {
+                                    "additionalProperties": true,
+                                    "nullable": true,
+                                    "type": "object"
+                                  },
+                                  "renditions": {
+                                    "items": {
+                                      "additionalProperties": true,
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "sha256": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
+                                  "width": {
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [],
+                                "type": "object"
+                              },
+                              "imageUrl": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "mediaAssetId": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "mediaFormat": {
+                                "enum": [
+                                  "image",
+                                  "gif",
+                                  "video"
+                                ],
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "posterUrl": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "rejectionReason": {
+                                "nullable": true,
+                                "type": "string"
+                              },
+                              "reviewStatus": {
+                                "enum": [
+                                  "pending",
+                                  "approved",
+                                  "rejected"
+                                ],
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string"
+                              },
+                              "videoUrl": {
+                                "nullable": true,
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "campaignId",
+                              "destinationUrl"
+                            ],
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "currentSubmissionId": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "dailyBudgetUsd": {
+                          "nullable": true,
+                          "type": "number"
+                        },
+                        "dailyBudgetUsdCents": {
+                          "nullable": true,
+                          "type": "number"
+                        },
+                        "defaultStackId": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "endsAt": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "format": {
+                          "enum": [
+                            "banner",
+                            "card",
+                            "video",
+                            "interstitial"
+                          ],
+                          "type": "string"
+                        },
+                        "formats": {
+                          "items": {
+                            "enum": [
+                              "banner",
+                              "card",
+                              "video",
+                              "interstitial"
+                            ],
+                            "type": "string"
+                          },
+                          "type": "array"
+                        },
+                        "frequencyCapPerDay": {
+                          "type": "number"
+                        },
+                        "geoLocations": {
+                          "items": {
+                            "additionalProperties": true,
+                            "type": "object"
+                          },
+                          "type": "array"
+                        },
+                        "geoMode": {
+                          "type": "string"
+                        },
+                        "hourlyPacingUsdCents": {
+                          "nullable": true,
+                          "type": "number"
+                        },
+                        "hoversCount": {
+                          "type": "number"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "impressionsCount": {
+                          "type": "number"
+                        },
+                        "moderationStatus": {
+                          "enum": [
+                            "draft",
+                            "pending_primary_review",
+                            "pending_manager_approval",
+                            "approved",
+                            "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "pricingModel": {
+                          "type": "string"
+                        },
+                        "pricingVersion": {
+                          "type": "number"
+                        },
+                        "rejectionReason": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "remainingBudgetUsd": {
+                          "type": "number"
+                        },
+                        "remainingBudgetUsdCents": {
+                          "type": "number"
+                        },
+                        "schedule": {
+                          "nullable": true,
+                          "oneOf": [
+                            {
+                              "additionalProperties": true,
+                              "properties": {
+                                "mode": {
+                                  "enum": [
+                                    "inherit"
+                                  ],
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "enum": [
+                                    1
+                                  ],
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "version",
+                                "mode"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "additionalProperties": true,
+                              "properties": {
+                                "mode": {
+                                  "enum": [
+                                    "round_the_clock",
+                                    "custom"
+                                  ],
+                                  "type": "string"
+                                },
+                                "ranges": {
+                                  "items": {
+                                    "additionalProperties": true,
+                                    "properties": {
+                                      "endMinute": {
+                                        "maximum": 1439,
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      },
+                                      "startMinute": {
+                                        "maximum": 1439,
+                                        "minimum": 0,
+                                        "type": "integer"
+                                      }
+                                    },
+                                    "required": [
+                                      "startMinute",
+                                      "endMinute"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "timezone": {
+                                  "enum": [
+                                    "Africa/Lagos"
+                                  ],
+                                  "type": "string"
+                                },
+                                "version": {
+                                  "enum": [
+                                    1
+                                  ],
+                                  "type": "integer"
+                                }
+                              },
+                              "required": [
+                                "version",
+                                "mode",
+                                "timezone",
+                                "ranges"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        },
+                        "spentUsd": {
+                          "type": "number"
+                        },
+                        "startsAt": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "draft",
+                            "active",
+                            "paused",
+                            "completed",
+                            "cancelled",
+                            "under_review",
+                            "pending_manager_approval",
+                            "rejected",
+                            "suspended",
+                            "trash"
+                          ],
+                          "type": "string"
+                        },
+                        "submissionIntentId": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "submissionRequestId": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "submissionState": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "submittedAt": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "targetCountries": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "targetDevices": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "items": {
+                                "type": "string"
+                              },
+                              "type": "array"
+                            }
+                          ],
+                          "nullable": true
+                        },
+                        "targetHours": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "items": {
+                                "type": "number"
+                              },
+                              "type": "array"
+                            }
+                          ],
+                          "nullable": true
+                        },
+                        "targetStates": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "touchesCount": {
+                          "type": "number"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "title",
+                        "format",
+                        "status",
+                        "moderationStatus",
+                        "budgetUsdCents",
+                        "remainingBudgetUsdCents"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "page": {
+                    "type": "integer"
+                  },
+                  "pageSize": {
+                    "type": "integer"
+                  },
+                  "total": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "items",
+                  "page",
+                  "pageSize",
+                  "total",
+                  "counts"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
       "Campaigns_createCampaignResponse": {
         "properties": {
           "data": {
@@ -14365,6 +15377,159 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Campaigns_addCreativeResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Campaigns"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/campaigns/page": {
+      "get": {
+        "operationId": "Campaigns_campaignPage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaigns_campaignPageResponse"
                 }
               }
             },

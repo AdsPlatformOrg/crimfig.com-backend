@@ -1,4 +1,4 @@
-import { pgTable, uuid, bigint, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, bigint, timestamp, pgEnum, index, boolean } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { adsCampaigns } from './ads_campaigns';
 
@@ -43,6 +43,8 @@ export const adsCampaignEscrows = pgTable(
     refundedUsdCents: bigint('refunded_usd_cents', { mode: 'number' }).notNull().default(0),
 
     status: adsEscrowStatusEnum('status').notNull().default('active'),
+
+    releasePending: boolean('release_pending').notNull().default(false),
 
     lastSettledAt: timestamp('last_settled_at', { withTimezone: true }),
 

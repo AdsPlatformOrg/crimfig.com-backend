@@ -37,7 +37,7 @@ export class CampaignEscrowService {
       const [campaign] = await tx.select().from(adsCampaigns)
         .where(and(eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, userId))).for('update');
       if (!campaign) throw new NotFoundException('Campaign not found');
-      if (targetStatus && (campaign.status === 'suspended' || (targetStatus === 'active' && !currentApproval(campaign)))) {
+      if (targetStatus && (['suspended','completed','cancelled'].includes(campaign.status) || campaign.submissionIntentId || (targetStatus === 'active' && !currentApproval(campaign)))) {
         throw new ConflictException('Campaign requires staff moderation before this transition');
       }
       const finish = async (result: any) => {
@@ -84,6 +84,7 @@ export class CampaignEscrowService {
         const reserved = await receipt(this.key(escrow.id, 'reserve', escrow.allocatedUsdCents));
         if (action === 'reserve' && escrow.status === 'active') {
           if (reserved.amountUsdCents !== amountUsdCents) throw new ConflictException('An active reservation cannot be resized');
+          if (escrow.releasePending) [escrow] = await tx.update(adsCampaignEscrows).set({releasePending:false,updatedAt:new Date()}).where(eq(adsCampaignEscrows.id,escrow.id)).returning();
           return finish({ escrow, operationId: reserved.idempotencyKey, transactionId: reserved.id, replayed: true });
         }
         if (escrow.status === 'released') {
@@ -99,6 +100,16 @@ export class CampaignEscrowService {
       }
       if (action === 'release' && campaign.status === 'active' && !targetStatus) {
         throw new ConflictException('Pause the campaign before releasing its reservation');
+      }
+      if(action==='release'){
+        await tx.execute(sql`UPDATE ads_opportunity_reservations SET state='EXPIRED',released_at=now(),release_reason='PAYABLE_WINDOW_CLOSED',updated_at=now() WHERE campaign_id=${campaignId} AND is_simulated=false AND state IN('HELD','ISSUED') AND expires_at<=now() AND NOT EXISTS(SELECT 1 FROM ads_interactions e WHERE e.serve_id=ads_opportunity_reservations.serve_id AND e.created_at<=ads_opportunity_reservations.event_deadline AND e.financial_eligibility='pending' AND e.verification_version=2 AND e.type=CASE WHEN ads_opportunity_reservations.pricing_model='cpc' THEN 'click' ELSE 'viewable_impression' END)`);
+        const outstanding=await tx.execute(sql`SELECT 1 FROM ads_opportunity_reservations WHERE escrow_id=${escrow!.id} AND escrow_allocated_usd_cents=${escrow!.allocatedUsdCents} AND is_simulated=false AND settled_at IS NULL AND state IN('HELD','ISSUED','CLAIMED') LIMIT 1`);
+        if(outstanding.rows.length){
+          if(!targetStatus)throw new ConflictException('Issued or claimed opportunities still retain funded exposure');
+          [escrow]=await tx.update(adsCampaignEscrows).set({releasePending:true,updatedAt:new Date()}).where(eq(adsCampaignEscrows.id,escrow!.id)).returning();
+          const reserved=await receipt(this.key(escrow!.id,'reserve',escrow!.allocatedUsdCents));
+          return finish({escrow,operationId:reserved.idempotencyKey,transactionId:reserved.id,fundsRetained:true,replayed:true});
+        }
       }
       if(action === 'reserve' && amountUsdCents! > campaign.remainingBudgetUsdCents) throw new ConflictException('Campaign cannot reserve this budget');
       // Concurrent reservations for different campaigns serialize on this wallet row.
@@ -117,13 +128,13 @@ export class CampaignEscrowService {
         const allocated = (escrow?.allocatedUsdCents || 0) + amount;
         if (!Number.isSafeInteger(allocated)) throw new ConflictException('Escrow ledger limit exceeded');
         if (escrow) {
-          [escrow] = await tx.update(adsCampaignEscrows).set({ allocatedUsdCents: allocated, status: 'active', updatedAt: now })
+          [escrow] = await tx.update(adsCampaignEscrows).set({ allocatedUsdCents: allocated, status: 'active', releasePending:false, updatedAt: now })
             .where(eq(adsCampaignEscrows.id, escrow.id)).returning();
         } else {
           [escrow] = await tx.insert(adsCampaignEscrows).values({ campaignId, userId, allocatedUsdCents: allocated, consumedUsdCents: 0, refundedUsdCents: 0, status: 'active' }).returning();
         }
       } else {
-        [escrow] = await tx.update(adsCampaignEscrows).set({ refundedUsdCents: escrow!.refundedUsdCents + amount, status: 'released', updatedAt: now })
+        [escrow] = await tx.update(adsCampaignEscrows).set({ refundedUsdCents: escrow!.refundedUsdCents + amount, status: 'released', releasePending:false, updatedAt: now })
           .where(eq(adsCampaignEscrows.id, escrow!.id)).returning();
       }
       await tx.update(billingWallets).set({ balanceUsdCents: available, lockedUsdCents: locked, version: sql`${billingWallets.version} + 1`, updatedAt: now })

@@ -189,6 +189,7 @@ export class DeferredAuditService {
     let updatedRollups = 0;
 
     for (const record of recentInteractions) {
+      if (!record.placementId) continue;
       const periodStart = new Date(record.hourBucket);
 
       // Fetch placement to identify campaign and creative

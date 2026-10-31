@@ -5,11 +5,12 @@ import { AdsEscrowService } from './ads-escrow.service';
 import { AdsSettlementService } from './ads-settlement.service';
 import { AdsBillingController } from './ads-billing.controller';
 import { DeferredAuditService } from './deferred-audit.service';
+import {OpportunityClient} from './opportunity-client';
 
 @Module({
   imports: [DatabaseModule],
   controllers: [AdsBillingController],
-  providers: [BillingEcosystemClient, AdsEscrowService, AdsSettlementService, DeferredAuditService],
-  exports: [BillingEcosystemClient, AdsEscrowService, AdsSettlementService, DeferredAuditService],
+  providers: [BillingEcosystemClient, AdsEscrowService, AdsSettlementService, DeferredAuditService,OpportunityClient],
+  exports: [BillingEcosystemClient, AdsEscrowService, AdsSettlementService, DeferredAuditService,OpportunityClient],
 })
 export class BillingModule {}

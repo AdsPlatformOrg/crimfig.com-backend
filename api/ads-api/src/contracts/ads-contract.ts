@@ -80,6 +80,7 @@ function responseModel(data: Schema, name: string, envelope = true): Function {
 
 const responses: Record<string, Record<string, Schema>> = {
   CampaignsController: {
+    campaignPage:object({items:array(campaign),page:{type:'integer'},pageSize:{type:'integer'},total:{type:'integer'},counts:{type:'object',additionalProperties:{type:'integer'}}}),
     saveCampaign: object(campaignProperties,['id','title','contentRevision']),
     beginEdit: object(campaignProperties,['id','title','contentRevision']),
     deleteCreative:object({deleted:bool(),creativeId:str(),contentRevision:{type:'integer'}}),

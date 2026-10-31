@@ -770,10 +770,19 @@ export class AuctionEngineService {
     now?: Date;
   }): OpportunityReservationRecord {
     const now = params.now || new Date();
+    const ttlMs = params.ttlMs ?? 15 * 60 * 1000;
+    if (!Number.isFinite(now.getTime()) || !Number.isSafeInteger(params.remainingBudgetUsdCents) || params.remainingBudgetUsdCents < 0 ||
+        !Number.isSafeInteger(ttlMs) || ttlMs <= 0 || ttlMs > 15 * 60 * 1000 || !params.opportunityId || !params.campaignId ||
+        !['cpm','cpc'].includes(params.pricingModel) || typeof params.reservedNanos !== 'bigint' || params.reservedNanos <= 0n) {
+      throw new RangeError('Invalid simulated exposure reservation');
+    }
     this.expireStaleSimulatedReservations(now);
 
     const existing = this.simulatedReservations.get(params.opportunityId);
     if (existing) {
+      if (existing.campaignId !== params.campaignId || existing.pricingModel !== params.pricingModel || existing.reservedNanos !== params.reservedNanos ||
+          existing.escrowId !== (params.escrowId ?? null) || existing.serveId !== (params.serveId ?? null)) throw new Error('Opportunity ID belongs to different reservation details');
+      if (existing.state === 'EXPIRED' || existing.state === 'RELEASED') throw new Error('Opportunity reservation is closed; use a new opportunity ID');
       return existing;
     }
 
@@ -794,7 +803,6 @@ export class AuctionEngineService {
       );
     }
 
-    const ttlMs = params.ttlMs ?? 15 * 60 * 1000; // 15-minute payable window
     const reservedUsdCentsCeiling = Number(
       (params.reservedNanos + NANOS_PER_USD_CENT - 1n) / NANOS_PER_USD_CENT,
     );

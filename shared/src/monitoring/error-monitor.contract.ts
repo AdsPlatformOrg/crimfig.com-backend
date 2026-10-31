@@ -372,6 +372,7 @@ export function ensureRequestId(candidate: unknown): string {
 }
 
 export interface RawErrorCaptureInput {
+  sourceEventId?:string;
   environment?: ErrorMonitorEnvironment | string;
   service: string;
   source?: ErrorSourceType;

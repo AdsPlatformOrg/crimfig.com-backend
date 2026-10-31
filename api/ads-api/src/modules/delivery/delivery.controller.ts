@@ -3,7 +3,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DeliveryService } from './delivery.service';
 import { Public } from '@crimfig/shared';
 import type { Response, Request } from 'express';
-import { IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min } from 'class-validator';
+import { IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, IsUUID, IsISO8601 } from 'class-validator';
 
 function extractClientIp(req: Request): string {
   // Express resolves trusted proxies only when explicitly configured. Never trust arbitrary XFF.
@@ -37,6 +37,8 @@ export class AuditPingDto {
 }
 
 export class TrackInteractionDto {
+  @IsOptional() @IsUUID() eventId?:string;
+  @IsOptional() @IsISO8601() occurredAt?:string;
   @IsOptional() @IsString() @MaxLength(200)
   placementToken?: string;
   @IsOptional() @IsString() @MaxLength(2048)
@@ -48,6 +50,8 @@ export class TrackInteractionDto {
 }
 
 export class ViewabilityTelemetryDto {
+  @IsOptional() @IsUUID() eventId?:string;
+  @IsOptional() @IsISO8601() occurredAt?:string;
   @IsString() @MaxLength(2048)
   impToken: string;
   @IsNumber() @Min(0) @Max(1)
@@ -74,6 +78,7 @@ export class DeliveryController {
 
     await this.deliveryService.logInteraction({
       impToken: dto.impToken,
+      eventId:dto.eventId,occurredAt:dto.occurredAt,
       type: 'viewable_impression',
       source: 'embed',
       clientIp,
@@ -135,6 +140,7 @@ export class DeliveryController {
     await this.deliveryService.logInteraction({
       placementToken: dto.placementToken,
       impToken: dto.impToken,
+      eventId:dto.eventId,occurredAt:dto.occurredAt,
       type: dto.type,
       source: dto.source,
       clientIp,
@@ -151,6 +157,7 @@ export class DeliveryController {
     @Query('domain') domain: string,
     @Query('mode') mode?: string,
     @Query('fill') fill?: string,
+    @Query('consent') consent?:string,
     @Req() req?: Request,
   ) {
     const clientIp = req ? extractClientIp(req) : undefined;
@@ -166,6 +173,7 @@ export class DeliveryController {
       req ? trustedClientGeo(req) : undefined,
       req
         ? {
+            measurementConsent:consent==='granted',
             origin: req.headers['origin'] as string | undefined,
             referer: req.headers['referer'] as string | undefined,
           }

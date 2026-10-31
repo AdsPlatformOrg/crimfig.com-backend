@@ -22,7 +22,6 @@ export class BillingStaffGrants {
   constructor(config: ConfigService) {
     const raw: unknown = JSON.parse(
       config.get<string>('BILLING_STAFF_ROLE_GRANTS') ||
-      config.get<string>('ADS_STAFF_ROLE_GRANTS') ||
       '{}'
     );
 
@@ -45,12 +44,6 @@ export class BillingStaffGrants {
       for (const r of roles) {
         if (BILLING_STAFF_ROLES.includes(r as BillingStaffRole)) {
           mappedRoles.push(r as BillingStaffRole);
-        } else if (r === 'ads_admin') {
-          mappedRoles.push('billing_admin');
-        } else if (r === 'ads_finance') {
-          mappedRoles.push('billing_manager');
-        } else if (r === 'ads_support') {
-          mappedRoles.push('billing_support');
         }
       }
 

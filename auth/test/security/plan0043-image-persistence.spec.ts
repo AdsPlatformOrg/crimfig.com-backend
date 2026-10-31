@@ -95,6 +95,32 @@ function setup(fail = false) {
   };
 }
 describe("PLAN-0043 confirmed metadata persistence", () => {
+  it('rejects unsupported encoder quality before storage or persistence',async()=>{
+    const s=setup();await expect(s.service.uploadPrepared('owner',[await fixture()],{...manifest,quality:0.95})).rejects.toThrow();
+    expect(s.saved).toHaveLength(0);expect(s.rows).toHaveLength(0);
+  });
+  it("does not publish incomplete rows and removes unbound objects if persistence fails", async () => {
+    const s = setup(true);
+    await expect(
+      s.service.uploadPrepared("owner", [await fixture()], manifest),
+    ).rejects.toThrow();
+    expect(s.rows).toHaveLength(0);
+    expect(s.removed).toHaveLength(1);
+  });
+  it("rejects an approved crop outside its declared source coordinate space", async () => {
+    const s = setup();
+    await expect(
+      s.service.uploadPrepared("owner", [await fixture()], {
+        ...manifest,
+        crop: { x: 900, y: 0, width: 600, height: 600 },
+      }),
+    ).rejects.toThrow();
+    expect(s.saved).toHaveLength(0);
+  });
+  it.each([0.97,1])('persists the validated encoder quality %s without relabeling it',async quality=>{
+    const s=setup();const result:any=await s.service.uploadPrepared('owner',[await fixture()],{...manifest,quality});
+    expect(result.preparation.quality).toBe(quality);expect(s.rows[0].preparation.quality).toBe(quality);
+  });
   it("publishes ready assets only in the transaction containing their complete verified specs", async () => {
     const s = setup(),
       file = await fixture();
@@ -126,23 +152,5 @@ describe("PLAN-0043 confirmed metadata persistence", () => {
       target: 230000,
     });
     expect(result.preparation.renditions[0].sha256).toMatch(/^[a-f0-9]{64}$/);
-  });
-  it("does not publish incomplete rows and removes unbound objects if persistence fails", async () => {
-    const s = setup(true);
-    await expect(
-      s.service.uploadPrepared("owner", [await fixture()], manifest),
-    ).rejects.toThrow();
-    expect(s.rows).toHaveLength(0);
-    expect(s.removed).toHaveLength(1);
-  });
-  it("rejects an approved crop outside its declared source coordinate space", async () => {
-    const s = setup();
-    await expect(
-      s.service.uploadPrepared("owner", [await fixture()], {
-        ...manifest,
-        crop: { x: 900, y: 0, width: 600, height: 600 },
-      }),
-    ).rejects.toThrow();
-    expect(s.saved).toHaveLength(0);
   });
 });

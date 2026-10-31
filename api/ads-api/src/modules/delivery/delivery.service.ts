@@ -1,4 +1,9 @@
+import {DeliveryDeadlineError,DELIVERY_RUNTIME,requireDeliveryTime,withinDeliveryBudget} from './delivery-budgets';
+import {EvidenceService} from './evidence.service';
+import {OpportunityClient} from '../billing/opportunity-client';
+import {adDigest,approvedAdPolicy,stableAdValue} from '@crimfig/shared';
 import { currentApproval } from '../campaigns/campaign-workflow';
+import { paidDeliveryReadiness } from './paid-delivery-policy';
 import { selectImageRendition } from '../uploads/prepared-image';
 import { resolvedSchedule, scheduleMatches } from '../campaigns/daily-schedule';
 import {
@@ -7,6 +12,7 @@ import {
   NotFoundException,
   ForbiddenException,
   Logger,
+  Optional,
 } from '@nestjs/common';
 import * as crypto from 'crypto';
 import { DATABASE_TOKEN } from '../database/database.module';
@@ -125,6 +131,8 @@ export class DeliveryService {
     private readonly tokenService: ImpressionTokenService,
     private readonly auctionEngine: AuctionEngineService,
     private readonly fraudRules: FraudRulesService,
+    @Optional() private readonly opportunities?:OpportunityClient,
+    @Optional() private readonly evidence?:EvidenceService,
   ) {}
 
   private publicBaseUrl(): string {
@@ -172,8 +180,7 @@ export class DeliveryService {
 
     return (
       placementMatches &&
-      serve.campaignId === payload.campaignId &&
-      serve.creativeId === payload.creativeId &&
+      ((serve.inventoryClass==='house'||serve.inventoryClass==='shadow') ? !serve.campaignId&&!serve.creativeId&&payload.campaignId===HOUSE_CAMPAIGN_UUID&&payload.creativeId===HOUSE_CREATIVE_UUID&&serve.billingPriceNanos===0n : serve.campaignId===payload.campaignId&&serve.creativeId===payload.creativeId) &&
       (serve.promoterId === payload.promoterId || !serve.promoterId) &&
       serve.ipHash === payload.ipHash &&
       serve.servedAt.getTime() <= payload.timestamp &&
@@ -205,107 +212,82 @@ export class DeliveryService {
     return '';
   }
 
+  if (typeof window !== 'undefined' && window.__cfLoaderV2) { window.__cfLoaderV2.scan(); return; }
+  var instances = new Map(), lazySlots=new Map();
+  function eventIdentity() { return window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : undefined; }
   function sendRenderBeacon(ad, baseOverride) {
-    var base = baseOverride || apiBase;
     if (!ad || !ad.impToken || typeof fetch !== 'function') return;
-    fetch(base + '/api/v1/delivery/interaction', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        impToken: ad.impToken,
-        type: 'render',
-        source: 'embed'
-      })
+    fetch((baseOverride || apiBase) + '/api/v1/delivery/interaction', {
+      method:'POST', credentials:'omit', keepalive:true, headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,type:'render',source:'embed'})
     }).catch(function() {});
   }
-
   function trackViewability(container, ad, minSeconds, baseOverride) {
-    var base = baseOverride || apiBase;
-    if (!ad || !ad.impToken || typeof window === 'undefined' || !('IntersectionObserver' in window)) return;
-    var sent = false, timer = null, startedAt = null;
-    var observer = new window.IntersectionObserver(function(entries) {
-      entries.forEach(function(entry) {
-        var docVisible = typeof document === 'undefined' || !document.visibilityState || document.visibilityState === 'visible';
-        if (entry.isIntersecting && entry.intersectionRatio >= 0.5 && docVisible) {
-          if (timer || sent) return;
-          startedAt = Date.now();
-          timer = setTimeout(function() {
-            timer = null;
-            if (sent) return;
-            var stillVisible = typeof document === 'undefined' || !document.visibilityState || document.visibilityState === 'visible';
-            if (!stillVisible) {
-              startedAt = null;
-              return;
-            }
-            sent = true;
-            fetch(base + '/api/v1/delivery/viewability', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                impToken: ad.impToken,
-                visibleRatio: Math.min(1, entry.intersectionRatio),
-                durationSeconds: Math.max(minSeconds, (Date.now() - startedAt) / 1000),
-                format: ad.format || undefined
-              })
-            }).catch(function() {});
-          }, minSeconds * 1000);
-        } else if (timer) {
-          clearTimeout(timer);
-          timer = null;
-          startedAt = null;
-        }
-      });
-    }, { threshold: [0.5] });
-    observer.observe(container);
+    if (!ad || !ad.impToken || !('IntersectionObserver' in window)) return;
+    var sent=false, timer=null, ratio=0, startedAt=0;
+    function clear(){if(timer)clearTimeout(timer);timer=null;startedAt=0;}
+    function visible(){
+      if(!container.isConnected || document.visibilityState!=='visible' || (document.hasFocus&&!document.hasFocus()) || ratio<0.5)return false;
+      var rect=container.getBoundingClientRect();
+      var x=Math.max(0,Math.min(window.innerWidth-1,rect.left+rect.width/2));
+      var y=Math.max(0,Math.min(window.innerHeight-1,rect.top+rect.height/2));
+      var top=document.elementFromPoint?document.elementFromPoint(x,y):null;
+      return !top || top===container || container.contains(top);
+    }
+    function update(){
+      if(sent)return;
+      if(!visible()){clear();return;}
+      if(timer)return;
+      startedAt=Date.now();
+      timer=setTimeout(function(){
+        timer=null;if(!visible()){clear();return;}sent=true;
+        fetch((baseOverride||apiBase)+'/api/v1/delivery/viewability',{
+          method:'POST',credentials:'omit',keepalive:true,headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,visibleRatio:ratio,durationSeconds:(Date.now()-startedAt)/1000,format:ad.format||undefined})
+        }).catch(function(){});cleanup();
+      },minSeconds*1000);
+    }
+    var observer=new window.IntersectionObserver(function(entries){entries.forEach(function(entry){ratio=entry.intersectionRatio;update();});},{threshold:[0,0.5,1]});
+    var poll=setInterval(update,200);
+    function cleanup(){clear();clearInterval(poll);observer.disconnect();document.removeEventListener('visibilitychange',changed);window.removeEventListener('blur',changed);window.removeEventListener('focus',update);}
+    function changed(){clear();update();}
+    observer.observe(container);document.addEventListener('visibilitychange',changed);window.addEventListener('blur',changed);window.addEventListener('focus',update);
+    container.__cfCleanup=cleanup;
   }
-
-  function initSlots() {
-    if (typeof document === 'undefined' || typeof window === 'undefined') return;
-    var currentDomain = window.location ? window.location.hostname : '';
-
-    // 1. Modern ins.crimfig-pub-slot elements (supports both data-ad-slot and data-cf-placement)
-    var pubSlots = document.querySelectorAll('ins.crimfig-pub-slot:not([data-cf-loaded="true"])');
-    pubSlots.forEach(function(slot) {
-      var token = slot.getAttribute('data-ad-slot') || slot.getAttribute('data-cf-placement');
-      var slotApiBase = slot.getAttribute('data-cf-api-base') || apiBase;
-      if (!token) return;
-      slot.setAttribute('data-cf-loaded', 'true');
-
-      var query = '?domain=' + encodeURIComponent(currentDomain);
-      fetch(slotApiBase + '/api/v1/delivery/ad/' + encodeURIComponent(token) + query, {
-        headers: { 'Accept': 'application/json' }
-      })
-      .then(function(res) { return res.json(); })
-      .then(function(data) {
-        if (!data || !data.data) return;
-        renderAdCard(slot, data.data, 'publisher_network', slotApiBase);
-      })
-      .catch(function(err) {
-        console.warn('CrimFig Ads failed to render:', err);
-      });
+  function dispose(element){
+    var lazy=lazySlots.get(element);if(lazy){lazy.disconnect();lazySlots.delete(element);}
+    var state=instances.get(element);if(state){state.closed=true;state.controller.abort();clearTimeout(state.timer);instances.delete(element);}
+    element.querySelectorAll('*').forEach(function(child){if(child.__cfCleanup)child.__cfCleanup();if(child.tagName==='VIDEO')child.pause();});
+  }
+  function requestSlot(element,token,base,consent){
+    if(instances.has(element)||lazySlots.has(element))return;
+    if('IntersectionObserver' in window && element.getBoundingClientRect().top>window.innerHeight+200){
+      var lazy=new IntersectionObserver(function(entries){if(entries.some(function(e){return e.isIntersecting;})){lazy.disconnect();lazySlots.delete(element);requestSlot(element,token,base,consent);}},{rootMargin:'200px'});
+      lazySlots.set(element,lazy);lazy.observe(element);return;
+    }
+    var state={generation:eventIdentity(),closed:false,controller:new AbortController(),timer:null};instances.set(element,state);
+    element.style.minHeight=element.style.minHeight||'90px';element.style.display='block';
+    state.timer=setTimeout(function(){state.closed=true;state.controller.abort();element.setAttribute('data-cf-state','unavailable');},15000);
+    var query='?domain='+encodeURIComponent(window.location.hostname)+'&consent='+(consent==='granted'?'granted':'unknown');
+    fetch(base+'/api/v1/delivery/ad/'+encodeURIComponent(token)+query,{credentials:'omit',signal:state.controller.signal,headers:{Accept:'application/json'}})
+      .then(function(res){if(!res.ok)throw new Error('Ad unavailable');return res.json();})
+      .then(function(data){if(state.closed||instances.get(element)!==state||!element.isConnected)return;
+        clearTimeout(state.timer);state.closed=true;
+        if(data&&data.data){renderAdCard(element,data.data,'publisher_network',base);element.setAttribute('data-cf-state','rendered');}
+        else element.setAttribute('data-cf-state','unavailable');})
+      .catch(function(){clearTimeout(state.timer);if(instances.get(element)===state){state.closed=true;element.setAttribute('data-cf-state','unavailable');}});
+  }
+  function initSlots(){
+    if(typeof document==='undefined'||typeof window==='undefined')return;
+    instances.forEach(function(state,element){if(!element.isConnected)dispose(element);});
+    lazySlots.forEach(function(observer,element){if(!element.isConnected)dispose(element);});
+    document.querySelectorAll('ins.crimfig-pub-slot').forEach(function(slot){
+      var token=slot.getAttribute('data-ad-slot')||slot.getAttribute('data-cf-placement');
+      if(token)requestSlot(slot,token,slot.getAttribute('data-cf-api-base')||apiBase,slot.getAttribute('data-cf-consent'));
     });
-
-    // 2. Legacy script[data-placement] elements
-    var legacyScripts = document.querySelectorAll('script[data-placement]:not([data-cf-processed="true"])');
-    legacyScripts.forEach(function(script) {
-      var token = script.getAttribute('data-placement');
-      if (!token) return;
-      script.setAttribute('data-cf-processed', 'true');
-      var container = document.getElementById('cf-ad-' + token);
-      if (!container) return;
-
-      var scriptApiBase = (script.src ? script.src.replace(/\\/api\\/v1\\/delivery\\/embed\\.js.*/, '') : '') || apiBase;
-      fetch(scriptApiBase + '/api/v1/delivery/ad/' + encodeURIComponent(token) + '?domain=' + encodeURIComponent(currentDomain), {
-        headers: { 'Accept': 'application/json' }
-      })
-      .then(function(res) { return res.json(); })
-      .then(function(data) {
-        if (!data || !data.data) return;
-        renderAdCard(container, data.data, 'publisher_network', scriptApiBase);
-      })
-      .catch(function(err) {
-        console.warn('CrimFig Ads failed to render legacy slot:', err);
-      });
+    document.querySelectorAll('script[data-placement]').forEach(function(script){
+      var token=script.getAttribute('data-placement');var container=document.getElementById('cf-ad-'+token);
+      if(token&&container)requestSlot(container,token,apiBase,script.getAttribute('data-cf-consent'));
     });
   }
 
@@ -374,7 +356,7 @@ export class DeliveryService {
       videoWrap.appendChild(play);
 
       if ('IntersectionObserver' in window) {
-        new window.IntersectionObserver(function(entries) {
+        var videoObserver=new window.IntersectionObserver(function(entries) {
           entries.forEach(function(entry) {
             if (entry.intersectionRatio >= 0.5) {
               if (!reduced && !started) {
@@ -386,7 +368,7 @@ export class DeliveryService {
               video.pause();
             }
           });
-        }, { threshold: [0, 0.5] }).observe(videoWrap);
+        }, { threshold: [0, 0.5] });videoObserver.observe(videoWrap);videoWrap.__cfCleanup=function(){videoObserver.disconnect();video.pause();};
       } else if (!reduced) {
         started = true;
         play.style.display = 'none';
@@ -438,10 +420,18 @@ export class DeliveryService {
     container.innerHTML = '';
     container.appendChild(card);
     sendRenderBeacon(ad, activeBase);
+    function engagement(type){fetch(activeBase+'/api/v1/delivery/interaction',{method:'POST',credentials:'omit',keepalive:true,headers:{'Content-Type':'application/json'},body:JSON.stringify({eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,type:type,source:'embed'})}).catch(function(){});}
+    card.addEventListener('pointerenter',function(){engagement('hover');},{once:true});
+    card.addEventListener('pointerdown',function(event){if(event.pointerType==='touch')engagement('touch');},{once:true});
     trackViewability(card, ad, ad.adType === 'video' ? 2 : 1, activeBase);
   }
 
   if (typeof window !== 'undefined') {
+    window.__cfLoaderV2={scan:initSlots,refresh:function(element){if(!element)return;dispose(element);element.replaceChildren();initSlots();}};
+    var scheduled=false;
+    new MutationObserver(function(){if(!scheduled){scheduled=true;setTimeout(function(){scheduled=false;initSlots();},100);}}).observe(document.documentElement,{childList:true,subtree:true});
+    window.addEventListener('pagehide',function(){instances.forEach(function(state,element){dispose(element);});});
+    window.addEventListener('pageshow',initSlots);
     window.cfPubQ = window.cfPubQ || [];
     if (!window.__cfPubLoaderBound) {
       window.__cfPubLoaderBound = true;
@@ -674,6 +664,8 @@ export class DeliveryService {
    */
   private async serveHouseOrShadowAd(params: {
     requestId: string;
+    serveBefore?:number;
+    parentOpportunityId?:string;
     slotTagId: string;
     slotId: string | null;
     websiteId: string | null;
@@ -712,13 +704,19 @@ export class DeliveryService {
     };
     const recordHash = this.auctionEngine.computeDecisionHash(decisionDraft);
 
-    let serveId: string = crypto.randomUUID();
-    let decisionId: string = crypto.randomUUID();
-
-    try {
-      const [insertedDecision] = await this.db
-        .insert(adsAuctionDecisions)
-        .values({
+    const {serveId,decisionId}=await this.db.transaction(async tx=>{
+      if(params.serveBefore)requireDeliveryTime(params.serveBefore,'default_commit');
+      await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+      if(params.slotId){
+        const [supply]=await tx.select({slot:adstationSlots,site:adsPromoterWebsites,promoter:adsPromoters}).from(adstationSlots)
+          .innerJoin(adsPromoterWebsites,eq(adsPromoterWebsites.id,adstationSlots.websiteId)).innerJoin(adsPromoters,eq(adsPromoters.id,adstationSlots.promoterId)).where(eq(adstationSlots.id,params.slotId)).for('share').limit(1);
+        if(!supply||supply.promoter.id!==params.promoterId||supply.site.id!==params.websiteId||supply.site.promoterId!==params.promoterId||!supply.slot.isActive||!['testing','installation_pending','active'].includes(supply.slot.lifecycleStatus)||!supply.site.isActive||supply.site.isSuspended||supply.site.verificationStatus!=='verified'||!supply.site.verificationExpiresAt||supply.site.verificationExpiresAt<=new Date()||!['testing','pending_approval','approved'].includes(supply.site.policyStatus)||!supply.promoter.isActive||supply.promoter.isSuspended)throw new ForbiddenException('Ad delivery is unavailable');
+        const [owner]=await tx.select({status:schema.users.status}).from(schema.users).where(eq(schema.users.id,supply.promoter.userId)).for('share').limit(1);
+        if(owner?.status!=='ACTIVE')throw new ForbiddenException('Ad delivery is unavailable');
+        const controls=await tx.execute(sql`SELECT 1 FROM ads_traffic_controls WHERE is_active AND (expires_at IS NULL OR expires_at>now()) AND ((target_scope='slot' AND target_id=${params.slotId}) OR(target_scope='website' AND target_id=${params.websiteId}) OR(target_scope='promoter' AND target_id=${params.promoterId})) LIMIT 1`);
+        if(controls.rows.length){params.inventoryClass='shadow';params.deliveryMode='shadow';params.trafficRiskStatus='suspicious';}
+      }
+      const [decision]=await tx.insert(adsAuctionDecisions).values({
           requestId: params.requestId,
           promoterId: params.promoterId,
           websiteId: params.websiteId,
@@ -743,19 +741,13 @@ export class DeliveryService {
           billingPriceNanos: 0n,
           recordHash,
         })
-        .returning({ id: adsAuctionDecisions.id });
-      if (insertedDecision?.id) decisionId = insertedDecision.id;
-    } catch {
-      // Fallback for unit-test mocks without full decision table rows
-    }
-
-    try {
-      const [insertedServe] = await this.db
-        .insert(adsServes)
-        .values({
+.returning({id:adsAuctionDecisions.id});
+      if(!decision?.id)throw new Error('House decision could not be recorded');
+      const decisionId=decision.id;
+      const [serve]=await tx.insert(adsServes).values({
           placementId: params.placementId,
-          campaignId: HOUSE_CAMPAIGN_UUID,
-          creativeId: HOUSE_CREATIVE_UUID,
+          campaignId: null,
+          creativeId: null,
           promoterId: params.promoterId,
           slotHandle: params.slotTagId,
           requestId: params.requestId,
@@ -779,11 +771,14 @@ export class DeliveryService {
           geoRegion: params.clientGeo?.region || null,
           deviceType: params.clientGeo?.device || null,
         })
-        .returning({ id: adsServes.id });
-      if (insertedServe?.id) serveId = insertedServe.id;
-    } catch {
-      // Keep generated serveId if House campaign seed row is absent in isolated unit DB
-    }
+.returning({id:adsServes.id});
+      if(!serve?.id)throw new Error('House serve could not be recorded');
+      await tx.update(adsAuctionDecisions).set({serveId:serve.id}).where(eq(adsAuctionDecisions.id,decisionId));
+      if(!this.evidence)throw new Error('Durable decision recording is unavailable');
+      await this.evidence.append(params.requestId,{version:1,stage:'issued',serveId:serve.id,inventoryClass:params.inventoryClass,deliveryMode:params.deliveryMode,slotId:params.slotId,websiteId:params.websiteId,decisionId,parentOpportunityId:params.parentOpportunityId??null,runtimeVersion:DELIVERY_RUNTIME.version,decision:stableAdValue(decisionDraft)},tx);
+      if(params.serveBefore)requireDeliveryTime(params.serveBefore,'default_commit');
+      return {serveId:serve.id,decisionId};
+    });
 
     const tokenPlacementId = params.placementId || HOUSE_PLACEMENT_UUID;
     const impToken = this.tokenService.generateToken({
@@ -839,10 +834,13 @@ export class DeliveryService {
       city?: string;
       device?: string;
     },
-    requestHeaders?: { origin?: string; referer?: string },
+    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean },
   ) {
     this.tokenService.assertConfigured();
     const requestId = crypto.randomUUID();
+    const serverDeadline=Date.now()+DELIVERY_RUNTIME.serverMs;
+    let canonicalSlot:any=null,canonicalWebsite:any=null,canonicalPromoter:any=null;
+    try {
     const isSlotCatalog = token.startsWith('cf_slot_');
 
     // Reject unowned shared catalog slot IDs (`cf_slot_0001`..`cf_slot_0010`) on public delivery (`G01`)
@@ -853,9 +851,7 @@ export class DeliveryService {
     }
 
     // 1. Check if token is a canonical AdStation slot (`adstation_slots.slotTagId`)
-    let canonicalSlot: any = null;
-    let canonicalWebsite: any = null;
-    let canonicalPromoter: any = null;
+
 
     if (token.startsWith('cf-slot-')) {
       const [slotRow] = await this.db
@@ -890,7 +886,7 @@ export class DeliveryService {
         canonicalPromoter.isSuspended ||
         !canonicalWebsite.isActive ||
         canonicalWebsite.isSuspended ||
-        canonicalWebsite.verificationStatus !== 'verified' ||
+        canonicalWebsite.verificationStatus !== 'verified' || !canonicalWebsite.verificationExpiresAt || canonicalWebsite.verificationExpiresAt<=new Date() ||
         canonicalWebsite.policyStatus === 'unverified' ||
         canonicalWebsite.policyStatus === 'rejected' ||
         canonicalWebsite.policyStatus === 'suspended'
@@ -932,6 +928,9 @@ export class DeliveryService {
         .set({ embedPingLastAt: new Date() })
         .where(eq(adsPromoterWebsites.id, canonicalWebsite.id));
 
+      const controls=await this.db.execute(sql`SELECT action FROM ads_traffic_controls WHERE is_active AND (expires_at IS NULL OR expires_at>now()) AND
+        ((target_scope='slot' AND target_id=${canonicalSlot.id}) OR(target_scope='website' AND target_id=${canonicalWebsite.id}) OR(target_scope='promoter' AND target_id=${canonicalPromoter.id}))`);
+      const restricted=controls.rows.length>0;
       // Evaluate supply-time traffic risk for shadow-serving protection
       const riskAssessment = this.fraudRules.assessSupplyRequestRisk({
         slotTagId: canonicalSlot.slotTagId,
@@ -947,19 +946,17 @@ export class DeliveryService {
 
       // If website or slot is in TESTING policy state, or if paid serving is not yet enabled,
       // or if traffic is flagged as suspicious/high_risk, serve a zero-charge CrimFig House/Shadow Ad.
-      const paidServingEnabled =
-        (process.env.ADS_PAID_SERVING_ENABLED || 'true').toLowerCase() ===
-        'true';
+      const paidServingEnabled = paidDeliveryReadiness().ready;
       const isTestingMode =
         canonicalWebsite.policyStatus === 'testing' ||
         canonicalWebsite.policyStatus === 'pending_approval' ||
         canonicalSlot.lifecycleStatus === 'testing' ||
         canonicalSlot.lifecycleStatus === 'installation_pending' ||
-        !paidServingEnabled;
-      const isShadowRisk = riskAssessment.trafficRiskStatus !== 'normal';
+        !paidServingEnabled || restricted || requestHeaders?.measurementConsent!==true;
+      const isShadowRisk = restricted || riskAssessment.trafficRiskStatus !== 'normal';
 
       if (isTestingMode || isShadowRisk) {
-        return this.serveHouseOrShadowAd({
+        return this.serveHouseOrShadowAd({serveBefore:serverDeadline,
           requestId,
           slotTagId: canonicalSlot.slotTagId,
           slotId: canonicalSlot.id,
@@ -981,6 +978,10 @@ export class DeliveryService {
         });
       }
     }
+
+    // Legacy routes must obey the same release gate; a token cannot bypass the
+    // missing distributed reservation authority by selecting a different path.
+    if (!paidDeliveryReadiness().ready) throw new ForbiddenException('Paid ad delivery is not available. Verified canonical slots can serve CrimFig default ads.');
 
     // 2. Legacy / Share-Link Placement lookup (`ads_placements.placementToken`)
     let placement: any = null;
@@ -1102,8 +1103,9 @@ export class DeliveryService {
       }
     }
 
-    // 3. Dynamic Auction Evaluation across all eligible active campaigns (no .limit(20) truncation — G02)
-    const activeCandidates = await this.db
+    // Complete bounded candidate snapshot: exceeding capacity yields no-fill, never an auction over an arbitrary prefix.
+    const candidateDeadline=Math.min(serverDeadline,Date.now()+DELIVERY_RUNTIME.candidateMs);
+    const activeCandidates = await withinDeliveryBudget(this.db
       .select({
         campaignId: adsCampaigns.id,
         creativeId: adsCreatives.id,
@@ -1168,7 +1170,8 @@ export class DeliveryService {
           eq(adsCreatives.reviewStatus, 'approved'),
           sql`${adsCampaigns.remainingBudgetUsdCents} > 0`,
         ),
-      );
+      ).limit(2001),candidateDeadline,'candidate_fetch');
+    if(activeCandidates.length>2000)throw new Error('CANDIDATE_CAPACITY_EXCEEDED');
 
     const formattedCandidates = activeCandidates.map((c) => ({
       ...c,
@@ -1211,13 +1214,13 @@ export class DeliveryService {
       | 'tablet'
       | undefined;
 
-    const eligibleCandidates = await this.filterEligibleCandidates(
+    const eligibleCandidates = await withinDeliveryBudget(this.filterEligibleCandidates(
       formattedCandidates,
       {
         ...clientGeo,
         device: resolvedDevice,
       },
-    );
+    ),candidateDeadline,'candidate_targeting');
 
     const requestedLayout = canonicalSlot
       ? canonicalSlot.format || 'banner'
@@ -1253,11 +1256,15 @@ export class DeliveryService {
         ? this.parseStringArray(canonicalPromoter.allowedCategories)
         : undefined;
 
+    const auctionDeadline=Math.min(serverDeadline,Date.now()+DELIVERY_RUNTIME.auctionMs);
+    requireDeliveryTime(auctionDeadline,'auction');
     const auctionResult = this.auctionEngine.resolveAuction(
       compatibleCandidates,
       {
         slotHandle: requestedHandle,
         requestId,
+        policyVersion:approvedAdPolicy()?.version,
+        bidderGroupingMode:approvedAdPolicy()?.bidderGrouping,
         promoterAllowedCategories:
           allowedCategories && allowedCategories.length > 0
             ? allowedCategories
@@ -1270,9 +1277,10 @@ export class DeliveryService {
       },
     );
 
+    requireDeliveryTime(auctionDeadline,'auction');
     // If canonical slot has no eligible paid campaign winner, fall back cleanly to zero-charge CrimFig House Ad (`G04`)
     if (!auctionResult && canonicalSlot) {
-      return this.serveHouseOrShadowAd({
+      return this.serveHouseOrShadowAd({serveBefore:serverDeadline,
         requestId,
         slotTagId: canonicalSlot.slotTagId,
         slotId: canonicalSlot.id,
@@ -1356,128 +1364,22 @@ export class DeliveryService {
     const placementId = placement ? placement.id : HOUSE_PLACEMENT_UUID;
     const ipHash = this.tokenService.hashIp(clientIp);
 
-    // Reserve per-opportunity exposure in auctionEngine so concurrent serves cannot over-commit remaining budget
-    if (auctionResult && billingPriceNanos > 0n) {
-      this.auctionEngine.reserveSimulatedOpportunityExposure({
-        opportunityId: requestId,
-        campaignId: finalCampaignId,
-        remainingBudgetUsdCents: auctionResult.winner.remainingBudgetUsdCents,
-        pricingModel: auctionResult.winner.pricingModel,
-        reservedNanos: billingPriceNanos,
-      });
+    if(!canonicalSlot || !canonicalWebsite || !this.opportunities || !auctionResult)throw new ForbiddenException('Paid delivery requires canonical funded inventory');
+    let serve:{id:string};
+    try {
+      const viewer=this.fraudRules.computeKeyedIpHash(clientIp).keyedIpHash;
+      requireDeliveryTime(serverDeadline,'reserve');
+      const receipt=await this.opportunities.reserve({serveBefore:new Date(serverDeadline).toISOString(),opportunityId:requestId,campaignId:finalCampaignId,creativeId:finalCreativeId,
+        submissionId:(winningCreative as any).currentSubmissionId,contentRevision:(winningCreative as any).contentRevision,
+        promoterId,websiteId:canonicalWebsite.id,slotId:canonicalSlot.id,policyVersion:approvedAdPolicy()!.version,
+        priceNanos:billingPriceNanos.toString(),clearingPriceMicros,visitorKey:viewer,ipHash,selectedImageUrl:winningCreative.imageUrl??undefined,
+        decision:stableAdValue(auctionResult.decisionSnapshot)});
+      const issued=await this.opportunities.issue(receipt);serve={id:issued.serveId};
+    } catch(error) {
+      // Unknown remote outcomes retain their existing opportunity for reconciliation. Never locally release an issued token.
+      return this.serveHouseOrShadowAd({serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
+        promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',clientIp,userAgent,referrerDomain:canonicalWebsite.domain,clientGeo});
     }
-
-    // Record immutable ads_serves + ads_auction_decisions + ads_opportunity_reservations in transaction
-    const [serve] = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`set local lock_timeout = '5s'`);
-      await tx.execute(sql`set local statement_timeout = '8s'`);
-      const [current] = await tx
-        .select()
-        .from(adsCampaigns)
-        .where(eq(adsCampaigns.id, finalCampaignId))
-        .for('update')
-        .limit(1);
-      if (
-        !current ||
-        current.status !== 'active' ||
-        !currentApproval(current) ||
-        current.contentRevision !== (winningCreative as any).contentRevision ||
-        current.currentSubmissionId !==
-          (winningCreative as any).currentSubmissionId
-      ) {
-        throw new NotFoundException(
-          'The selected submission changed. Request another ad.',
-        );
-      }
-      const [creative] = await tx
-        .select()
-        .from(adsCreatives)
-        .where(
-          and(
-            eq(adsCreatives.id, finalCreativeId),
-            eq(adsCreatives.campaignId, finalCampaignId),
-            eq(adsCreatives.status, 'active'),
-            eq(adsCreatives.reviewStatus, 'approved'),
-          ),
-        )
-        .limit(1);
-      if (!creative) {
-        throw new NotFoundException('The selected creative is unavailable.');
-      }
-
-      let decisionId: string | null = null;
-      if (auctionResult?.decisionSnapshot) {
-        try {
-          const [dec] = await tx
-            .insert(adsAuctionDecisions)
-            .values({
-              requestId,
-              promoterId,
-              websiteId: canonicalWebsite?.id || placement?.websiteId || null,
-              slotId: canonicalSlot?.id || null,
-              slotTagId: canonicalSlot ? canonicalSlot.slotTagId : 'cf_slot_auto',
-              inventoryClass: 'paid',
-              deliveryMode: 'normal',
-              trafficRiskStatus: 'normal',
-              financialEligibility: 'pending',
-              policyVersion: auctionResult.decisionSnapshot.policyVersion,
-              bidderGroupingMode:
-                auctionResult.decisionSnapshot.bidderGroupingMode,
-              tieSeed: auctionResult.decisionSnapshot.tieSeed,
-              candidateCount: auctionResult.decisionSnapshot.candidateCount,
-              eligibleGroupCount:
-                auctionResult.decisionSnapshot.eligibleGroupCount,
-              evaluatedCandidates:
-                auctionResult.decisionSnapshot.evaluatedCandidates,
-              excludedCandidates:
-                auctionResult.decisionSnapshot.excludedCandidates,
-              winnerCampaignId: finalCampaignId,
-              winnerCreativeId: finalCreativeId,
-              runnerUpCampaignId:
-                auctionResult.decisionSnapshot.runnerUpCampaignId,
-              pricingModel: auctionResult.winner.pricingModel,
-              clearingPriceMicros,
-              billingPriceNanos,
-              recordHash: auctionResult.decisionSnapshot.recordHash,
-            })
-            .returning({ id: adsAuctionDecisions.id });
-          if (dec?.id) decisionId = dec.id;
-        } catch {
-          // Non-fatal in minimal test doubles
-        }
-      }
-
-      return tx
-        .insert(adsServes)
-        .values({
-          placementId: placement ? placement.id : null,
-          campaignId: finalCampaignId,
-          creativeId: finalCreativeId,
-          promoterId,
-          slotHandle: canonicalSlot ? canonicalSlot.slotTagId : 'cf_slot_auto',
-          requestId,
-          websiteId: canonicalWebsite?.id || placement?.websiteId || null,
-          slotId: canonicalSlot?.id || null,
-          inventoryClass: 'paid',
-          deliveryMode: 'normal',
-          trafficRiskStatus: 'normal',
-          financialEligibility: 'pending',
-          auctionDecisionId: decisionId,
-          policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
-          clearingPriceMicros,
-          pricingVersion: 2,
-          billingPriceNanos,
-          pricingModel: auctionResult
-            ? auctionResult.winner.pricingModel
-            : 'cpm',
-          ipHash,
-          userAgentHash: userAgent ? this.tokenService.hashIp(userAgent) : null,
-          geoCountry: clientGeo?.country || null,
-          geoRegion: clientGeo?.region || null,
-          deviceType: resolvedDevice || null,
-        })
-        .returning();
-    });
 
     // Generate cryptographic signed impression token binding this serve
     const impToken = this.tokenService.generateToken({
@@ -1543,6 +1445,14 @@ export class DeliveryService {
       impToken,
       clickUrl,
     };
+    } catch(error) {
+      if(this.evidence)await this.evidence.append(requestId,{version:1,stage:'no_fill',reasonCode:'REQUEST_NOT_SERVED',errorCategory:error instanceof Error?error.name:'UNKNOWN',runtimeVersion:DELIVERY_RUNTIME.version,elapsedMs:DELIVERY_RUNTIME.serverMs-(serverDeadline-Date.now()),slotHandleHash:adDigest(token),serverReceivedAt:new Date()});
+      if(error instanceof DeliveryDeadlineError&&['candidate_fetch','candidate_targeting','auction'].includes(error.stage)&&canonicalSlot&&Date.now()<serverDeadline){
+        return this.serveHouseOrShadowAd({serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
+          promoterId:canonicalPromoter.id,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',clientIp,userAgent,referrerDomain,clientGeo});
+      }
+      throw error;
+    }
   }
 
   /**
@@ -1572,6 +1482,8 @@ export class DeliveryService {
       tokenPayload.campaignId === HOUSE_CAMPAIGN_UUID &&
       tokenPayload.creativeId === HOUSE_CREATIVE_UUID
     ) {
+      if(!(await this.boundServe(tokenPayload)))throw new NotFoundException('House click attribution is unavailable');
+      await this.logInteraction({impToken:token,type:'click',source:'embed',clientIp,userAgent,referrer});
       return CRIMFIG_HOUSE_CREATIVE.destinationUrl;
     }
 
@@ -1590,15 +1502,9 @@ export class DeliveryService {
       creativeId = tokenPayload.creativeId;
       promoterId = tokenPayload.promoterId;
 
-      const [creative] = await this.db
-        .select({ destinationUrl: adsCreatives.destinationUrl })
-        .from(adsCreatives)
-        .where(eq(adsCreatives.id, creativeId))
-        .limit(1);
-
-      if (creative) {
-        destinationUrl = creative.destinationUrl;
-      }
+      const [issued]=await this.db.select().from(adsServes).where(eq(adsServes.id,serveId!)).limit(1);
+      const render=issued?.contentSnapshot as any;
+      if(render?.destinationUrl)destinationUrl=render.destinationUrl;
     } else {
       // 2. Fallback to legacy placementToken lookup
       const [placement] = await this.db
@@ -1650,9 +1556,7 @@ export class DeliveryService {
 
     if (
       !campaign ||
-      campaign.status !== 'active' ||
-      !currentApproval(campaign) ||
-      campaign.remainingBudget <= 0
+      (tokenPayload?campaign.status==='suspended':campaign.status!=='active'||!currentApproval(campaign)||campaign.remainingBudget<=0)
     ) {
       throw new NotFoundException('Campaign inactive or budget exhausted');
     }
@@ -1670,27 +1574,8 @@ export class DeliveryService {
     const { keyedIpHash, keyId } = this.fraudRules.computeKeyedIpHash(clientIp);
 
     // Record click interaction telemetry with validation & GIVT/SIVT status for batch settlement
-    const [interaction] = await this.db
-      .insert(adsInteractions)
-      .values({
-        placementId,
-        promoterId: promoterId || placementId,
-        serveId,
-        type: 'click',
-        source: 'share_link',
-        actorIp: clientIp,
-        userAgent,
-        referrer,
-        verificationVersion: tokenPayload && validation.isValid ? 2 : 0,
-        isValid: validation.isValid,
-        invalidReason: validation.reasonCode || null,
-        assessmentStatus: validation.assessmentStatus,
-        ivtCategory: validation.ivtCategory,
-        financialEligibility: validation.financialEligibility,
-        keyedIpHash,
-        keyId,
-      })
-      .returning();
+    if(!tokenPayload)throw new NotFoundException('Signed click attribution is required');
+    const interaction=tokenPayload?await this.logInteraction({impToken:token,type:'click',source:'share_link',clientIp,userAgent,referrer}):undefined;
 
     const clickId = `clk_${Date.now().toString(36)}_${crypto.randomBytes(8).toString('hex')}`;
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -1699,11 +1584,11 @@ export class DeliveryService {
       await this.db.insert(schema.adsClicks).values({
         clickId,
         serveId,
-        interactionId: interaction.id,
+        interactionId: interaction?.id??null,
         campaignId,
         promoterId: promoterId || null,
-        actorIp: clientIp || null,
-        userAgent: userAgent || null,
+        actorIp: null,
+        userAgent: userAgent?.slice(0,512) || null,
         expiresAt,
       });
     } catch (clickErr: any) {
@@ -1793,6 +1678,7 @@ export class DeliveryService {
     referrer?: string;
     visibleRatio?: number;
     durationSeconds?: number;
+    eventId?:string;occurredAt?:string;
   }) {
     let placementId: string | undefined;
     let promoterId: string | undefined;
@@ -1814,7 +1700,7 @@ export class DeliveryService {
         payload.campaignId === HOUSE_CAMPAIGN_UUID &&
         payload.creativeId === HOUSE_CREATIVE_UUID;
 
-      if (!isHouseOrShadowServe && !(await this.boundServe(payload))) return;
+      if (!(await this.boundServe(payload))) return;
 
       signedPayload = payload;
       placementId = payload.placementId;
@@ -1886,14 +1772,9 @@ export class DeliveryService {
     ) {
       let minDuration = 1;
       if (params.type === 'viewable_impression' && signedPayload && !isHouseOrShadowServe) {
-        const [creative] = await this.db
-          .select({
-            adType: adsCreatives.adType,
-            format: adsCreatives.adFormat,
-          })
-          .from(adsCreatives)
-          .where(eq(adsCreatives.id, signedPayload.creativeId))
-          .limit(1);
+        const [issued]=await this.db.select({snapshot:adsServes.contentSnapshot}).from(adsServes).where(eq(adsServes.id,signedPayload.servedId)).limit(1);
+        const snapshot=issued?.snapshot as any;
+        const creative=snapshot?{adType:snapshot.adType,format:snapshot.adFormat}:null;
         if (!creative) {
           isValid = false;
           invalidReason = 'VIEWABILITY_THRESHOLD';
@@ -1963,24 +1844,35 @@ export class DeliveryService {
       return;
     }
 
-    try {
-      await this.db.insert(adsInteractions).values({
-        placementId,
+    if(!this.evidence)throw new Error('Durable evidence collection is unavailable');
+    const rawId=crypto.randomUUID(),clientEventId=params.eventId??crypto.randomUUID();
+    let safeReferrer:string|null=null;try{if(params.referrer){const url=new URL(params.referrer);safeReferrer=url.origin;}}catch{safeReferrer=null;}
+    const recorded=await this.db.transaction(async tx=>{
+      await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-event:${clientEventId}`},0))`);
+      if(signedPayload&&!isHouseOrShadowServe){
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ads-escrow:${signedPayload.campaignId}`},0))`);
+      }
+      const [existing]=await tx.select().from(adsInteractions).where(eq(adsInteractions.eventId,clientEventId)).limit(1);
+      if(existing){if(existing.serveId!==serveId||existing.type!==params.type)throw new ForbiddenException('Event identity changed');return existing;}
+      const [event]=await tx.insert(adsInteractions).values({
+        id:rawId,eventId:clientEventId,createdAt:new Date(),
+        placementId:placementId===HOUSE_PLACEMENT_UUID?null:placementId,
         promoterId: promoterId || placementId,
         serveId,
         websiteId,
         slotId,
         type: params.type,
         source: params.source || 'embed',
-        actorIp: params.clientIp,
-        userAgent: params.userAgent,
-        referrer: params.referrer,
+        actorIp: null,
+        userAgent: params.userAgent?.slice(0,512),
+        referrer: safeReferrer,
         visibleRatio: visibleRatioStr,
         durationMs,
         measurable: true,
         assessmentStatus,
         ivtCategory,
-        financialEligibility,
+        financialEligibility:isHouseOrShadowServe||!signedPayload?'invalid':financialEligibility==='invalid'?'invalid':'pending',
         keyedIpHash,
         keyId,
         verificationVersion:
@@ -1989,9 +1881,18 @@ export class DeliveryService {
         invalidReason: isHouseOrShadowServe
           ? invalidReason || 'HOUSE_OR_SHADOW_NON_BILLABLE'
           : invalidReason,
-      });
-    } catch (err: any) {
-      this.logger.warn(`Skipped interaction insert: ${err?.message}`);
+      }).returning();
+      await this.evidence!.append(event.id,{version:1,serveId,eventId:clientEventId,type:event.type,serverReceivedAt:event.createdAt,
+        clientOccurredAt:params.occurredAt??null,clientTimeTrust:'untrusted',visibleRatio:event.visibleRatio,durationMs:event.durationMs,
+        measurable:event.measurable,verificationVersion:event.verificationVersion,assessmentStatus:event.assessmentStatus,financialEligibility:event.financialEligibility,
+        keyedIpHash:event.keyedIpHash,keyId:event.keyId,websiteId,slotId,referrer:safeReferrer},tx);
+      return event;
+    });
+    if(recorded.serveId&&recorded.verificationVersion===2&&recorded.financialEligibility==='pending'&&['click','viewable_impression'].includes(recorded.type)){
+      const [serve]=await this.db.select().from(adsServes).where(eq(adsServes.id,recorded.serveId)).limit(1);
+      if(serve?.opportunityReservationId&&this.opportunities){try{await this.opportunities.claim(serve.opportunityReservationId,recorded.id);}catch{/* Durable event remains available to the reconciler; no payment is inferred. */}}
     }
+    return recorded;
+
   }
 }

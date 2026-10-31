@@ -387,6 +387,14 @@ export class CampaignsController {
     };
   }
 
+  @Get('page')
+  @ApiQuery({name:'status',required:false})
+  @ApiQuery({name:'page',required:false,type:Number})
+  @ApiQuery({name:'pageSize',required:false,type:Number})
+  async campaignPage(@Req() req:any,@Query('status') status?:string,@Query('page') page?:string,@Query('pageSize') pageSize?:string) {
+    return {status:'success',data:await this.campaignsService.campaignPage(req.user.sub,status??'all',Number(page??1),Number(pageSize??25))};
+  }
+
   @Get(':id/mutations/:requestId')
   async mutationResult(@Param('id',new ParseUUIDPipe()) id:string,@Param('requestId',new ParseUUIDPipe()) requestId:string,@Req() req:any) {
     return {status:'success',data:await this.campaignsService.mutationResult(id,req.user.sub,requestId)};

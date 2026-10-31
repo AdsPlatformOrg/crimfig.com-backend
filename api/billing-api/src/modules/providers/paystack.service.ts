@@ -1,3 +1,4 @@
+import { PaystackBrokerClient } from './paystack-broker.client';
 import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import * as crypto from 'crypto';
 
@@ -63,11 +64,13 @@ export interface PaystackTransferResponse {
 @Injectable()
 export class PaystackService {
   private readonly logger = new Logger(PaystackService.name);
-  private readonly secretKey = process.env.PAYSTACK_SECRET_KEY || '';
+  private readonly secretKey = 'isolated-provider-gateway';
+  private readonly broker = new PaystackBrokerClient();
+  private readonly request = (url: string, init?: RequestInit) => this.broker.request(url, init);
   private readonly baseUrl = 'https://api.paystack.co';
 
   paymentDomain(): 'test' | 'live' {
-    const mode = this.secretKey.startsWith('sk_live_') ? 'live' : this.secretKey.startsWith('sk_test_') ? 'test' : null;
+    const mode = process.env.PAYSTACK_MODE === 'live' ? 'live' : process.env.PAYSTACK_MODE === 'test' ? 'test' : null;
     const staging = process.env.RAILWAY_ENVIRONMENT_NAME === 'staging';
     const expected = process.env.PAYSTACK_MODE || (staging ? 'test' : process.env.NODE_ENV === 'production' ? 'live' : mode);
     if (!mode || mode !== expected || (staging && mode !== 'test') || (process.env.NODE_ENV === 'production' && !staging && mode !== 'live')) {
@@ -79,14 +82,9 @@ export class PaystackService {
   /**
    * Verify HMAC-SHA512 webhook signature from Paystack
    */
-  verifyWebhookSignature(signature: string, rawBody: string | Buffer): boolean {
-    if (!this.secretKey || typeof signature !== 'string' || !/^[0-9a-f]{128}$/i.test(signature)) return false;
-    const bodyStr = typeof rawBody === 'string' ? rawBody : rawBody.toString('utf8');
-    const hash = crypto
-      .createHmac('sha512', this.secretKey)
-      .update(bodyStr)
-      .digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(signature, 'hex'));
+  async verifyWebhookSignature(signature: string, rawBody: string | Buffer): Promise<boolean> {
+    if (typeof signature !== 'string' || !/^[0-9a-f]{128}$/i.test(signature)) return false;
+    return this.broker.verifyWebhook(rawBody, signature);
   }
 
   /**
@@ -102,7 +100,7 @@ export class PaystackService {
   }): Promise<PaystackInitResponse> {
     this.paymentDomain();
     try {
-      const res = await fetch(`${this.baseUrl}/transaction/initialize`, {
+      const res = await this.request(`${this.baseUrl}/transaction/initialize`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.secretKey}`,
@@ -138,7 +136,7 @@ export class PaystackService {
   async verifyTransaction(reference: string): Promise<PaystackVerifyResponse['data']> {
     this.paymentDomain();
     try {
-      const res = await fetch(`${this.baseUrl}/transaction/verify/${encodeURIComponent(reference)}`, {
+      const res = await this.request(`${this.baseUrl}/transaction/verify/${encodeURIComponent(reference)}`, {
         method: 'GET', redirect: 'error', signal: AbortSignal.timeout(10000),
         headers: {
           Authorization: `Bearer ${this.secretKey}`,
@@ -169,7 +167,7 @@ export class PaystackService {
     this.paymentDomain();
     if (!/^[a-zA-Z0-9.=-]{1,200}$/.test(params.reference) || !Number.isSafeInteger(params.amountKobo) || params.amountKobo <= 0) throw new ServiceUnavailableException('Invalid durable charge reference or amount');
     try {
-      const res = await fetch(`${this.baseUrl}/transaction/charge_authorization`, {
+      const res = await this.request(`${this.baseUrl}/transaction/charge_authorization`, {
         method: 'POST',
         redirect: 'error',
         signal: AbortSignal.timeout(10000),
@@ -208,7 +206,7 @@ export class PaystackService {
       throw new Error('Authorization code is required');
     }
     try {
-      const res = await fetch(`${this.baseUrl}/customer/deactivate_authorization`, {
+      const res = await this.request(`${this.baseUrl}/customer/deactivate_authorization`, {
         method: 'POST',
         redirect: 'error',
         signal: AbortSignal.timeout(10000),
@@ -234,7 +232,7 @@ export class PaystackService {
   async listBanks(): Promise<Array<{ name: string; code: string; slug: string; id: number }>> {
     this.paymentDomain();
     try {
-      const res = await fetch(`${this.baseUrl}/bank?country=nigeria&perPage=100`, {
+      const res = await this.request(`${this.baseUrl}/bank?country=nigeria&perPage=100`, {
         headers: { Authorization: `Bearer ${this.secretKey}` },
         redirect: 'error', signal: AbortSignal.timeout(10000),
       });
@@ -258,7 +256,7 @@ export class PaystackService {
     this.paymentDomain();
     if (!/^\d{10}$/.test(accountNumber) || !/^\d{3,10}$/.test(bankCode)) throw new ServiceUnavailableException('Invalid bank account details');
     try {
-      const res = await fetch(
+      const res = await this.request(
         `${this.baseUrl}/bank/resolve?account_number=${accountNumber}&bank_code=${bankCode}`,
         {
           headers: { Authorization: `Bearer ${this.secretKey}` },
@@ -288,7 +286,7 @@ export class PaystackService {
     this.paymentDomain();
     if (!/^\d{10}$/.test(params.accountNumber) || !/^\d{3,10}$/.test(params.bankCode) || !params.name.trim() || params.name.length > 255) throw new ServiceUnavailableException('Invalid transfer recipient');
     try {
-      const res = await fetch(`${this.baseUrl}/transferrecipient`, {
+      const res = await this.request(`${this.baseUrl}/transferrecipient`, {
         method: 'POST',
         redirect: 'error', signal: AbortSignal.timeout(10000),
         headers: {
@@ -324,29 +322,14 @@ export class PaystackService {
     reason?: string;
     reference: string;
   }): Promise<PaystackTransferResponse> {
-    this.paymentDomain();
-    if (!Number.isSafeInteger(params.amountKobo) || params.amountKobo <= 0 ||
-        !/^[a-z0-9_-]{16,50}$/.test(params.reference) || !/^RCP_[A-Za-z0-9]+$/.test(params.recipientCode)) {
-      throw new Error('Invalid transfer binding');
-    }
-    const res = await fetch(`${this.baseUrl}/transfer`, {
-      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(10000),
-      headers: { Authorization: `Bearer ${this.secretKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ source: 'balance', currency: 'NGN', amount: params.amountKobo,
-        recipient: params.recipientCode, reason: params.reason || 'CrimFig Withdrawal', reference: params.reference }),
-    });
-    const json: any = await res.json();
-    if (!res.ok || json?.status !== true || !json.data || json.data.reference !== params.reference) {
-      throw new Error('Transfer initialization could not be confirmed');
-    }
-    return json.data;
+    throw new ServiceUnavailableException('Direct Billing payouts are disabled. Use the independent withdrawal execution authority.');
   }
-
+  
   /** Read-only recovery. Not-found/timeout does not prove a transfer was never dispatched. */
   async verifyTransfer(reference: string): Promise<unknown> {
     this.paymentDomain();
     if (!/^[a-z0-9_-]{16,50}$/.test(reference)) throw new Error('Invalid transfer reference');
-    const res = await fetch(`${this.baseUrl}/transfer/verify/${encodeURIComponent(reference)}`, {
+    const res = await this.request(`${this.baseUrl}/transfer/verify/${encodeURIComponent(reference)}`, {
       redirect: 'error', signal: AbortSignal.timeout(10000), headers: { Authorization: `Bearer ${this.secretKey}` },
     });
     const json: any = await res.json();

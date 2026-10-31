@@ -46,9 +46,9 @@ export class ModerationService {
     return this.db.transaction(async(tx)=>{
       const c=await this.workflow.lock(tx,campaignId);
       if(c.advertiserId===params.reviewerId) throw new BadRequestException('Owners cannot review their own campaigns.');
-      const [prior]=await tx.select().from(adsCampaignMutations).where(and(eq(adsCampaignMutations.campaignId,campaignId),eq(adsCampaignMutations.actorId,params.reviewerId),eq(adsCampaignMutations.requestId,params.requestId))).limit(1);
-      if(prior) {if(prior.fingerprint!==hash) throw new ConflictException('This decision request changed.');return prior.result;}
       if(c.currentSubmissionId!==params.submissionId || c.contentRevision!==params.expectedRevision || c.submissionIntentId || ['suspended','trash','cancelled','completed','draft'].includes(c.status)) throw new ConflictException('This submission changed. Reload before reviewing.');
+      const [prior]=await tx.select().from(adsCampaignMutations).where(and(eq(adsCampaignMutations.campaignId,campaignId),eq(adsCampaignMutations.actorId,params.reviewerId),eq(adsCampaignMutations.requestId,params.requestId))).limit(1);
+      if(prior) {if(prior.purgedAt)throw new ConflictException('This decision receipt has been archived. Reload the campaign.');if(prior.fingerprint!==hash) throw new ConflictException('This decision request changed.');return prior.result;}
       const [submission]=await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,params.submissionId)).limit(1);
       if(submission?.state!=='submitted'||submission.contentRevision!==c.contentRevision) throw new ConflictException('This review is no longer current.');
       const expected=stage==='manager'?'pending_manager_approval':'pending_primary_review';

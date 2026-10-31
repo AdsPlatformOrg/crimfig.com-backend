@@ -1,5 +1,7 @@
 import { WithdrawalLedgerService } from './withdrawal-ledger.service';
 import { WithdrawalDispatchService } from './withdrawal-dispatch.service';
+import { WithdrawalAuthorityClient } from './withdrawal-authority.client';
+import { FinancialProof } from '@crimfig/shared';
 import { Injectable, Inject, NotFoundException, BadRequestException, Logger, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -22,7 +24,23 @@ export class WithdrawalsService {
     private readonly paystackService: PaystackService,
     @Optional() private readonly ledger?: WithdrawalLedgerService,
     @Optional() private readonly dispatch?: WithdrawalDispatchService,
+    @Optional() private readonly authority?: WithdrawalAuthorityClient,
   ) {}
+  async availability() { return this.authority ? this.authority.availability() : { available: false, reason: 'security_unavailable' }; }
+  async prepareAuthorization(params: { userId: string; requestId: string; quoteId: string; bankAccountId: string; amountUsd: number }) {
+    this.requireAuthority();
+    if (!this.authority) throw new ServiceUnavailableException('Independent withdrawal authorization is unavailable');
+    const reference = this.ledger!.referenceForRequest(params.userId, params.requestId);
+    const cents = Math.round(params.amountUsd * 100);
+    if (!Number.isSafeInteger(cents) || cents < 500 || Math.abs(params.amountUsd * 100 - cents) > 0.0000001) throw new BadRequestException('Invalid withdrawal amount');
+    const result = await this.authority.prepare({ ...params, amountUsdCents: cents });
+    if (result.reference !== reference) throw new ServiceUnavailableException('Withdrawal intent identity mismatch');
+    return result;
+  }
+  async reviewAuthorization(userId: string, reference: string, proof: FinancialProof) {
+    if (!this.authority) throw new ServiceUnavailableException('Independent withdrawal authorization is unavailable');
+    return this.authority.review(userId, reference, proof);
+  }
 
   /**
    * Request a withdrawal from USD wallet to a registered NGN bank account
@@ -33,6 +51,7 @@ export class WithdrawalsService {
     amountUsd: number;
     requestId?: string;
     quoteId?: string;
+    ownerProof?: FinancialProof;
   }) {
     this.requireAuthority();
     const cents = Math.round(params.amountUsd * 100);
@@ -40,8 +59,11 @@ export class WithdrawalsService {
         cents < 500 || cents > 2147483647 || Math.abs(params.amountUsd * 100 - cents) > 0.0000001) {
       throw new BadRequestException('Provide a UUID requestId and an amount with at most two decimal places');
     }
-    // Reservation uses an existing validated quote; repeats never require a new provider/FX request.
-    const reservation = await this.ledger!.reserve(params.userId, params.requestId, params.bankAccountId, cents, params.quoteId);
+    if (!this.authority) throw new ServiceUnavailableException('Independent withdrawal authorization is unavailable');
+    const authorityDigest = await this.authority.authorize({ userId: params.userId, requestId: params.requestId,
+      bankAccountId: params.bankAccountId, amountUsdCents: cents, quoteId: params.quoteId, ownerProof: params.ownerProof });
+    // Approval precedes any wallet reservation. Unknown outcomes recover by the original request ID.
+    const reservation = await this.ledger!.reserve(params.userId, params.requestId, params.bankAccountId, cents, params.quoteId, authorityDigest);
     if (reservation.alreadyReserved) {
       const current = await this.ledger!.dispatchIntent(params.userId, reservation.reference, false);
       return { ...reservation, status: current.status, confirmation: 'recovery_required' };

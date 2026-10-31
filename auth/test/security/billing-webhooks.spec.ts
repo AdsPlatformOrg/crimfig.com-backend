@@ -1,3 +1,4 @@
+import { PaystackProviderBroker } from '../../../shared/src/financial-security/provider-broker';
 import { createHmac } from 'crypto';
 import { BadRequestException } from '@nestjs/common';
 import { PaystackService } from '../../../api/billing-api/src/modules/providers/paystack.service';
@@ -6,23 +7,14 @@ import { WebhooksService } from '../../../api/billing-api/src/modules/webhooks/w
 
 describe('public provider callback boundary', () => {
   it('checks exact raw bytes and a configured secret; missing/default keys never authenticate', () => {
-    const previous = process.env.PAYSTACK_SECRET_KEY;
-    const raw = '{ "event": "charge.success", "data": {"reference":"test"} }';
-    try {
-      delete process.env.PAYSTACK_SECRET_KEY;
-      const unconfigured = new PaystackService();
-      const oldDefaultSignature = createHmac('sha512', 'sk_test_mock_paystack_key').update(raw).digest('hex');
-      expect(unconfigured.verifyWebhookSignature(oldDefaultSignature, raw)).toBe(false);
-      process.env.PAYSTACK_SECRET_KEY = 'unit-test-provider-secret';
-      const configured = new PaystackService();
-      const signature = createHmac('sha512', process.env.PAYSTACK_SECRET_KEY).update(raw).digest('hex');
-      expect(configured.verifyWebhookSignature(signature, Buffer.from(raw))).toBe(true);
-      expect(configured.verifyWebhookSignature(signature, JSON.stringify(JSON.parse(raw)))).toBe(false);
-      expect(configured.verifyWebhookSignature('short', raw)).toBe(false);
-    } finally {
-      if (previous === undefined) delete process.env.PAYSTACK_SECRET_KEY;
-      else process.env.PAYSTACK_SECRET_KEY = previous;
-    }
+    const raw = '{ "event": "charge.success" }';
+    expect(() => new PaystackProviderBroker('')).toThrow();
+    const secret = 'sk_test_unit_provider_fixture';
+    const broker = new PaystackProviderBroker(secret);
+    const signature = createHmac('sha512', secret).update(raw).digest('hex');
+    expect(broker.verifyWebhook(Buffer.from(raw).toString('base64'), signature)).toBe(true);
+    expect(broker.verifyWebhook(Buffer.from(JSON.stringify(JSON.parse(raw))).toString('base64'), signature)).toBe(false);
+    expect(broker.verifyWebhook(Buffer.from(raw).toString('base64'), 'short')).toBe(false);
   });
 
   it('controller forwards captured raw bytes rather than reserialized JSON', async () => {

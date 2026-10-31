@@ -84,7 +84,7 @@ export class FraudRulesService {
     keyedIpHash: string;
     keyId: string;
   } {
-    const keyId = process.env.ADS_EVIDENCE_HASH_KEY_ID || 'evkey_2026_10';
+    const keyId = process.env.ADS_EVIDENCE_HASH_KEY_ID || (process.env.ADS_EVIDENCE_HASH_SECRET?'evidence-v1':'impression-v1');
     const secret =
       process.env.ADS_EVIDENCE_HASH_SECRET ||
       process.env.ADS_IMPRESSION_SIGNING_KEY ||

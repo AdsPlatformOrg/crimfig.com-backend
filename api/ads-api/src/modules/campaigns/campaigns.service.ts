@@ -28,7 +28,7 @@ import {
   adsMediaAssets,
   crimfigGeoTargets,
 } from "@crimfig/database/schema";
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql, or } from "drizzle-orm";
 import { DATABASE_TOKEN } from "../database/database.module";
 import { AdsEscrowService } from "../billing/ads-escrow.service";
 import {
@@ -734,9 +734,9 @@ export class CampaignsService {
       adType, headline, bodyText, ctaText, destinationUrl, adFormat, imageUrl: null, videoUrl: null, posterUrl: null, mediaAssetId: null, mediaFormat: 'image',
     };
     if (!asset) throw new BadRequestException(`A validated ${adType} asset is required.`);
-    if (adType === "image" && asset.bytes > 200000)
+    if (adType === "image" && asset.bytes > 300000)
       throw new BadRequestException(
-        "Prepare this image to a delivered size of at most 200 KB.",
+        "Prepare this image to a delivered size of at most 300 KB.",
       );
     if (
       adType === "image" &&
@@ -1150,7 +1150,7 @@ export class CampaignsService {
       }
 
       const before=await this.workflow.snapshot(tx,campaign);
-      const [submission]=await tx.insert(adsCampaignSubmissions).values({campaignId,actorId:advertiserId,requestId:control.requestId,contentRevision:campaign.contentRevision,fingerprint:hash,snapshot:before,state:'funding_pending'}).returning();
+      const [submission]=await tx.insert(adsCampaignSubmissions).values({campaignId,actorId:advertiserId,requestId:control.requestId,contentRevision:campaign.contentRevision,fingerprint:hash,snapshot:before,snapshotHash:fingerprint(before),state:'funding_pending'}).returning();
       await tx.update(adsCampaigns).set({submissionIntentId:submission.id}).where(eq(adsCampaigns.id,campaignId));
       await this.workflow.audit(tx,before,{...before,campaign:{...before.campaign,submissionIntentId:submission.id}},advertiserId,'submission_prepared',control.requestId,['submissionIntentId']);
       return submission;
@@ -1198,6 +1198,22 @@ export class CampaignsService {
   }
 
   // ── Reads ───────────────────────────────────────────────────────────────────
+
+  async campaignPage(advertiserId:string,status='all',page=1,pageSize=25) {
+    if(!Number.isSafeInteger(page)||page<1||page>100000||!Number.isSafeInteger(pageSize)||pageSize<1||pageSize>100) throw new BadRequestException('Invalid campaign page.');
+    const owner=eq(adsCampaigns.advertiserId,advertiserId);
+    const review=or(eq(adsCampaigns.moderationStatus,'pending_primary_review'),eq(adsCampaigns.moderationStatus,'pending_manager_approval'));
+    if(!['all','draft','active','paused','under_review','rejected','trash','suspended','completed','cancelled'].includes(status)) throw new BadRequestException('Unsupported campaign filter.');
+    const filtered=status==='all'?owner:and(owner,status==='under_review'?review:and(eq(adsCampaigns.status,status as any),status==='paused'?sql`${adsCampaigns.moderationStatus} NOT IN ('pending_primary_review','pending_manager_approval')`:undefined));
+    return this.db.transaction(async tx=>{
+      const rows=await tx.select().from(adsCampaigns).where(filtered).orderBy(desc(adsCampaigns.createdAt),desc(adsCampaigns.id)).limit(pageSize).offset((page-1)*pageSize);
+      const [total]=await tx.select({count:sql<number>`count(*)::int`}).from(adsCampaigns).where(filtered);
+      const counts=await tx.select({status:adsCampaigns.status,moderationStatus:adsCampaigns.moderationStatus,count:sql<number>`count(*)::int`}).from(adsCampaigns).where(owner).groupBy(adsCampaigns.status,adsCampaigns.moderationStatus);
+      const summary:Record<string,number>={all:0};
+      for(const row of counts){const key=['pending_primary_review','pending_manager_approval'].includes(row.moderationStatus)?'under_review':row.status;summary[key]=(summary[key]??0)+row.count;summary.all+=row.count;}
+      return {items:rows.map(c=>({...c,capabilities:campaignCapabilities(c)})),page,pageSize,total:total.count,counts:summary};
+    },{isolationLevel:'repeatable read',accessMode:'read only'});
+  }
 
   async getAdvertiserCampaigns(advertiserId: string, status?: string) {
     const conditions = [eq(adsCampaigns.advertiserId, advertiserId)];

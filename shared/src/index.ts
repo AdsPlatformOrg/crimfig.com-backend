@@ -101,3 +101,20 @@ export type {
 } from './monitoring/error-monitor.contract';
 export { ErrorMonitorCaptureInterceptor } from './monitoring/error-monitor.interceptor';
 export type { ErrorMonitorSink } from './monitoring/error-monitor.interceptor';
+export {HttpErrorMonitorSink} from './monitoring/error-monitor.http-sink';
+export {DurableErrorMonitorSink} from './monitoring/error-monitor.durable-sink';
+export {errorMonitorBoundary,ErrorMonitorMetadataGuard} from './monitoring/error-monitor.boundary';
+export * from './ad-authority-policy';
+
+export * from './ad-evidence-journal';
+export { FINANCIAL_SECURITY_POLICY } from './financial-security/policy.config';
+export * from './financial-security/authorization';
+export * from './financial-security/proof-issuer';
+export * from './financial-security/challenge-proposal';
+export * from './financial-security/private-transport';
+export * from './financial-security/private-api';
+export * from './financial-security/postgres-authority';
+export * from './financial-security/executor';
+export * from './financial-security/paystack-adapter';
+export * from './financial-security/provider-approval';
+export * from './financial-security/provider-broker';

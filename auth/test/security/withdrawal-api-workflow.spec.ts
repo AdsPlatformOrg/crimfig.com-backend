@@ -6,13 +6,16 @@ function fixture(duplicate=false) {
   const ledger:any={reserve:jest.fn(async()=>({withdrawalId:'id',reference:'reference',status:'pending',alreadyReserved:duplicate})),dispatchIntent:jest.fn(async()=>({status:'processing'})),cancel:jest.fn(async()=>({status:'cancelled'}))};
   const dispatch:any={dispatch:jest.fn(async()=>({status:'processing',confirmation:'unconfirmed'})),recover:jest.fn(async()=>({status:'completed',confirmation:'confirmed'}))};
   const unused=new Proxy({},{get(){throw Error('Unexpected legacy/provider/FX effect');}});
-  return {ledger,dispatch,service:new WithdrawalsService(unused as any,unused as any,unused as any,unused as any,ledger,dispatch)};
+  return {ledger,dispatch,service:new WithdrawalsService(unused as any,unused as any,unused as any,unused as any,ledger,dispatch,{authorize:jest.fn(async()=> 'a'.repeat(64))} as any)};
 }
 const input={userId:'owner',requestId:'request',bankAccountId:'bank',amountUsd:5.01,quoteId:'quote'};
+it.each([0,4.99,5.001,NaN,Infinity,21474836.48])('invalid amount %s cannot reach reservation',async amountUsd=>{
+  const {service,ledger}=fixture();await expect(service.requestWithdrawal({...input,amountUsd})).rejects.toThrow();expect(ledger.reserve).not.toHaveBeenCalled();
+});
 it('withdrawal create reserves canonical cents and sends through one dispatch authority',async()=>{
   const {service,ledger,dispatch}=fixture();
   const result=await service.requestWithdrawal(input);
-  expect(ledger.reserve).toHaveBeenCalledWith('owner','request','bank',501,'quote');
+  expect(ledger.reserve).toHaveBeenCalledWith('owner','request','bank',501,'quote','a'.repeat(64));
   expect(dispatch.dispatch).toHaveBeenCalledWith('owner','reference');expect(result.confirmation).toBe('unconfirmed');
 });
 it('duplicate withdrawal creation returns recovery state without dispatching again or obtaining new FX',async()=>{
@@ -20,13 +23,10 @@ it('duplicate withdrawal creation returns recovery state without dispatching aga
   expect((await service.requestWithdrawal(input)).confirmation).toBe('recovery_required');
   expect(dispatch.dispatch).not.toHaveBeenCalled();expect(ledger.dispatchIntent).toHaveBeenCalledWith('owner','reference',false);
 });
-it.each([0,4.99,5.001,NaN,Infinity,21474836.48])('invalid amount %s cannot reach reservation',async amountUsd=>{
-  const {service,ledger}=fixture();await expect(service.requestWithdrawal({...input,amountUsd})).rejects.toThrow();expect(ledger.reserve).not.toHaveBeenCalled();
-});
 it('all owner endpoint identities derive from the verified request, never body identity',async()=>{
   const {service,ledger,dispatch}=fixture();const controller=new WithdrawalsController(service),req={user:{sub:'verified-owner'}};
   await controller.requestWithdrawal(req,{requestId:'request',bankAccountId:'bank',amountUsd:5,quoteId:'quote',userId:'forged'} as any);
-  expect(ledger.reserve).toHaveBeenCalledWith('verified-owner','request','bank',500,'quote');
+  expect(ledger.reserve).toHaveBeenCalledWith('verified-owner','request','bank',500,'quote','a'.repeat(64));
   await controller.recover(req,'ref');expect(dispatch.recover).toHaveBeenCalledWith('verified-owner','ref');
   await controller.dispatch(req,'ref');expect(dispatch.dispatch).toHaveBeenCalledWith('verified-owner','ref');
   await controller.cancel(req,'ref');expect(ledger.cancel).toHaveBeenCalledWith('verified-owner','ref');

@@ -1,9 +1,9 @@
 import { RefundReviewService } from './refund-review.service';
 import { Controller, Get, Post, Body, Req, Param, ForbiddenException, Optional, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
-import { FinancialOperation } from '@crimfig/shared';
+import { FinancialOperation, FinancialProof } from '@crimfig/shared';
 import { WithdrawalsService } from './withdrawals.service';
-import { IsNumber, IsUUID, Max, Min, IsString, IsIn, IsInt, MaxLength } from 'class-validator';
+import { IsNumber, IsUUID, Max, Min, IsString, IsIn, IsInt, MaxLength, IsObject, IsOptional } from 'class-validator';
 
 export class QuoteWithdrawalDto {
   @IsUUID('4')
@@ -19,9 +19,13 @@ export class QuoteWithdrawalDto {
 }
 
 export class RequestWithdrawalDto extends QuoteWithdrawalDto {
+  @IsOptional()
+  @IsObject()
+  ownerProof?: FinancialProof;
   @IsUUID('4')
   quoteId: string;
 }
+export class WithdrawalReviewDto { @IsObject() proof: FinancialProof; }
 
 export class RegisterRefundEvidenceDto {
   @IsString()
@@ -71,6 +75,17 @@ export class ApproveRefundReviewDto {
 @Controller('withdrawals')
 export class WithdrawalsController {
   constructor(private readonly withdrawalsService: WithdrawalsService, @Optional() private readonly refundReview?: RefundReviewService) {}
+  @Get('availability')
+  async availability() { return { status: 'success', data: await this.withdrawalsService.availability() }; }
+  @Post('authorizations')
+  async prepareAuthorization(@Req() req: any, @Body() dto: RequestWithdrawalDto) {
+    return { status: 'success', data: await this.withdrawalsService.prepareAuthorization({ userId: req.user.sub,
+      requestId: dto.requestId, quoteId: dto.quoteId, bankAccountId: dto.bankAccountId, amountUsd: dto.amountUsd }) };
+  }
+  @Post(':reference/reviews')
+  async reviewAuthorization(@Req() req: any, @Param('reference') reference: string, @Body() dto: WithdrawalReviewDto) {
+    return { status: 'success', data: await this.withdrawalsService.reviewAuthorization(req.user.sub, reference, dto.proof) };
+  }
 
   @Get()
   @ApiOperation({ summary: 'Get list of withdrawal requests' })
@@ -90,6 +105,7 @@ export class WithdrawalsController {
       quoteId: dto.quoteId,
       bankAccountId: dto.bankAccountId,
       amountUsd: dto.amountUsd,
+      ownerProof: dto.ownerProof,
     });
     return { status: 'success', data: result };
   }

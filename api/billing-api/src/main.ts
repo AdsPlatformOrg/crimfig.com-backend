@@ -1,3 +1,4 @@
+import {errorMonitorBoundary,DurableErrorMonitorSink} from '@crimfig/shared';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -19,12 +20,14 @@ async function bootstrap() {
 
   app.enableShutdownHooks([ShutdownSignal.SIGINT, ShutdownSignal.SIGTERM]);
   app.use(helmet());
+  app.use(errorMonitorBoundary('billing-api',app.get(DurableErrorMonitorSink)));
 
   app.enableCors({
     origin: dashboardOrigins(process.env.NODE_ENV === 'production'),
     credentials: false,
+    exposedHeaders:['X-Request-Id','X-Correlation-Id'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-internal-key', 'x-paystack-signature', 'stripe-signature'],
+    allowedHeaders: ['X-Request-Id','X-Correlation-Id','Content-Type', 'Authorization', 'x-internal-key', 'x-paystack-signature', 'stripe-signature'],
   });
 
   app.useGlobalPipes(

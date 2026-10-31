@@ -150,16 +150,16 @@ export class ErrorMonitorCaptureInterceptor implements NestInterceptor {
       );
 
       if (this.sink) {
-        void this.sink.recordEvent(sanitized).catch((sinkErr: unknown) => {
+        void this.sink.recordEvent(sanitized).catch(() => {
           this.logger.warn('Failed to persist error monitor event', {
             requestId: sanitized.requestId,
-            reason: sinkErr instanceof Error ? sinkErr.message : 'sink_error',
+            reason: 'MONITOR_SINK_FAILED',
           });
         });
       }
-    } catch (configOrSanitizeErr: unknown) {
+    } catch {
       this.logger.warn('Skipped error monitor capture due to configuration or sanitization error', {
-        reason: configOrSanitizeErr instanceof Error ? configOrSanitizeErr.message : 'unknown',
+        reason: 'MONITOR_CONFIGURATION_OR_SANITIZATION_FAILED',
       });
     }
   }

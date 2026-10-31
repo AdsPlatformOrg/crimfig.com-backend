@@ -140,6 +140,14 @@ export const adsOpportunityReservations = pgTable(
     reservedNanos: bigint('reserved_nanos', { mode: 'bigint' })
       .notNull()
       .default(0n),
+    bindingFingerprint:varchar('binding_fingerprint',{length:64}),
+    escrowAllocatedUsdCents:bigint('escrow_allocated_usd_cents',{mode:'number'}),
+    submissionId:uuid('submission_id'),contentRevision:integer('content_revision'),creativeId:uuid('creative_id'),
+    promoterId:uuid('promoter_id'),websiteId:uuid('website_id'),slotId:uuid('slot_id'),placementId:uuid('placement_id'),
+    policyVersion:varchar('policy_version',{length:64}),policySnapshot:jsonb('policy_snapshot'),
+    eventDeadline:timestamp('event_deadline',{withTimezone:true}),ingestDeadline:timestamp('ingest_deadline',{withTimezone:true}),
+    claimEventId:uuid('claim_event_id'),settledAt:timestamp('settled_at',{withTimezone:true}),
+    visitorKey:varchar('visitor_key',{length:64}),
     reservedUsdCentsCeiling: integer('reserved_usd_cents_ceiling')
       .notNull()
       .default(0),
@@ -161,6 +169,7 @@ export const adsOpportunityReservations = pgTable(
       .defaultNow(),
   },
   (t) => [
+    index('ads_opportunity_generation_idx').on(t.escrowId,t.escrowAllocatedUsdCents,t.state,t.settledAt),
     index('ads_opp_res_campaign_state_idx').on(t.campaignId, t.state),
     index('ads_opp_res_expires_at_idx').on(t.expiresAt),
     index('ads_opp_res_serve_id_idx').on(t.serveId),

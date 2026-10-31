@@ -305,6 +305,19 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('an explicit paid flag cannot issue a paid serve on approved active inventory while authority is unavailable',async()=>{
+      const previous=process.env.ADS_PAID_SERVING_ENABLED;process.env.ADS_PAID_SERVING_ENABLED='true';
+      try {
+        const slotRow={slot:{id:'44444444-4444-4444-8444-444444444444',slotTagId:'cf-slot-network-releasegate',format:'banner',lifecycleStatus:'active',isActive:true},
+          website:{id:'55555555-5555-4555-8555-555555555555',domain:'jed.com.ng',verificationStatus:'verified',policyStatus:'approved',isActive:true,isSuspended:false},
+          promoter:{id:'66666666-6666-4666-8666-666666666666',isActive:true,isSuspended:false,trustScore:90}};
+        const {service,insertedServes}=buildDeliveryService(slotRow);
+        await service.getAdForPlacement(slotRow.slot.slotTagId,'203.0.113.20','Mozilla/5.0 Chrome/120.0','jed.com.ng',undefined,undefined,{country:'NG'},{origin:'https://jed.com.ng'});
+        expect(insertedServes.some(s=>s.inventoryClass==='paid')).toBe(false);
+        expect(insertedServes).toHaveLength(1);expect(insertedServes[0]).toMatchObject({inventoryClass:'house',financialEligibility:'invalid',billingPriceNanos:0n});
+      } finally {if(previous===undefined)delete process.env.ADS_PAID_SERVING_ENABLED;else process.env.ADS_PAID_SERVING_ENABLED=previous;}
+    });
+
     it('serves a zero-charge CrimFig House Ad on verified testing slots and allows house click redirects without campaign budget', async () => {
       const slotRow = {
         slot: {

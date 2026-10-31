@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, ServiceUnavailableException } from '@nestjs/common';
+import { WithdrawalAuthorityClient } from './withdrawal-authority.client';
 import { PaystackService } from '../providers/paystack.service';
 import { WithdrawalLedgerService } from './withdrawal-ledger.service';
 import { verifiedTransferOutcome } from './withdrawal-state';
@@ -6,14 +7,21 @@ import { verifiedTransferOutcome } from './withdrawal-state';
 /** Unexposed until endpoint/webhook/operator integration is verified. No automatic write retries. */
 @Injectable()
 export class WithdrawalDispatchService {
-  constructor(private readonly ledger: WithdrawalLedgerService, private readonly paystack: PaystackService) {}
+  constructor(private readonly ledger: WithdrawalLedgerService, private readonly paystack: PaystackService,
+    @Optional() private readonly authority?: WithdrawalAuthorityClient) {}
 
   async dispatch(userId: string, reference: string) {
+    if (!this.authority) throw new ServiceUnavailableException('Independent withdrawal execution is unavailable');
+    this.authority.assertReleased();
+    const pending = await this.ledger.dispatchIntent(userId, reference, false);
+    if (pending.dispatchStarted) return { reference, status: pending.status, confirmation: 'recovery_required' };
+    if (!pending.authorityDigest) throw new ServiceUnavailableException('This legacy withdrawal requires independent reconciliation');
     const intent = await this.ledger.dispatchIntent(userId, reference, true);
     if (!intent.claimed) return { reference, status: intent.status, confirmation: 'recovery_required' };
     try {
-      const data = await this.paystack.initiateTransfer({ reference, amountKobo: intent.amountKobo, recipientCode: intent.recipientCode });
-      return await this.consume(intent, data);
+      const result = await this.authority.execute(intent);
+      // Submitted means provider acceptance, never completion. Terminal outcomes still require exact verified evidence.
+      return { reference, status: intent.status, confirmation: result.state === 'submitted' ? 'pending' : result.state === 'held' ? 'security_hold' : 'unconfirmed' };
     } catch {
       // Started is durable even if dispatch never reached provider. Keep reservation; never assume failure/refund.
       return { reference, status: 'processing', confirmation: 'unconfirmed' };

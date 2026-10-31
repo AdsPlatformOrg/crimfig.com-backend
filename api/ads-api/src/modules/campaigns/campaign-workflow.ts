@@ -23,7 +23,8 @@ export function assertEditableCampaign(campaign: any) {
   if (campaign.submissionIntentId) throw new ConflictException('Check the pending submission before editing.');
 }
 export function currentApproval(c: any) {
-  return c.moderationStatus === 'approved' && !!c.currentSubmissionId && c.currentSubmissionId === c.approvedSubmissionId &&
+  return Number.isSafeInteger(c.contentRevision) && c.contentRevision > 0 && Number.isSafeInteger(c.approvedRevision) &&
+    c.moderationStatus === 'approved' && !!c.currentSubmissionId && c.currentSubmissionId === c.approvedSubmissionId &&
     c.approvedRevision === c.contentRevision && !c.submissionIntentId;
 }
 export function campaignCapabilities(c: any) {
@@ -50,7 +51,8 @@ export class CampaignWorkflow {
     const targets = await tx.select().from(crimfigGeoTargets).where(sql`(${crimfigGeoTargets.ownerType} = 'campaign' AND ${crimfigGeoTargets.ownerId} = ${c.id}) OR (${crimfigGeoTargets.ownerType} = 'stack' AND ${crimfigGeoTargets.ownerId} IN (SELECT id FROM ads_creative_stacks WHERE campaign_id = ${c.id}))`).orderBy(asc(crimfigGeoTargets.id));
     // Omit clocks/approval bookkeeping so identical saves do not create content revisions.
     const strip = (r: any) => Object.fromEntries(Object.entries(r).filter(([k]) => !['updatedAt','createdAt','reviewedAt','reviewStatus','rejectionReason','primaryReviewerId','managerReviewerId','primaryReviewedAt','managerReviewedAt'].includes(k)));
-    return canonical({ campaign: strip(c), stacks: stacks.map(strip), creatives: creatives.map(strip), targets });
+    return canonical({ campaign: strip(c), stacks: stacks.map(strip), creatives: creatives.map(strip),
+      targets:targets.map(({id,createdAt,updatedAt,...content}:any)=>content).sort((a:any,b:any)=>`${a.ownerType}:${a.ownerId}:${a.placeId}`.localeCompare(`${b.ownerType}:${b.ownerId}:${b.placeId}`)) });
   }
   async audit(tx: any, before: any, after: any, actorId: string, action: string, requestId: string, fields: string[]) {
     await tx.insert(adsCampaignChanges).values({ campaignId: after.campaign.id, actorId, requestId, action,
@@ -66,7 +68,7 @@ export class CampaignWorkflow {
     return this.db.transaction(async (tx: any) => {
       const c = await this.lock(tx, id, owner);
       const [prior] = await tx.select().from(adsCampaignMutations).where(and(eq(adsCampaignMutations.campaignId,id),eq(adsCampaignMutations.actorId,owner),eq(adsCampaignMutations.requestId,control.requestId))).limit(1);
-      if (prior) { if (prior.fingerprint !== hash) throw new ConflictException('This request ID was used for different changes.'); return prior.result; }
+      if (prior) { if(prior.purgedAt)throw new ConflictException('This request receipt has been archived. Reload the campaign.');if (prior.fingerprint !== hash) throw new ConflictException('This request ID was used for different changes.'); return prior.result; }
       if (c.contentRevision !== control.expectedRevision) throw new ConflictException('This campaign changed. Reload before saving.');
       if (!beginEdit) assertEditableCampaign(c);
       const before = await this.snapshot(tx,c);

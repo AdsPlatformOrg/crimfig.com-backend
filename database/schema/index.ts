@@ -70,3 +70,5 @@ export * from './advertiser_achievements';
 export * from './ads_campaign_workflow';
 export * from './ads_supply_and_auction';
 export * from './error_monitor';
+export * from './ad_delivery_authority';
+export * from './financial_authorization';

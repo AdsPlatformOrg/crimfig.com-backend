@@ -9,6 +9,7 @@ import {
   Req,
   UseGuards,
   UnauthorizedException,
+  BadRequestException,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
@@ -17,11 +18,14 @@ import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import {
   IsInt,
+  IsUUID,
+  IsISO8601,
   IsOptional,
   IsString,
   IsBoolean,
   IsObject,
   MaxLength,
+  MinLength,
   Min,
   Max,
 } from 'class-validator';
@@ -30,8 +34,11 @@ import { JwtAuthGuard } from '../../guards/jwt-auth.guard';
 import { AuthRoles } from '../../security/auth-staff-grants';
 import { AuthStaffRoleGuard } from '../../security/auth-staff-role.guard';
 import { ErrorMonitorService } from './error-monitor.service';
+import {ALLOWLISTED_ERROR_SERVICES} from '@crimfig/shared';
 
 export class IngestInternalErrorEventDto {
+  @IsOptional() @IsISO8601() occurredAt?:string;
+  @IsOptional() @IsUUID() sourceEventId?:string;
   @IsString()
   @MaxLength(64)
   service!: string;
@@ -143,6 +150,8 @@ export class ReportBrowserErrorDto {
   requestId?: string;
 }
 
+class RequeueSourceDto {@IsUUID()requestId!:string;@IsString()@MinLength(10)@MaxLength(1000)reason!:string;}
+
 @ApiTags('Platform Admin — Error Monitor')
 @UseGuards(ThrottlerGuard, JwtAuthGuard, AuthStaffRoleGuard)
 @AuthRoles('super_admin')
@@ -215,6 +224,9 @@ export class ErrorMonitorAdminController {
     return { status: 'success', data };
   }
 
+  @Get('source-outbox') async sourceBacklog(@Query('service')service?:string){return {status:'success',data:await this.errorMonitorService.sourceBacklog(service)};}
+  @Post('source-outbox/:id/requeue') async requeueSource(@Param('id',new ParseUUIDPipe())id:string,@Req()req:any,@Body()body:RequeueSourceDto){return {status:'success',data:await this.errorMonitorService.requeueSource(id,req.user.sub,body)};}
+
   @Get('sources')
   @ApiOperation({
     summary: 'Platform Admin (super_admin): List registered first-party apps/services and reporting coverage',
@@ -280,6 +292,8 @@ export class ErrorMonitorIngestionController {
     summary: 'Authenticated first-party browser boundary error reporting (monitor-only, never triggers email)',
   })
   async ingestBrowserEvent(@Req() req: any, @Body() dto: ReportBrowserErrorDto) {
+    if(!dto.service.endsWith('-web') || !ALLOWLISTED_ERROR_SERVICES.includes(dto.service as any))
+      throw new BadRequestException('Browser reports must identify a registered browser application.');
     const data = await this.errorMonitorService.ingestRawEvent({
       service: dto.service,
       source: 'browser',

@@ -12,6 +12,15 @@ const required = (key: string): string => {
 };
 
 export const config = {
+  FINANCIAL_AUTH: {
+    AUTHORITY_PUBLIC_KEYS: process.env.FINANCIAL_AUTHORITY_PUBLIC_KEYS || '{}',
+    SIGNING_PRIVATE_KEY: process.env.FINANCIAL_AUTH_SIGNING_PRIVATE_KEY,
+    SIGNING_KEY_ID: process.env.FINANCIAL_AUTH_SIGNING_KEY_ID,
+    EXPLICIT_PLATFORM_GRANTS: process.env.AUTH_STAFF_ROLE_GRANTS || '{}',
+    AUTHORITY_URL: process.env.FINANCIAL_AUTHORITY_URL,
+    WORKLOAD_PRIVATE_KEY: process.env.AUTH_FINANCIAL_WORKLOAD_PRIVATE_KEY,
+    WORKLOAD_KEY_ID: process.env.AUTH_FINANCIAL_WORKLOAD_KEY_ID,
+  },
   NODE_ENV: (process.env.NODE_ENV ?? 'development') as 'development' | 'test' | 'staging' | 'production',
   PORT: Number(process.env.PORT ?? 4000),
 

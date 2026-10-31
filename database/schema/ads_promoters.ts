@@ -102,6 +102,7 @@ export const adsPromoterWebsites = pgTable(
       .notNull()
       .default("pending"),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    verificationExpiresAt:timestamp("verification_expires_at",{withTimezone:true}),
     lastVerificationAttemptAt: timestamp("last_verification_attempt_at", {
       withTimezone: true,
     }),

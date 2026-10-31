@@ -1,4 +1,5 @@
-import { pgTable, uuid, varchar, text, integer, boolean, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
+import {sql} from 'drizzle-orm';
+import { pgTable, uuid, varchar, text, integer, boolean, timestamp, pgEnum, index,uniqueIndex } from 'drizzle-orm/pg-core';
 import { adsPlacements, adsPromoters } from './ads_promoters';
 
 /**
@@ -41,7 +42,7 @@ export const adsInteractions = pgTable(
   'ads_interactions',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    placementId: uuid('placement_id').notNull().references(() => adsPlacements.id, { onDelete: 'restrict' }),
+    placementId: uuid('placement_id').references(() => adsPlacements.id, { onDelete: 'restrict' }),
     promoterId: uuid('promoter_id').notNull().references(() => adsPromoters.id, { onDelete: 'restrict' }),
 
     // Optional link to initial auction resolution serve record
@@ -83,6 +84,7 @@ export const adsInteractions = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
+    uniqueIndex('ads_interaction_client_event_uq').on(t.eventId).where(sql`${t.eventId} IS NOT NULL`),
     index('ads_interactions_placement_id_idx').on(t.placementId),
     index('ads_interactions_promoter_id_idx').on(t.promoterId),
     index('ads_interactions_serve_id_idx').on(t.serveId),

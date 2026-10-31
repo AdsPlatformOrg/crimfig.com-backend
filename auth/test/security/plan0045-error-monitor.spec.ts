@@ -521,7 +521,7 @@ describe('PLAN-0045: Platform Error Monitor in Auth & Email Notifications', () =
       expect(db503.outbox.size).toBe(1);
 
       // Dispatch due outbox at T+0 -> sends initial email
-      const initialDispatch = await service503.processDueOutbox(baseTime);
+      const initialDispatch = await service503.processDueOutbox(baseTime,10,env);
       expect(initialDispatch.processedCount).toBe(1);
       expect(sentEmails.length).toBe(1);
       expect(sentEmails[0].recipients).toEqual(['jed@crimfig.com']);

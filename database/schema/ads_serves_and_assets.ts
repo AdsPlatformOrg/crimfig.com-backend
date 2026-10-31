@@ -1,3 +1,4 @@
+import {sql} from 'drizzle-orm';
 import {
   jsonb,
   pgTable,
@@ -10,6 +11,7 @@ import {
   timestamp,
   pgEnum,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
 import { adsCampaigns } from "./ads_campaigns";
@@ -82,16 +84,17 @@ export const adsServes = pgTable(
       onDelete: "set null",
     }),
     campaignId: uuid("campaign_id")
-      .notNull()
       .references(() => adsCampaigns.id, { onDelete: "restrict" }),
     creativeId: uuid("creative_id")
-      .notNull()
       .references(() => adsCreatives.id, { onDelete: "restrict" }),
     promoterId: uuid("promoter_id").references(() => adsPromoters.id, {
       onDelete: "set null",
     }),
 
-    slotHandle: varchar("slot_handle", { length: 50 }).notNull(),
+    slotHandle: varchar("slot_handle", { length: 64 }).notNull(),
+    opportunityReservationId:uuid('opportunity_reservation_id'),
+    submissionId:uuid('submission_id'),contentRevision:bigint('content_revision',{mode:'number'}),
+    contentSnapshot:jsonb('content_snapshot'),
     // Clearing price in micros (1/1,000,000 USD) for high-precision second-price auction resolution
     pricingVersion: smallint("pricing_version").notNull().default(1),
     // Immutable exact price per eligible event; never derive money from the eCPM score.
@@ -134,7 +137,6 @@ export const adsServes = pgTable(
       .notNull()
       .default("pending"),
     auctionDecisionId: uuid("auction_decision_id"),
-    opportunityReservationId: uuid("opportunity_reservation_id"),
     policyVersion: varchar("policy_version", { length: 32 })
       .notNull()
       .default("auction_v1"),
@@ -144,6 +146,7 @@ export const adsServes = pgTable(
       .defaultNow(),
   },
   (t) => [
+    uniqueIndex('ads_serve_reservation_uq').on(t.opportunityReservationId).where(sql`${t.opportunityReservationId} IS NOT NULL`),
     index("ads_serves_campaign_id_idx").on(t.campaignId),
     index("ads_serves_placement_id_idx").on(t.placementId),
     index("ads_serves_promoter_id_idx").on(t.promoterId),

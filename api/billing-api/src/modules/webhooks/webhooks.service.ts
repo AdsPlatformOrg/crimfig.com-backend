@@ -29,7 +29,7 @@ export class WebhooksService {
    * Handle incoming Paystack webhook with idempotency protection
    */
   async handlePaystackWebhook(rawBody: string, signature: string) {
-    const isValid = this.paystackService.verifyWebhookSignature(signature, rawBody);
+    const isValid = await this.paystackService.verifyWebhookSignature(signature, rawBody);
     if (!isValid) {
       this.logger.warn('Paystack webhook signature verification failed');
       throw new BadRequestException('Invalid webhook signature');

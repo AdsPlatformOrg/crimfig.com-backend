@@ -1,3 +1,4 @@
+import {errorMonitorBoundary,DurableErrorMonitorSink} from '@crimfig/shared';
 import { adsCorsOptions } from './modules/security/ads-cors';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
@@ -20,6 +21,7 @@ async function bootstrap() {
 
   app.enableShutdownHooks([ShutdownSignal.SIGINT, ShutdownSignal.SIGTERM]);
   app.use(helmet());
+  app.use(errorMonitorBoundary('ads-api',app.get(DurableErrorMonitorSink)));
 
   app.enableCors(adsCorsOptions(process.env.NODE_ENV === 'production'));
 

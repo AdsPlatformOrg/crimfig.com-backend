@@ -155,7 +155,7 @@ export class BillingEcosystemClient {
     if (data?.campaign?.id !== campaignId || data?.campaign?.advertiserId !== userId || data?.campaign?.status !== status) {
       throw new ServiceUnavailableException('Billing returned an invalid campaign transition receipt; reconcile before retrying');
     }
-    if (data.escrow || status === 'active') this.checkedEscrow(data, userId, campaignId, status === 'active' ? 'reserve' : 'release');
+      if (data.escrow || status === 'active') this.checkedEscrow(data, userId, campaignId, status === 'active'||data.fundsRetained===true ? 'reserve' : 'release');
     else if (data.operationId !== null || data.transactionId !== null || data.replayed !== true) {
       throw new ServiceUnavailableException('Billing returned an invalid unfunded campaign transition');
     }

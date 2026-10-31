@@ -1,3 +1,5 @@
+import {errorMonitorBoundary} from '@crimfig/shared';
+import {ErrorMonitorService} from './modules/error-monitor/error-monitor.service';
 import { dashboardOrigins } from '@crimfig/shared';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
@@ -25,6 +27,7 @@ async function bootstrap() {
   // Critical for zero-downtime rolling deployments — in-flight requests finish,
   // new requests are rejected, then the process exits cleanly.
   app.enableShutdownHooks([ShutdownSignal.SIGINT, ShutdownSignal.SIGTERM]);
+  app.use(errorMonitorBoundary('auth-api',app.get(ErrorMonitorService)));
 
   // ─── Security Middleware ───────────────────────────────────────────────────
   app.use(
@@ -40,9 +43,12 @@ async function bootstrap() {
   app.enableCors({
     origin: dashboardOrigins(config.IS_PRODUCTION),
     credentials: true,
+    exposedHeaders:['X-Request-Id','X-Correlation-Id'],
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
     allowedHeaders: [
       'Content-Type',
+      'X-Request-Id',
+      'X-Correlation-Id',
       'Authorization',
       'X-Requested-With',
       'Accept',

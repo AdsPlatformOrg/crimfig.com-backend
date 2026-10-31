@@ -1,3 +1,6 @@
+import {EvidenceService} from './evidence.service';
+import {EvidenceController} from './evidence.controller';
+import {BillingModule} from '../billing/billing.module';
 import { Module } from '@nestjs/common';
 import { DeliveryService } from './delivery.service';
 import { DeliveryController } from './delivery.controller';
@@ -6,9 +9,9 @@ import { AuctionEngineService } from './auction-engine.service';
 import { VerificationModule } from '../verification/verification.module';
 
 @Module({
-  imports: [VerificationModule],
-  controllers: [DeliveryController],
-  providers: [DeliveryService, ImpressionTokenService, AuctionEngineService],
+  imports: [VerificationModule,BillingModule],
+  controllers: [DeliveryController,EvidenceController],
+  providers: [EvidenceService,DeliveryService, ImpressionTokenService, AuctionEngineService],
   exports: [DeliveryService, ImpressionTokenService, AuctionEngineService],
 })
 export class DeliveryModule {}

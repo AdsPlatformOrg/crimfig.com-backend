@@ -647,6 +647,9 @@ importers:
       class-validator:
         specifier: ^0.14.1
         version: 0.14.4
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@opentelemetry/api@1.9.1)(@types/pg@8.21.0)(pg@8.23.0)
       passport:
         specifier: ^0.7.0
         version: 0.7.0

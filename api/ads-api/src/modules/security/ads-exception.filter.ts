@@ -21,7 +21,8 @@ export class AdsGlobalExceptionFilter implements ExceptionFilter {
         ? exception.getResponse()
         : (exception instanceof Error ? exception.message : 'Internal Server Error');
 
-    const errorDetails = safeApiError(status, message, request.route?.path, request.headers['x-request-id']);
+    const errorDetails = safeApiError(status, message, request.route?.path,
+      (request as Request & {requestId?:string}).requestId ?? request.headers['x-request-id']);
 
     if (status >= 500) {
       this.logger.error(

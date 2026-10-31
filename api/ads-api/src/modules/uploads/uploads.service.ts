@@ -328,7 +328,7 @@ export class UploadsService {
       version: 1,
       pipelineVersion: manifest.pipelineVersion ?? 1,
       groupId,
-      quality: 0.97,
+      quality: manifest.quality,
       layout: manifest.layout,
       ratio: manifest.ratio,
       crop: manifest.crop,

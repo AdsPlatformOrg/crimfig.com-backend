@@ -536,6 +536,12 @@ export class LocationsService {
     ownerId: string,
     targets: ResolvedTarget[],
   ): Promise<void> {
+    const current=await tx.select().from(schema.crimfigGeoTargets).where(and(eq(schema.crimfigGeoTargets.ownerType,ownerType),eq(schema.crimfigGeoTargets.ownerId,ownerId)));
+    const normalized=(rows:any[])=>rows.map(row=>({placeId:row.placeId,scope:row.scope,geoVersion:row.geoVersion,
+      countries:[...(typeof row.resolvedCountries==='string'?JSON.parse(row.resolvedCountries):row.resolvedCountries)].sort(),
+      subdivisions:[...(typeof row.resolvedSubdivisions==='string'?JSON.parse(row.resolvedSubdivisions):row.resolvedSubdivisions)].sort(),
+      cities:[...(typeof row.resolvedCities==='string'?JSON.parse(row.resolvedCities):row.resolvedCities)].sort()})).sort((a,b)=>a.placeId.localeCompare(b.placeId));
+    if(JSON.stringify(normalized(current))===JSON.stringify(normalized(targets)))return;
     await tx
       .delete(schema.crimfigGeoTargets)
       .where(and(eq(schema.crimfigGeoTargets.ownerType, ownerType), eq(schema.crimfigGeoTargets.ownerId, ownerId)));

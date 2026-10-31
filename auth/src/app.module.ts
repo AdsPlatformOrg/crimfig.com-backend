@@ -10,6 +10,7 @@ import { DatabaseModule } from './modules/database/database.module';
 import { HealthModule } from './modules/health/health.module';
 import { EmailModule } from './modules/email/email.module';
 import { ErrorMonitorModule } from './modules/error-monitor/error-monitor.module';
+import { FinancialAuthorizationModule } from './modules/financial-authorization/financial-authorization.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ErrorMonitorModule } from './modules/error-monitor/error-monitor.module
     OAuthModule,        // /oauth/authorize, /oauth/token, /oauth/userinfo
     TokensModule,       // JWT issuance, refresh, revocation
     MfaModule,          // TOTP enrollment, verification, backup codes
+    FinancialAuthorizationModule,
     ConsentModule,      // App-specific Terms acceptance
     OrganizationsModule, // Multi-owner org management + email invites
     ErrorMonitorModule, // Central Platform Admin Error Monitor & Email Outbox (PLAN-0045)

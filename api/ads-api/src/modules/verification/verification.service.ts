@@ -1,9 +1,9 @@
-import { Injectable, Inject, NotFoundException, Logger } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, Logger,ConflictException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
-import { adsPromoterWebsites, adsPromoterApps } from '@crimfig/database/schema';
-import { and, eq } from 'drizzle-orm';
+import { adsPromoterWebsites, adsPromoterApps,adsSupplyStateHistory } from '@crimfig/database/schema';
+import { and, eq, sql } from 'drizzle-orm';
 import * as dns from 'dns/promises';
 import { deadline, fetchWebsiteProof, hasVerificationMeta, websiteTarget } from './website-proof';
 
@@ -55,27 +55,22 @@ export class VerificationService {
       errorMessage = 'Website verification failed. Check the HTTPS domain, public DNS and verification record.';
     }
 
-    const nextPolicyStatus = isVerified
-      ? website.policyStatus === 'approved' || website.policyStatus === 'pending_approval'
-        ? website.policyStatus
-        : 'testing'
-      : website.policyStatus === 'unverified'
-        ? 'unverified'
-        : website.policyStatus;
-
-    const [updated] = await this.db
-      .update(adsPromoterWebsites)
-      .set({
-        verificationStatus: isVerified ? 'verified' : 'failed',
-        verifiedAt: isVerified ? new Date() : null,
-        policyStatus: nextPolicyStatus,
-        lastVerificationAttemptAt: new Date(),
-        verificationErrorMessage: errorMessage,
-        verificationFailures: isVerified ? 0 : (website.verificationFailures || 0) + 1,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(adsPromoterWebsites.id, websiteId), eq(adsPromoterWebsites.promoterId, promoterId)))
-      .returning();
+    const updated=await this.db.transaction(async tx=>{
+      await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+      const [current]=await tx.select().from(adsPromoterWebsites).where(and(eq(adsPromoterWebsites.id,websiteId),eq(adsPromoterWebsites.promoterId,promoterId))).for('update').limit(1);
+      if(!current||current.domain!==website.domain||current.url!==website.url||current.verificationToken!==token||current.verificationMethod!==website.verificationMethod)throw new ConflictException('Website details changed. Run verification again.');
+      // Ownership proof cannot erase a concurrent staff rejection or suspension.
+      const nextPolicyStatus=isVerified&&current.policyStatus==='unverified'?'testing':current.policyStatus;
+      const now=new Date();
+      const [saved]=await tx.update(adsPromoterWebsites).set({
+        verificationStatus:isVerified?'verified':'failed',verifiedAt:isVerified?now:null,
+        verificationExpiresAt:isVerified?new Date(now.getTime()+30*86400000):null,
+        policyStatus:nextPolicyStatus,lastVerificationAttemptAt:now,verificationErrorMessage:errorMessage,
+        verificationFailures:isVerified?0:(current.verificationFailures||0)+1,updatedAt:now,
+      }).where(eq(adsPromoterWebsites.id,websiteId)).returning();
+      await tx.insert(adsSupplyStateHistory).values({entityType:'website',entityId:websiteId,dimension:'ownership_status',fromState:current.verificationStatus,toState:saved.verificationStatus,actorRole:'owner',reason:isVerified?'OWNERSHIP_PROOF_CONFIRMED':'OWNERSHIP_PROOF_FAILED'});
+      return saved;
+    });
 
     return {
       isVerified,

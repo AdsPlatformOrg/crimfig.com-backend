@@ -1,8 +1,10 @@
+import {adDigest} from '@crimfig/shared';
 import {
   Injectable,
   Inject,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -11,6 +13,7 @@ import {
   errorMonitorOccurrences,
   errorMonitorOutbox,
   errorMonitorSources,
+  errorMonitorIngestReceipts,
 } from '@crimfig/database/schema';
 import {
   and,
@@ -144,6 +147,28 @@ export class ErrorMonitorService implements ErrorMonitorSink {
     private readonly emailService: EmailService,
   ) {}
 
+  async sourceBacklog(service?:string){
+    if(service&&!ALLOWLISTED_ERROR_SERVICES.includes(service as any))throw new BadRequestException('Unknown source service');
+    const environment=resolveErrorMonitorConfig().environment;
+    const result=await this.db.execute(sql`SELECT id,service,environment,status,attempts,next_attempt_at,lease_expires_at,last_error_code,created_at,delivered_at
+      FROM error_monitor_source_outbox WHERE environment=${environment} AND (${service??null}::text IS NULL OR service=${service??null}) AND status<>'delivered' ORDER BY created_at LIMIT 100`);
+    return {environment,items:result.rows};
+  }
+  async requeueSource(id:string,actorId:string,input:{requestId:string;reason:string}){
+    return this.db.transaction(async tx=>{
+      const environment=resolveErrorMonitorConfig().environment;
+      await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`source-requeue:${input.requestId}`},0))`);
+      const result=await tx.execute(sql`SELECT * FROM error_monitor_source_outbox WHERE id=${id} AND environment=${environment} FOR UPDATE`);const row=result.rows[0];
+      if(!row)throw new NotFoundException('Source event not found');
+      const prior=await tx.execute(sql`SELECT * FROM error_monitor_source_actions WHERE request_id=${input.requestId}`);
+      if(prior.rows[0]){const receipt=prior.rows[0];if(receipt.source_id!==id||receipt.actor_id!==actorId||receipt.reason!==input.reason)throw new ConflictException('Retry request identity changed');return {id,replayed:true};}
+      if(!['dead','failed'].includes(String(row.status))||row.lease_expires_at&&new Date(String(row.lease_expires_at))>new Date())throw new ConflictException('This source event is not available for manual retry');
+      await tx.execute(sql`UPDATE error_monitor_source_outbox SET status='pending',attempts=0,next_attempt_at=now(),lease_id=NULL,lease_expires_at=NULL,last_error_code=NULL WHERE id=${id}`);
+      await tx.execute(sql`INSERT INTO error_monitor_source_actions(source_id,actor_id,request_id,reason) VALUES(${id},${actorId},${input.requestId},${input.reason})`);
+      return {id,replayed:false};
+    });
+  }
   async ingestRawEvent(
     rawInput: RawErrorCaptureInput,
     env: Record<string, string | undefined> = process.env,
@@ -158,22 +183,31 @@ export class ErrorMonitorService implements ErrorMonitorSink {
     }
 
     const sanitized = redactAndSanitizeErrorEvent(rawInput, env);
-    return this.recordEvent(sanitized, env);
+    return this.recordEvent(sanitized, env, rawInput.sourceEventId, adDigest(rawInput));
   }
 
   async recordEvent(
     event: SanitizedErrorMonitorEvent,
     env: Record<string, string | undefined> = process.env,
+    sourceEventId?:string,
+    sourceFingerprint?:string,
   ) {
     if (event.statusCode < 400 || event.statusCode > 599) {
       return { recorded: false as const, reason: 'NON_ERROR_STATUS' as const };
     }
 
     const runtimeConfig = resolveErrorMonitorConfig(env);
-    const now = event.occurredAt instanceof Date ? event.occurredAt : new Date();
+    if(!runtimeConfig.captureEnabled)return {recorded:false,reason:'CAPTURE_DISABLED'};
+    const now = new Date();
     const monitorUrl = `${config.APP.AUTH_WEB_URL}/admin/error-monitor?requestId=${encodeURIComponent(event.requestId)}`;
 
     return this.db.transaction(async (tx) => {
+      if(sourceEventId){
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${event.environment}:${event.service}:${sourceEventId}`},0))`);
+        const [prior]=await tx.select().from(errorMonitorIngestReceipts).where(and(eq(errorMonitorIngestReceipts.environment,event.environment),eq(errorMonitorIngestReceipts.service,event.service),eq(errorMonitorIngestReceipts.sourceEventId,sourceEventId))).limit(1);
+        if(prior){if(prior.fingerprint!==(sourceFingerprint??adDigest(event)))throw new ConflictException('Source event identity changed');return prior.result;}
+      }
+      const result=await (async()=>{
       await tx
         .insert(errorMonitorSources)
         .values({
@@ -490,10 +524,15 @@ export class ErrorMonitorService implements ErrorMonitorSink {
         windowSuppressedCount: group.windowSuppressedCount,
         outboxScheduled,
       };
+      })();
+      if(sourceEventId)await tx.insert(errorMonitorIngestReceipts).values({sourceEventId,service:event.service,environment:event.environment,fingerprint:sourceFingerprint??adDigest(event),result});
+      return result;
     });
   }
 
-  async processDueOutbox(now: Date = new Date(), batchSize = 10) {
+  async processDueOutbox(now: Date = new Date(), batchSize = 10, env:Record<string,string|undefined>=process.env) {
+    const runtime=resolveErrorMonitorConfig(env);
+    if(!runtime.captureEnabled || !runtime.emailEnabled) return {processedCount:0,results:[]};
     const leaseDurationMs = 60_000;
     const leaseExpiresAt = new Date(now.getTime() + leaseDurationMs);
 
@@ -502,7 +541,8 @@ export class ErrorMonitorService implements ErrorMonitorSink {
       .from(errorMonitorOutbox)
       .where(
         and(
-          inArray(errorMonitorOutbox.status, ['pending', 'failed']),
+          inArray(errorMonitorOutbox.status, ['pending', 'failed', 'processing']),
+          sql`${errorMonitorOutbox.attempts} < ${errorMonitorOutbox.maxAttempts}`,
           lte(errorMonitorOutbox.nextAttemptAt, now),
           or(
             sql`${errorMonitorOutbox.leaseExpiresAt} IS NULL`,
@@ -533,11 +573,15 @@ export class ErrorMonitorService implements ErrorMonitorSink {
           status: 'processing',
           leaseOwner: this.workerId,
           leaseExpiresAt,
+          attempts:sql`${errorMonitorOutbox.attempts} + 1`,
           updatedAt: now,
         })
         .where(
           and(
             eq(errorMonitorOutbox.id, item.id),
+            inArray(errorMonitorOutbox.status,['pending','failed','processing']),
+            lte(errorMonitorOutbox.nextAttemptAt,now),
+            sql`${errorMonitorOutbox.attempts} < ${errorMonitorOutbox.maxAttempts}`,
             or(
               sql`${errorMonitorOutbox.leaseExpiresAt} IS NULL`,
               lte(errorMonitorOutbox.leaseExpiresAt, now),
@@ -555,9 +599,9 @@ export class ErrorMonitorService implements ErrorMonitorSink {
         textContent: leased.textBody,
       });
 
-      const nextAttempts = leased.attempts + 1;
+      const nextAttempts = leased.attempts;
       if (delivery.accepted) {
-        await this.db
+        const [completed] = await this.db
           .update(errorMonitorOutbox)
           .set({
             status: 'provider_accepted',
@@ -568,7 +612,9 @@ export class ErrorMonitorService implements ErrorMonitorSink {
             leaseExpiresAt: null,
             updatedAt: now,
           })
-          .where(eq(errorMonitorOutbox.id, leased.id));
+          .where(and(eq(errorMonitorOutbox.id, leased.id),eq(errorMonitorOutbox.leaseOwner,this.workerId),eq(errorMonitorOutbox.status,'processing')))
+          .returning({id:errorMonitorOutbox.id});
+        if(!completed) continue;
 
         await this.db
           .update(errorMonitorGroups)
@@ -590,7 +636,7 @@ export class ErrorMonitorService implements ErrorMonitorSink {
         const nextAttemptAt = new Date(now.getTime() + backoffSeconds * 1000);
         const exhausted = nextAttempts >= leased.maxAttempts;
 
-        await this.db
+        const [completed] = await this.db
           .update(errorMonitorOutbox)
           .set({
             status: 'failed',
@@ -601,7 +647,9 @@ export class ErrorMonitorService implements ErrorMonitorSink {
             leaseExpiresAt: null,
             updatedAt: now,
           })
-          .where(eq(errorMonitorOutbox.id, leased.id));
+          .where(and(eq(errorMonitorOutbox.id, leased.id),eq(errorMonitorOutbox.leaseOwner,this.workerId),eq(errorMonitorOutbox.status,'processing')))
+          .returning({id:errorMonitorOutbox.id});
+        if(!completed) continue;
 
         await this.db
           .update(errorMonitorGroups)
@@ -909,8 +957,8 @@ export class ErrorMonitorService implements ErrorMonitorSink {
         service: descriptor.service,
         displayName: descriptor.displayName,
         sourceType: descriptor.sourceType,
-        status: recorded ? recorded.status : descriptor.defaultStatus,
-        captureEnabled: recorded ? recorded.captureEnabled : true,
+        status: recorded ? recorded.status : 'not_reporting',
+        captureEnabled: recorded ? recorded.captureEnabled : false,
         statusNote: descriptor.statusNote,
         lastHeartbeatAt: recorded?.lastHeartbeatAt ?? null,
         lastEventAt: recorded?.lastEventAt ?? null,
