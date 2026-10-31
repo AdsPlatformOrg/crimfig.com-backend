@@ -600,3 +600,42 @@ Resolved startup migration failure `[Schema release] Failed: 42701` on Railway s
 
 ## 2026-10-31 — PLAN-0036 Cloudflare R2 Storage Adapter & Multi-Provider Router
 Implemented Cloudflare R2 primary storage with Firebase warm fallback. Added `storage-adapter.interface.ts`, `cloudflare-r2-storage.service.ts` (AWS S3 Client, presigning, Range/206 streaming), and `media-storage-router.service.ts`. Updated `uploads.service.ts` to use the multi-provider router. Added migration `0028_media_storage_r2_adapter.sql` and updated `adsMediaAssets` / `adsMediaAssetLocations` schema. Verified 28 migrations in journal, `@crimfig/database` build, `@crimfig/ads-api` build, 37/37 `api:check` OpenAPI operations, and `compiled-runtime-smoke.cjs`.
+## 2026-10-31 — PLAN-0053 readiness plan
+Drafted .agents/plans/PLAN-0053-launch-readiness-and-railway-configuration.md and docs/reviews/plan-0053/local-env-presence.json. Separated local absence from unverified Railway state and pilot from paid release. Paystack test mode accepted; Railway API key local only. No runtime/deployment changes or tests. Configuration actions remain DRAFT.
+
+## 2026-10-31 — PLAN-0053 existing Railway token confirmed
+Current `.com` API endpoint/projects query works with existing local token. Read staging/production active service variables (presence/equality only) and deployments; JWT/internal keys match, signing/R2 present. Public runtime checks pass; production loader differs from staging even at direct Railway origin. Focused Jest: 10 passed, 4 test-harness failures (locking chain/VM geometry); existing local test edits preserved. See docs/reviews/plan-0053/execution-checkpoint.md. No Railway writes/deployments/financial mutations. IN_PROGRESS.
+
+## 2026-10-31 — PLAN-0053 focused regressions resolved
+Preserved preexisting plan0047-0049-supply-auction.spec.ts edits; corrected locked transaction/evidence/browser fixtures and null house FK expectations, verified signed sentinel IDs, added suspended owner rejection/no writes. Focused AdStation + supply-auction Jest suites pass 15/15. jed.com.ng selected; direct read-only DB state check blocked by private DNS, no public proxy returned. No application runtime/deployment/network changes; pilot remains IN_PROGRESS pending intended account and actual domain proof.
+
+## 2026-10-31 — PLAN-0053 public DNS proof confirmed, backend rejection persists
+JED published challenge; Google/Cloudflare/local DNS exact-match checks pass. Two staging UI retries still report TXT absent. Source uses backend dns.resolveTxt; backend cache/runtime discrepancy unconfirmed. Owner record is correct; no further DNS edit requested. Evidence: docs/reviews/plan-0053/dns-proof.json and jed-public-dns-present-backend-rejected.png. No overrides/deployments/config changes; pilot IN_PROGRESS.
+
+## 2026-10-31 — PLAN-0054 public DNS ownership verification draft
+Drafted .agents/plans/PLAN-0054-reliable-dns-ownership-verification-with-public-resolvers.md: fixed Cloudflare/Google DoH endpoints, strict exact TXT parsing and bounded fallback, safe failure reasons/runtime reconciliation, preserved locked state/ownership checks, focused negative-first units and actual jed.com.ng staging acceptance. No new required env keys/API subscription. Draft only, no code/tests/deployment changes. PLAN-0053 remains IN_PROGRESS.
+
+## 2026-10-31 — PLAN-0053 resume / PLAN-0054 staging candidate
+Local DNS implementation confirmed, pending staging redeploy per PLAN-0054 checklist; actual UI still rejects. DNS/website-proof/AdStation/supply suites: 66/66 pass across 4 suites; Ads API Nest build passes. Isolated HEAD+two DNS runtime files staging candidate prepared in .tmp/plan0053-staging-dns/backend, manifest docs/reviews/plan-0053/staging-dns-candidate.json. No local .env included, no unrelated local changes bundled, no push/upload/deployment. Staging rollout authorization pending; production/paused services excluded.
+
+## 2026-10-31 — PLAN-0053 approved ADS staging deploy succeeds
+JED explicitly authorized deployment; isolated HEAD+DNS source uploaded to ADS-API staging only, candidate launch configured for Ads. Deployment 45fe31ca-03f3-45e7-acba-401bf5473bcc SUCCESS; package builds/compiled runtime smoke pass. Real verification persisted 2026-10-31T09:31:56.410Z with 30-day expiry/testing policy. Created real pilot network banner cf-slot-network-1dce0fa5ce5342cd; reloaded state testing/unchecked. Owner will paste staged snippet; real render/diagnostics/zero-charge evidence pending. No production/paused-service/env/Paystack changes. Evidence docs/reviews/plan-0053/execution-checkpoint.md.
+
+## 2026-10-31 — PLAN-0055 promoter separation / eligibility draft
+Documented canonical slot API reuse, real server render diagnostics, owner/freshness checks, server-side AdStation eligibility and legacy blind consideration verification/shared-website suspension audit. CrimFig slot journey/testing precedes AdStation implementation. No backend code/contract/schema/payment/deployment changes; drafting task only.
+
+## 2026-10-31 — PLAN-0053 staging endpoint/CORS check
+Owner-set ADS_PUBLIC_URL confirmed against staging Railway domain and actual loader base; latest deployment SUCCESS. Public loader/preflight CORS pass; CORP same-origin also observed. Corrected manual pilot snippet with crossorigin anonymous; canonical generation/public-media policy follow-up documented in PLAN-0055. No runtime/header/deployment changes. Evidence docs/reviews/plan-0053/staging-endpoint-cors.json; actual external-page acceptance still pending.
+
+## 2026-10-31 — PLAN-0055 publisher empty-space plan amendment
+Added loader/integration lifecycle requirements: temporary format-aware reservation, eligible house fallback, collapse on no-fill/request/asset/script failures, independent blocked-loader deadline, lazy/retry/stale-response/disposal handling and no false render/charge evidence. No runtime or financial behavior changed; draft only.
+
+## 2026-10-31 — PLAN-0053 actual publisher delivery failure
+Correct tag installed on jed.com.ng; real lazy request gets HTTP 500/INTERNAL_ERROR with valid ACAO *, request f723c32f-af0f-423d-b6e4-8d0b90bbe3fe. Current successful deployment 9151da5d-b0e0-400b-9a4b-d010d71d2968 logs corroborate status but no root stack. No render/zero-charge acceptance; no changes/deployments. Evidence docs/reviews/plan-0053/publisher-install-check.json.
+
+## 2026-10-31 — PLAN-0053/0055 owner-reported delivery 500
+Recorded exact consent-unknown ad request and generic 500 response, request 1761f3ee-7870-449b-ab42-af7d6312eb85 at 2026-10-31T10:19:17.288Z. Both plans require tracing underlying exception and reproducing consent-unknown case without fabricated consent; loader collapse tracked separately. Evidence docs/reviews/plan-0053/owner-reported-delivery-error-20261031.json. Documentation only; no replay/tests/runtime/deployment changes.
+
+## 2026-10-31 — PLAN-0055 readiness correction pass
+Removed silent evidence secret fallback (controlled503 on missing dedicated key), fixed loader timeout/asset failure/late/disposed/retry cleanup and render-readiness telemetry, canonical zero-initial-height/CORS/React snippets and transactional recent-render installation/legacy consideration checks. Backend 83/83 tests in5 suites, contract37/37 and Ads build pass. Isolated candidate prepared; manual dedicated evidence key/history-safe rotation + staging rollout pending. No server env/deploy/financial/production changes. See docs/reviews/plan-0053/plan0055-readiness-review.md.
+

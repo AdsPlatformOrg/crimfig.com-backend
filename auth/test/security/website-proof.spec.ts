@@ -77,9 +77,21 @@ test('deadline bounds stalled resolver', async () => {
 import { VerificationService } from '../../../api/ads-api/src/modules/verification/verification.service';
 function database(row: any) {
   const saved: any = {};
-  const query: any = { from: () => query, where: () => query, limit: async () => row ? [row] : [] };
+  const query: any = { from: () => query, where: () => query, limit: async () => row ? [row] : [], for: () => query };
   const update: any = { set: (value: any) => { Object.assign(saved, value); return update; }, where: () => update, returning: async () => [saved] };
-  return { select: () => query, update: jest.fn(() => update), saved };
+  const insert: any = { values: () => ({ returning: async () => [] }) };
+  const tx: any = {
+    execute: jest.fn(async () => ({ rows: [] })),
+    select: () => query,
+    update: jest.fn(() => update),
+    insert: jest.fn(() => insert),
+  };
+  return {
+    select: () => query,
+    update: jest.fn(() => update),
+    transaction: jest.fn(async (cb: any) => cb(tx)),
+    saved,
+  };
 }
 const site = { id: 'site', promoterId: 'owner', domain: 'example.com', url: target.href, verificationToken: token, verificationMethod: 'dns_txt', verifiedAt: new Date() };
 test('TXT chunks joined within one record and exact proof accepted', async () => {

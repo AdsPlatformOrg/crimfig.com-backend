@@ -256,7 +256,7 @@ export class DeliveryService {
   }
   function dispose(element){
     var lazy=lazySlots.get(element);if(lazy){lazy.disconnect();lazySlots.delete(element);}
-    var state=instances.get(element);if(state){state.closed=true;state.controller.abort();clearTimeout(state.timer);instances.delete(element);}
+    var state=instances.get(element);if(state){state.closed=true;state.controller.abort();clearTimeout(state.timer);if(state.assetCancel)state.assetCancel();instances.delete(element);}
     element.querySelectorAll('*').forEach(function(child){if(child.__cfCleanup)child.__cfCleanup();if(child.tagName==='VIDEO')child.pause();});
   }
   function requestSlot(element,token,base,consent){
@@ -266,16 +266,37 @@ export class DeliveryService {
       lazySlots.set(element,lazy);lazy.observe(element);return;
     }
     var state={generation:eventIdentity(),closed:false,controller:new AbortController(),timer:null};instances.set(element,state);
-    element.style.minHeight=element.style.minHeight||'90px';element.style.display='block';
-    state.timer=setTimeout(function(){state.closed=true;state.controller.abort();element.setAttribute('data-cf-state','unavailable');},15000);
+    if(!element.__cfSizing)element.__cfSizing={height:element.style.height||'',padding:element.style.padding||'',margin:element.style.margin||''};
+    element.style.height=element.__cfSizing.height;element.style.padding=element.__cfSizing.padding;element.style.margin=element.__cfSizing.margin;
+    var reservedHeight=Number(element.getAttribute('data-cf-height'));
+    element.style.minHeight=(reservedHeight>0&&reservedHeight<=1200?reservedHeight:90)+'px';element.style.display='block';
+    element.setAttribute('data-cf-state','loading');
+    function collapseSlot() {
+      if(state.assetCancel)state.assetCancel();
+      element.querySelectorAll('*').forEach(function(child){if(child.__cfCleanup)child.__cfCleanup();});
+      element.innerHTML='';
+      element.style.minHeight='0px';
+      element.style.height='0px';
+      element.style.padding='0px';
+      element.style.margin='0px';
+      element.style.display='none';
+      element.setAttribute('data-cf-state','unavailable');
+    }
+    state.timer=setTimeout(function(){state.closed=true;state.controller.abort();collapseSlot();},15000);
     var query='?domain='+encodeURIComponent(window.location.hostname)+'&consent='+(consent==='granted'?'granted':'unknown');
     fetch(base+'/api/v1/delivery/ad/'+encodeURIComponent(token)+query,{credentials:'omit',signal:state.controller.signal,headers:{Accept:'application/json'}})
       .then(function(res){if(!res.ok)throw new Error('Ad unavailable');return res.json();})
       .then(function(data){if(state.closed||instances.get(element)!==state||!element.isConnected)return;
-        clearTimeout(state.timer);state.closed=true;
-        if(data&&data.data){renderAdCard(element,data.data,'publisher_network',base);element.setAttribute('data-cf-state','rendered');}
-        else element.setAttribute('data-cf-state','unavailable');})
-      .catch(function(){clearTimeout(state.timer);if(instances.get(element)===state){state.closed=true;element.setAttribute('data-cf-state','unavailable');}});
+        if(!data||!data.data){state.closed=true;clearTimeout(state.timer);collapseSlot();return;}
+        var ad=data.data;
+        if(!ad.impToken||!['text','image','video'].includes(ad.adType)||ad.adType==='image'&&!resolvedMedia(ad.imageUrl,base)||ad.adType==='video'&&!resolvedMedia(ad.videoUrl,base))throw new Error('Invalid creative');
+        return renderAdCard(element,ad,'publisher_network',base,state).then(function(){
+          if(state.closed||instances.get(element)!==state||!element.isConnected)return;
+          clearTimeout(state.timer);state.closed=true;
+          element.style.minHeight='0px';element.style.height='';element.setAttribute('data-cf-state','rendered');
+          sendRenderBeacon(ad,base);trackViewability(element.firstElementChild,ad,ad.adType==='video'?2:1,base);
+        });})
+      .catch(function(){clearTimeout(state.timer);if(instances.get(element)===state){state.closed=true;collapseSlot();}});
   }
   function initSlots(){
     if(typeof document==='undefined'||typeof window==='undefined')return;
@@ -291,8 +312,18 @@ export class DeliveryService {
     });
   }
 
-  function renderAdCard(container, ad, mode, slotApiBase) {
+  function renderAdCard(container, ad, mode, slotApiBase, state) {
     var activeBase = slotApiBase || apiBase;
+    var assets=[];
+    function readyAsset(asset,event){
+      assets.push(new Promise(function(resolve,reject){
+        function cleanup(){asset.removeEventListener(event,loaded);asset.removeEventListener('error',failed);}
+        function loaded(){cleanup();resolve();}
+        function failed(){cleanup();reject(new Error('Creative unavailable'));}
+        asset.addEventListener(event,loaded,{once:true});asset.addEventListener('error',failed,{once:true});
+        state.assetCancel=function(){cleanup();reject(new Error('Creative disposed'));};
+      }));
+    }
     var card = document.createElement('div');
     card.style.cssText = "border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:'Poppins',Arial,Helvetica,sans-serif;max-width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;";
 
@@ -312,12 +343,13 @@ export class DeliveryService {
       var videoWrap = document.createElement('div');
       videoWrap.style.cssText = 'position:relative;margin-bottom:12px;';
       var video = document.createElement('video');
+      readyAsset(video,'loadeddata');
       video.src = videoSource;
       if (ad.posterUrl) video.poster = resolvedMedia(ad.posterUrl, activeBase);
       video.muted = true;
       video.defaultMuted = true;
       video.playsInline = true;
-      video.preload = 'metadata';
+      video.preload = 'auto';
       video.setAttribute('playsinline', '');
       video.setAttribute('muted', '');
       video.setAttribute('disablePictureInPicture', '');
@@ -377,6 +409,7 @@ export class DeliveryService {
       card.appendChild(videoWrap);
     } else if (ad.imageUrl && resolvedMedia(ad.imageUrl, activeBase)) {
       var img = document.createElement('img');
+      readyAsset(img,'load');
       img.src = resolvedMedia(ad.imageUrl, activeBase);
       img.alt = ad.headline || 'Advertisement';
       img.style.cssText = 'width:100%;height:auto;object-fit:contain;border-radius:8px;margin-bottom:12px;display:block;';
@@ -419,11 +452,10 @@ export class DeliveryService {
 
     container.innerHTML = '';
     container.appendChild(card);
-    sendRenderBeacon(ad, activeBase);
     function engagement(type){fetch(activeBase+'/api/v1/delivery/interaction',{method:'POST',credentials:'omit',keepalive:true,headers:{'Content-Type':'application/json'},body:JSON.stringify({eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,type:type,source:'embed'})}).catch(function(){});}
     card.addEventListener('pointerenter',function(){engagement('hover');},{once:true});
     card.addEventListener('pointerdown',function(event){if(event.pointerType==='touch')engagement('touch');},{once:true});
-    trackViewability(card, ad, ad.adType === 'video' ? 2 : 1, activeBase);
+    return Promise.all(assets);
   }
 
   if (typeof window !== 'undefined') {

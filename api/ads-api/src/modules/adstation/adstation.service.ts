@@ -18,7 +18,7 @@ import {
   adsAuctionDecisions,
   adsSupplyStateHistory,
 } from '@crimfig/database/schema';
-import { and, eq, desc, sql } from 'drizzle-orm';
+import { and, eq, desc, gte, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
 
 export interface CreateAdstationSlotDto {
@@ -293,18 +293,20 @@ export class AdstationService {
     const htmlSnippet = [
       `<!-- CrimFig Ad Slot: ${slot.name} (${slot.slotTagId}) -->`,
       `<ins class="crimfig-pub-slot"`,
-      `     style="display:block;min-height:${slot.height || 250}px;"`,
+      `     style="display:block;min-height:0;"`,
+      `     data-cf-height="${slot.height || 90}"`,
+      `     data-cf-api-base="${adsPublicUrl}"`,
       `     data-ad-slot="${slot.slotTagId}"`,
       `     data-ad-format="${slot.format || 'banner'}"`,
       `     data-full-width-responsive="${slot.responsive ? 'true' : 'false'}"></ins>`,
-      `<script async src="${adsPublicUrl}/api/v1/delivery/embed.js?slot=${slot.slotTagId}"></script>`,
+      `<script async crossorigin="anonymous" src="${adsPublicUrl}/api/v1/delivery/embed.js?slot=${slot.slotTagId}"></script>`,
     ].join('\n');
 
     const nextJsSnippet = [
       `// Next.js / React Component Usage (${website?.domain || 'your-domain.com'})`,
       `<CrimFigAdSlot`,
-      `  slotId="${slot.slotTagId}"`,
-      `  format="${slot.format || 'banner'}"`,
+      `  slotTagId="${slot.slotTagId}"`,
+      `  publisherKey="${website?.id || slot.websiteId}"`,
       `  apiBaseUrl="${adsPublicUrl}"`,
       `/>`,
     ].join('\n');
@@ -327,7 +329,10 @@ export class AdstationService {
    * Inspects recent serves and render/impression receipts from the registered website domain.
    */
   async checkSlotInstallation(promoterId: string, slotId: string) {
-    const [slot] = await this.db
+    return this.db.transaction(async tx => {
+    await tx.execute(sql`set local lock_timeout='5s'`);
+    await tx.execute(sql`set local statement_timeout='8s'`);
+    const [slot] = await tx
       .select()
       .from(adstationSlots)
       .where(
@@ -336,43 +341,49 @@ export class AdstationService {
           eq(adstationSlots.promoterId, promoterId),
         ),
       )
-      .limit(1);
+      .for('update').limit(1);
 
     if (!slot) {
       throw new NotFoundException('AdStation slot not found or unauthorized');
     }
 
-    const [website] = await this.db
+    const [website] = await tx
       .select()
       .from(adsPromoterWebsites)
       .where(eq(adsPromoterWebsites.id, slot.websiteId))
-      .limit(1);
+      .for('share').limit(1);
 
     if (!website) {
       throw new NotFoundException('Website not found');
     }
 
-    const [serveStats] = await this.db
+    if (website.promoterId !== promoterId) throw new ForbiddenException('Website ownership changed');
+    if (website.verificationStatus !== 'verified' || !website.verificationExpiresAt || website.verificationExpiresAt <= new Date()) {
+      throw new BadRequestException('Reverify domain ownership before certifying installation.');
+    }
+    if (website.isSuspended || website.policyStatus === 'suspended') throw new ForbiddenException('Website is suspended');
+
+    const [serveStats] = await tx
       .select({
         serveCount: sql<number>`count(*)::int`,
         lastServedAt: sql<Date | null>`max(${adsServes.servedAt})`,
       })
       .from(adsServes)
-      .where(eq(adsServes.slotHandle, slot.slotTagId));
+      .where(and(eq(adsServes.slotHandle, slot.slotTagId), gte(adsServes.servedAt, new Date(Date.now() - 24 * 60 * 60 * 1000))));
 
-    const [interactionStats] = await this.db
+    const [interactionStats] = await tx
       .select({
         renderCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'render')::int`,
         impressionCount: sql<number>`count(*) filter (where ${adsInteractions.type} in ('impression', 'viewable_impression'))::int`,
       })
       .from(adsInteractions)
-      .where(eq(adsInteractions.slotId, slot.id));
+      .where(and(eq(adsInteractions.slotId, slot.id), gte(adsInteractions.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000))));
 
     const totalServes = serveStats?.serveCount || 0;
     const totalRenders =
       (interactionStats?.renderCount || 0) +
       (interactionStats?.impressionCount || 0);
-    const isInstalled = totalServes > 0;
+    const isInstalled = totalServes > 0 && totalRenders > 0;
 
     const nextInstallationStatus = isInstalled ? 'verified' : 'missing';
     const nextLifecycleStatus =
@@ -388,19 +399,18 @@ export class AdstationService {
 
     const diagnostic = isInstalled
       ? `Verified embed activity on ${website.domain}: ${totalServes} ad serve(s), ${totalRenders} render/impression beacon(s).`
-      : `No ad requests received yet for slot tag "${slot.slotTagId}" on https://${website.domain}. Install the snippet and load the page once, then re-run this check.`;
+      : totalServes > 0
+        ? `Ad requests detected on ${website.domain}, but no render receipt has been received. Check delivery errors and load the publisher page again.`
+        : `No ad requests received yet for slot tag "${slot.slotTagId}" on https://${website.domain}. Install the snippet and load the page once, then re-run this check.`;
 
-    const [updatedSlot] = await this.db
+    const [updatedSlot] = await tx
       .update(adstationSlots)
       .set({
         installationStatus: nextInstallationStatus,
         installationCheckedAt: new Date(),
         installationDiagnostic: diagnostic,
         lifecycleStatus: nextLifecycleStatus,
-        isConsiderationVerified:
-          slot.isConsiderationSlot && isInstalled
-            ? true
-            : slot.isConsiderationVerified,
+        isConsiderationVerified: slot.isConsiderationSlot ? isInstalled : slot.isConsiderationVerified,
         considerationLastCheckedAt: slot.isConsiderationSlot
           ? new Date()
           : slot.considerationLastCheckedAt,
@@ -410,7 +420,7 @@ export class AdstationService {
       .returning();
 
     if (slot.isConsiderationSlot && isInstalled) {
-      await this.db
+      await tx
         .update(adsPromoterWebsites)
         .set({
           considerationSlotActive: true,
@@ -430,6 +440,7 @@ export class AdstationService {
       diagnostic,
       slot: updatedSlot,
     };
+    });
   }
 
   /**
@@ -542,30 +553,12 @@ export class AdstationService {
       );
     }
 
-    const [updatedSlot] = await this.db
-      .update(adstationSlots)
-      .set({
-        isConsiderationVerified: true,
-        installationStatus: 'verified',
-        installationCheckedAt: new Date(),
-        considerationLastCheckedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(adstationSlots.id, slotId))
-      .returning();
-
-    await this.db
-      .update(adsPromoterWebsites)
-      .set({
-        considerationSlotActive: true,
-        considerationSlotVerifiedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(adsPromoterWebsites.id, websiteId));
+    const result = await this.checkSlotInstallation(promoterId, slotId);
+    if (!result.isInstalled) throw new BadRequestException('A recent real render receipt is required before verifying this placement.');
 
     return {
       status: 'verified',
-      slot: updatedSlot,
+      slot: result.slot,
     };
   }
 

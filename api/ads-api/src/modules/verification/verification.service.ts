@@ -6,6 +6,7 @@ import { adsPromoterWebsites, adsPromoterApps,adsSupplyStateHistory } from '@cri
 import { and, eq, sql } from 'drizzle-orm';
 import * as dns from 'dns/promises';
 import { deadline, fetchWebsiteProof, hasVerificationMeta, websiteTarget } from './website-proof';
+import { resolveTxtDnsProof } from './dns-proof-resolver';
 
 @Injectable()
 export class VerificationService {
@@ -30,6 +31,15 @@ export class VerificationService {
       throw new NotFoundException('Website not found');
     }
 
+    // Rate-limiting safeguard: enforce 10-second cooldown between consecutive verification attempts
+    if (website.lastVerificationAttemptAt) {
+      const elapsedMs = Date.now() - new Date(website.lastVerificationAttemptAt).getTime();
+      if (elapsedMs < 10000) {
+        const remainingSec = Math.ceil((10000 - elapsedMs) / 1000);
+        throw new ConflictException(`Verification was attempted recently. Please wait ${remainingSec} second${remainingSec === 1 ? '' : 's'} before retrying.`);
+      }
+    }
+
     const token = website.verificationToken;
     let isVerified = false;
     let errorMessage: string | null = null;
@@ -40,10 +50,23 @@ export class VerificationService {
         throw new Error('Invalid verification token; re-register this website');
       }
       if (website.verificationMethod === 'dns_txt') {
-        const records = await deadline(dns.resolveTxt(target.hostname), 2000);
         const expected = `crimfig-site-verification=${token}`;
-        isVerified = records.some(record => record.join('') === expected);
-        if (!isVerified) errorMessage = 'Exact DNS TXT verification record was not found.';
+        // First try local resolver
+        try {
+          const records = await deadline(dns.resolveTxt(target.hostname), 2000);
+          isVerified = records.some(record => record.join('') === expected);
+        } catch {
+          isVerified = false;
+        }
+
+        // If not verified locally, query public DoH resolvers (Cloudflare primary, Google fallback) per PLAN-0054
+        if (!isVerified) {
+          const dohResult = await resolveTxtDnsProof(target.hostname, token);
+          isVerified = dohResult.isVerified;
+          if (!isVerified) {
+            errorMessage = dohResult.errorMessage || 'Exact DNS TXT verification record was not found.';
+          }
+        }
       } else if (website.verificationMethod === 'html_file_and_meta_tag') {
         isVerified = hasVerificationMeta(await fetchWebsiteProof(target), token);
         if (!isVerified) errorMessage = 'Exact crimfig-site-verification meta tag was not found.';

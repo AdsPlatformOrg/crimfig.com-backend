@@ -1,4 +1,4 @@
-import {BadRequestException,ConflictException,Inject,Injectable,NotFoundException} from '@nestjs/common';
+import {BadRequestException,ConflictException,Inject,Injectable,NotFoundException,ServiceUnavailableException} from '@nestjs/common';
 import {and,desc,eq,sql} from 'drizzle-orm';
 import {randomUUID} from 'crypto';
 import * as s from '@crimfig/database/schema';
@@ -9,7 +9,18 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]
 @Injectable()
 export class EvidenceService {
   constructor(@Inject('DATABASE_CONNECTION')private readonly db:any,private readonly opportunity:OpportunityClient){}
-  private signingEnv(){return {...process.env,ADS_EVIDENCE_HASH_KEY_ID:process.env.ADS_EVIDENCE_HASH_KEY_ID||(process.env.ADS_EVIDENCE_HASH_SECRET?'evidence-v1':'impression-v1'),ADS_EVIDENCE_HASH_SECRET:process.env.ADS_EVIDENCE_HASH_SECRET||process.env.ADS_IMPRESSION_SIGNING_KEY};}
+  private signingEnv() {
+    const rawSecret = process.env.ADS_EVIDENCE_HASH_SECRET;
+    if (!rawSecret || Buffer.byteLength(rawSecret) < 32) {
+      throw new ServiceUnavailableException('Dedicated ad evidence signing is not configured');
+    }
+    const keyId = process.env.ADS_EVIDENCE_HASH_KEY_ID || 'evidence-v1';
+    return {
+      ...process.env,
+      ADS_EVIDENCE_HASH_KEY_ID: keyId,
+      ADS_EVIDENCE_HASH_SECRET: rawSecret,
+    };
+  }
   async append(eventId:string,payload:Record<string,unknown>,existingTx?:any){
     const write=(tx:any)=>appendAdEvidence(tx,eventId,payload,this.signingEnv());
     return existingTx?write(existingTx):this.db.transaction(write);

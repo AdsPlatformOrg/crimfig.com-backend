@@ -150,7 +150,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
   });
 
   describe('A06–A09 & A19–A20: Supply Admission, Zero-Charge House Ads & Shadow Serving', () => {
-    function buildDeliveryService(slotRow: any | null, candidates: any[] = []) {
+    function buildDeliveryService(slotRow: any | null, candidates: any[] = [], ownerStatus = 'ACTIVE') {
       const insertedServes: any[] = [];
       const insertedDecisions: any[] = [];
       const insertedInteractions: any[] = [];
@@ -235,6 +235,32 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
             };
           }),
         })),
+        execute: jest.fn(async () => ({ rows: [] })),
+        transaction: jest.fn(async (callback: any) => {
+          const tx: any = {
+            execute: jest.fn(async () => ({ rows: [] })),
+            insert: db.insert,
+            update: db.update,
+            select: jest.fn((fields: any) => ({
+              from: jest.fn((table: any) => {
+                const rows = table === require('@crimfig/database/schema').users
+                  ? [{ status: ownerStatus }]
+                  : table === require('@crimfig/database/schema').adstationSlots && slotRow ? [{
+                    slot: { ...slotRow.slot, promoterId: slotRow.promoter.id },
+                    site: { ...slotRow.website, promoterId: slotRow.promoter.id },
+                    promoter: { ...slotRow.promoter, userId: '99999999-9999-4999-8999-999999999999' },
+                  }] : [];
+                const query: any = {};
+                query.innerJoin = jest.fn(() => query);
+                query.where = jest.fn(() => query);
+                query.for = jest.fn(() => query);
+                query.limit = jest.fn(async () => rows);
+                return query;
+              }),
+            })),
+          };
+          return callback(tx);
+        }),
       };
 
       const tokenService = new ImpressionTokenService();
@@ -245,6 +271,8 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
         tokenService,
         auctionEngine,
         fraudRules,
+        undefined,
+        { append: jest.fn(async () => ({ id: 'test-evidence' })) } as any,
       );
       return {
         service,
@@ -267,6 +295,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
           id: '55555555-5555-4555-8555-555555555555',
           domain: 'jed.com.ng',
           verificationStatus: 'verified',
+          verificationExpiresAt: new Date(Date.now() + 86400000),
           policyStatus: 'testing',
           isActive: true,
           isSuspended: false,
@@ -305,11 +334,24 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
       ).rejects.toThrow(ForbiddenException);
     });
 
+    it('rejects an owner suspended before the locked commit without writing a serve or decision', async () => {
+      const row = {
+        slot: { id: '44444444-4444-4444-8444-444444444444', slotTagId: 'cf-slot-network-owner-race', format: 'banner', lifecycleStatus: 'testing', isActive: true },
+        website: { id: '55555555-5555-4555-8555-555555555555', domain: 'jed.com.ng', verificationStatus: 'verified', verificationExpiresAt: new Date(Date.now() + 86400000), policyStatus: 'testing', isActive: true, isSuspended: false },
+        promoter: { id: '66666666-6666-4666-8666-666666666666', isActive: true, isSuspended: false, trustScore: 80 },
+      };
+      const { service, insertedServes, insertedDecisions, insertedInteractions } = buildDeliveryService(row, [], 'SUSPENDED');
+      await expect(service.getAdForPlacement(row.slot.slotTagId, '203.0.113.20', 'Mozilla/5.0 Chrome/120.0', 'jed.com.ng', undefined, undefined, undefined, { origin: 'https://jed.com.ng' })).rejects.toThrow(ForbiddenException);
+      expect(insertedServes).toHaveLength(0);
+      expect(insertedDecisions).toHaveLength(0);
+      expect(insertedInteractions).toHaveLength(0);
+    });
+
     it('an explicit paid flag cannot issue a paid serve on approved active inventory while authority is unavailable',async()=>{
       const previous=process.env.ADS_PAID_SERVING_ENABLED;process.env.ADS_PAID_SERVING_ENABLED='true';
       try {
         const slotRow={slot:{id:'44444444-4444-4444-8444-444444444444',slotTagId:'cf-slot-network-releasegate',format:'banner',lifecycleStatus:'active',isActive:true},
-          website:{id:'55555555-5555-4555-8555-555555555555',domain:'jed.com.ng',verificationStatus:'verified',policyStatus:'approved',isActive:true,isSuspended:false},
+          website:{id:'55555555-5555-4555-8555-555555555555',domain:'jed.com.ng',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'approved',isActive:true,isSuspended:false},
           promoter:{id:'66666666-6666-4666-8666-666666666666',isActive:true,isSuspended:false,trustScore:90}};
         const {service,insertedServes}=buildDeliveryService(slotRow);
         await service.getAdForPlacement(slotRow.slot.slotTagId,'203.0.113.20','Mozilla/5.0 Chrome/120.0','jed.com.ng',undefined,undefined,{country:'NG'},{origin:'https://jed.com.ng'});
@@ -331,6 +373,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
           id: '55555555-5555-4555-8555-555555555555',
           domain: 'jed.com.ng',
           verificationStatus: 'verified',
+          verificationExpiresAt: new Date(Date.now() + 86400000),
           policyStatus: 'testing',
           isActive: true,
           isSuspended: false,
@@ -359,8 +402,12 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
       expect(ad.isHouseAd).toBe(true);
       expect(ad.headline).toBe(CRIMFIG_HOUSE_CREATIVE.headline);
       expect(insertedServes).toHaveLength(1);
-      expect(insertedServes[0].campaignId).toBe(HOUSE_CAMPAIGN_UUID);
-      expect(insertedServes[0].creativeId).toBe(HOUSE_CREATIVE_UUID);
+      expect(insertedServes[0].campaignId).toBeNull();
+      expect(insertedServes[0].creativeId).toBeNull();
+      expect(new ImpressionTokenService().verifyToken(ad.impToken, '203.0.113.10')).toMatchObject({
+        campaignId: HOUSE_CAMPAIGN_UUID,
+        creativeId: HOUSE_CREATIVE_UUID,
+      });
       expect(insertedServes[0].inventoryClass).toBe('house');
       expect(insertedServes[0].billingPriceNanos).toBe(0n);
       expect(insertedServes[0].clearingPriceMicros).toBe(0);
@@ -391,6 +438,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
           id: '55555555-5555-4555-8555-555555555555',
           domain: 'jed.com.ng',
           verificationStatus: 'verified',
+          verificationExpiresAt: new Date(Date.now() + 86400000),
           policyStatus: 'approved',
           isActive: true,
           isSuspended: false,
@@ -451,6 +499,12 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
           this.attributes.set(name, val);
         },
         innerHTML: '',
+        get firstElementChild() { return this.children[0]; },
+        style: { minHeight: '', display: '' },
+        isConnected: true,
+        getBoundingClientRect() {
+          return { top: 0, left: 0, bottom: 90, right: 728, width: 728, height: 90 };
+        },
         children: [] as any[],
         appendChild(child: any) {
           this.children.push(child);
@@ -459,6 +513,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
 
       const createElement = (tag: string) => ({
         tag,
+        isConnected: true,
         style: { cssText: '' },
         textContent: '',
         children: [] as any[],
@@ -469,7 +524,16 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
         setAttribute(k: string, v: string) {
           this.attributes[k] = v;
         },
-        addEventListener() {},
+        getAttribute(k: string) {
+          return this.attributes[k];
+        },
+        getBoundingClientRect() {
+          return { top: 0, left: 0, bottom: 90, right: 728, width: 728, height: 90 };
+        },
+        addEventListener(event: string, callback: () => void) {
+          if (tag === 'img' && event === 'load') Promise.resolve().then(callback);
+        },
+        removeEventListener() {},
       });
 
       const sandbox: any = {
@@ -479,10 +543,12 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
         },
         window: {
           location: { hostname: 'jed.com.ng' },
+          innerHeight: 1000,
+          innerWidth: 1000,
           cfPubQ: [],
           IntersectionObserver: function (cb: any) {
             intersectionCallback = cb;
-            return { observe: jest.fn() };
+            return { observe: jest.fn(), disconnect: jest.fn() };
           },
         },
         document: {
@@ -506,6 +572,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
           fetchedUrls.push({ url, options });
           if (url.includes('/api/v1/delivery/ad/')) {
             return Promise.resolve({
+              ok: true,
               json: () =>
                 Promise.resolve({
                   data: {
@@ -525,19 +592,29 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
           }
           return Promise.resolve({ ok: true });
         }),
-        setTimeout: (fn: any) => {
-          fn();
+        setTimeout: (fn: any, delay: number) => {
+          if (delay < 15000) fn();
           return 1;
         },
         clearTimeout: jest.fn(),
+        setInterval: jest.fn(() => 2),
+        clearInterval: jest.fn(),
+        AbortController,
         Date,
         Math,
         JSON,
         encodeURIComponent,
+        MutationObserver: class {
+          observe() {}
+          disconnect() {}
+        },
         console: { warn: jest.fn() },
       };
       sandbox.window.document = sandbox.document;
       sandbox.window.fetch = sandbox.fetch;
+      sandbox.window.addEventListener = jest.fn();
+      sandbox.window.removeEventListener = jest.fn();
+      sandbox.document.removeEventListener = jest.fn();
 
       vm.runInNewContext(scriptCode, sandbox);
       // Wait for Promise microtasks from fetch().then().then()
