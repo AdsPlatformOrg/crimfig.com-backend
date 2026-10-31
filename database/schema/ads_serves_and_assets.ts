@@ -52,6 +52,8 @@ export const adsMediaAssets = pgTable(
     thumbnailUrl: text("thumbnail_url"),
 
     status: mediaAssetStatusEnum("status").notNull().default("pending"),
+    primaryProvider: varchar("primary_provider", { length: 32 }).notNull().default("cloudflare_r2"),
+    replicationStatus: varchar("replication_status", { length: 20 }).notNull().default("ready"),
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
@@ -69,6 +71,35 @@ export const adsMediaAssets = pgTable(
 
 export type AdsMediaAsset = typeof adsMediaAssets.$inferSelect;
 export type NewAdsMediaAsset = typeof adsMediaAssets.$inferInsert;
+
+export const adsMediaAssetLocations = pgTable(
+  "ads_media_asset_locations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    assetId: uuid("asset_id").notNull().references(() => adsMediaAssets.id, { onDelete: "cascade" }),
+    provider: varchar("provider", { length: 32 }).notNull(),
+    role: varchar("role", { length: 12 }).notNull().default("primary"),
+    bucket: varchar("bucket", { length: 255 }).notNull(),
+    storageKey: varchar("storage_key", { length: 500 }).notNull(),
+    status: varchar("status", { length: 20 }).notNull().default("ready"),
+    bytes: bigint("bytes", { mode: "number" }).notNull().default(0),
+    contentType: varchar("content_type", { length: 100 }),
+    etag: varchar("etag", { length: 255 }),
+    sha256: varchar("sha256", { length: 64 }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }).defaultNow(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("ads_media_asset_locations_asset_provider_uq").on(t.assetId, t.provider),
+    index("ads_media_asset_locations_provider_status_idx").on(t.provider, t.status),
+    index("ads_media_asset_locations_key_idx").on(t.storageKey),
+  ]
+);
+
+export type AdsMediaAssetLocation = typeof adsMediaAssetLocations.$inferSelect;
+export type NewAdsMediaAssetLocation = typeof adsMediaAssetLocations.$inferInsert;
 
 /**
  * ads_serves

@@ -21,6 +21,8 @@ import { eq, and, or, inArray } from "drizzle-orm";
 import * as crypto from "crypto";
 import * as path from "path";
 import { FirebaseStorageService } from "./firebase-storage.service";
+import { MediaStorageRouter } from "./media-storage-router.service";
+import { adsMediaAssetLocations } from "@crimfig/database/schema";
 import { ADS_MEDIA_UPLOAD_SETTINGS } from "../../config/ads-settings.constants";
 
 export interface PresignRequest {
@@ -54,6 +56,7 @@ export class UploadsService {
     private readonly db: NodePgDatabase<typeof schema>,
     private readonly configService: ConfigService,
     private readonly firebaseStorageService: FirebaseStorageService,
+    private readonly storageRouter: MediaStorageRouter,
   ) {}
 
   /**
@@ -226,29 +229,29 @@ export class UploadsService {
         : ADS_MEDIA_UPLOAD_SETTINGS.storage.imagePrefix;
     const storageKey = `${prefix}${Date.now()}-${sha256.substring(0, 16)}.${ext}`;
 
-    const bucket = this.firebaseStorageService.getBucket();
-
-    if (!bucket)
+    if (!this.storageRouter.isConfigured()) {
       throw new ServiceUnavailableException(
         "Media storage is unavailable. Your file was not uploaded; please try again later.",
       );
-    const firebaseFile = bucket.file(storageKey);
-    await firebaseFile.save(file.buffer, {
+    }
+
+    await this.storageRouter.putObject({
+      key: storageKey,
+      body: file.buffer,
+      contentType: file.mimetype,
+      sha256,
       metadata: {
-        contentType: file.mimetype,
-        metadata: {
-          ownerId,
-          originalName: file.originalname,
-          sha256,
-          isPrivate: "true",
-        },
+        ownerId,
+        originalName: file.originalname,
+        sha256,
+        isPrivate: "true",
       },
     });
 
     // Server-managed private access URL
     const cdnUrl = `/api/v1/uploads/media/${storageKey}`;
 
-    // 3. Persist asset in ads_media_assets
+    // 3. Persist asset in ads_media_assets and location records
     const [asset] = await this.db
       .insert(adsMediaAssets)
       .values({
@@ -259,8 +262,25 @@ export class UploadsService {
         bytes: file.size,
         sha256,
         status: "ready",
+        primaryProvider: this.storageRouter.getPrimaryAdapter().provider,
+        replicationStatus: "ready",
       })
       .returning();
+
+    await this.db
+      .insert(adsMediaAssetLocations)
+      .values({
+        assetId: asset.id,
+        provider: this.storageRouter.getPrimaryAdapter().provider,
+        role: "primary",
+        bucket: "r2-or-firebase",
+        storageKey,
+        status: "ready",
+        bytes: file.size,
+        contentType: file.mimetype,
+        sha256,
+      })
+      .onConflictDoNothing();
 
     return {
       assetId: asset.id,
@@ -367,20 +387,18 @@ export class UploadsService {
       for (let i = 0; i < assets.length; i++) {
         const asset = assets[i];
         uploaded.push(asset.storageKey);
-        await bucket
-          .file(asset.storageKey)
-          .save(checked[i].file.buffer, {
-            resumable: false,
-            metadata: {
-              contentType: asset.mimeType,
-              metadata: {
-                ownerId,
-                sha256: asset.sha256,
-                isPrivate: "true",
-                preparationGroupId: groupId,
-              },
-            },
-          });
+        await this.storageRouter.putObject({
+          key: asset.storageKey,
+          body: checked[i].file.buffer,
+          contentType: asset.mimeType,
+          sha256: asset.sha256,
+          metadata: {
+            ownerId,
+            sha256: asset.sha256,
+            isPrivate: "true",
+            preparationGroupId: groupId,
+          },
+        });
       }
       persistenceStarted = true;
       const stored = await this.db.transaction(async (tx) => {
@@ -492,26 +510,20 @@ export class UploadsService {
       sha256,
     );
 
-    const bucket = this.firebaseStorageService.getBucket();
-    let uploadUrl = "";
-    const expiresAt = new Date(
-      Date.now() +
-        ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60 * 1000,
-    ).toISOString();
-
-    if (!bucket)
+    if (!this.storageRouter.isConfigured()) {
       throw new ServiceUnavailableException(
         "Media storage is unavailable. No upload URL was created; please try again later.",
       );
-    const fileRef = bucket.file(storageKey);
-    const [signedUrl] = await fileRef.getSignedUrl({
-      action: "write",
-      expires:
-        Date.now() +
-        ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60 * 1000,
+    }
+
+    const presigned = await this.storageRouter.createUploadUrl({
+      key: storageKey,
       contentType: params.contentType,
+      bytes: params.contentLength,
+      expiresInSeconds: ADS_MEDIA_UPLOAD_SETTINGS.storage.signedUrlTtlMinutes * 60,
     });
-    uploadUrl = signedUrl;
+    const uploadUrl = presigned.url;
+    const expiresAt = presigned.expiresAt.toISOString();
 
     const cdnUrl = `/api/v1/uploads/media/${storageKey}`;
 
@@ -670,22 +682,13 @@ export class UploadsService {
       throw new NotFoundException("Media asset not found or unauthorized");
     }
 
-    const bucket = this.firebaseStorageService.getBucket();
-    if (!bucket)
-      throw new ServiceUnavailableException(
-        "Media storage is unavailable. Upload completion could not be verified.",
-      );
-    const object = bucket.file(asset.storageKey);
-    const [exists] = await object.exists();
-    if (!exists)
+    const stat = await this.storageRouter.statObject(asset.storageKey);
+    if (!stat) {
       throw new BadRequestException(
         "Upload is incomplete. Upload the file before marking it complete.",
       );
-    const [metadata] = await object.getMetadata();
-    if (
-      Number(metadata.size) !== asset.bytes ||
-      metadata.contentType !== asset.mimeType
-    ) {
+    }
+    if (stat.bytes !== asset.bytes) {
       throw new BadRequestException(
         "Uploaded file does not match the expected size or type. Please upload it again.",
       );
@@ -742,15 +745,13 @@ export class UploadsService {
       throw new BadRequestException(
         "This media belongs to a saved creative and cannot be deleted independently.",
       );
-    // If bucket is active, remove from Firebase storage
     try {
-      const bucket = this.firebaseStorageService.getBucket();
-      if (bucket && asset.storageKey) {
-        await bucket.file(asset.storageKey).delete({ ignoreNotFound: true });
+      if (asset.storageKey) {
+        await this.storageRouter.deleteObject(asset.storageKey);
       }
     } catch (err: any) {
       this.logger.warn(
-        `Could not delete file from Firebase bucket: ${err.message}`,
+        `Could not delete file from media storage: ${err.message}`,
       );
     }
 

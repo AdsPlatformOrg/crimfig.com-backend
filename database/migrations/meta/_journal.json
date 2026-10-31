@@ -190,6 +190,13 @@
       "when": 1793420000000,
       "tag": "0027_financial_auth_challenges",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1793430000000,
+      "tag": "0028_media_storage_r2_adapter",
+      "breakpoints": true
     }
   ]
 }

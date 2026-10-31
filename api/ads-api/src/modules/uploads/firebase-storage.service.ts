@@ -2,6 +2,13 @@ import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getStorage } from 'firebase-admin/storage';
+import {
+  MediaStorageAdapter,
+  ObjectStat,
+  PutObjectInput,
+  ReadRange,
+  StorageProvider,
+} from './storage-adapter.interface';
 
 const cleanEnvVal = (val?: string): string => {
   if (!val) return '';
@@ -16,8 +23,9 @@ const cleanEnvVal = (val?: string): string => {
 };
 
 @Injectable()
-export class FirebaseStorageService implements OnModuleInit {
+export class FirebaseStorageService implements OnModuleInit, MediaStorageAdapter {
   private readonly logger = new Logger(FirebaseStorageService.name);
+  readonly provider: StorageProvider = 'firebase';
   private bucketInstance: any;
 
   constructor(private readonly configService: ConfigService) {}
@@ -50,7 +58,7 @@ export class FirebaseStorageService implements OnModuleInit {
 
       if (!projectId || !clientEmail || !privateKey) {
         this.logger.warn(
-          'Firebase service account credentials missing in environment. Media uploads are unavailable until storage is configured.',
+          'Firebase service account credentials missing in environment. Firebase fallback dormant.',
         );
         return;
       }
@@ -79,5 +87,124 @@ export class FirebaseStorageService implements OnModuleInit {
 
   getBucket() {
     return this.bucketInstance;
+  }
+
+  isConfigured(): boolean {
+    return !!this.bucketInstance;
+  }
+
+  async putObject(input: PutObjectInput): Promise<ObjectStat> {
+    const bucket = this.getBucket();
+    if (!bucket) throw new Error('Firebase Storage bucket is unavailable');
+
+    const file = bucket.file(input.key);
+    await file.save(input.body, {
+      metadata: {
+        contentType: input.contentType,
+        metadata: input.metadata,
+      },
+    });
+
+    return {
+      key: input.key,
+      bytes: input.body.length,
+      contentType: input.contentType,
+      sha256: input.sha256,
+      lastModified: new Date(),
+    };
+  }
+
+  async createUploadUrl(input: {
+    key: string;
+    contentType: string;
+    bytes: number;
+    expiresInSeconds: number;
+  }): Promise<{ url: string; headers?: Record<string, string>; expiresAt: Date }> {
+    const bucket = this.getBucket();
+    if (!bucket) throw new Error('Firebase Storage bucket is unavailable');
+
+    const file = bucket.file(input.key);
+    const expiresAt = new Date(Date.now() + input.expiresInSeconds * 1000);
+    const [url] = await file.getSignedUrl({
+      action: 'write',
+      expires: expiresAt,
+      contentType: input.contentType,
+      version: 'v4',
+    });
+
+    return {
+      url,
+      expiresAt,
+    };
+  }
+
+  async statObject(key: string): Promise<ObjectStat | null> {
+    const bucket = this.getBucket();
+    if (!bucket) return null;
+
+    const file = bucket.file(key);
+    const [exists] = await file.exists();
+    if (!exists) return null;
+
+    const [metadata] = await file.getMetadata();
+    return {
+      key,
+      bytes: Number(metadata.size || 0),
+      contentType: metadata.contentType || 'application/octet-stream',
+      etag: metadata.etag,
+      lastModified: metadata.updated ? new Date(metadata.updated) : undefined,
+    };
+  }
+
+  async getObjectStream(
+    key: string,
+    range?: ReadRange,
+  ): Promise<{
+    stream: NodeJS.ReadableStream;
+    contentType: string;
+    contentLength: number;
+    totalSize: number;
+    range?: { start: number; end: number; contentRange: string };
+  }> {
+    const bucket = this.getBucket();
+    if (!bucket) throw new Error('Firebase Storage bucket is unavailable');
+
+    const file = bucket.file(key);
+    const [metadata] = await file.getMetadata();
+    const totalSize = Number(metadata.size);
+    const contentType = metadata.contentType || 'application/octet-stream';
+
+    if (range) {
+      const end = range.end !== undefined ? range.end : totalSize - 1;
+      const stream = file.createReadStream({ start: range.start, end });
+      return {
+        stream,
+        contentType,
+        contentLength: end - range.start + 1,
+        totalSize,
+        range: {
+          start: range.start,
+          end,
+          contentRange: `bytes ${range.start}-${end}/${totalSize}`,
+        },
+      };
+    }
+
+    return {
+      stream: file.createReadStream(),
+      contentType,
+      contentLength: totalSize,
+      totalSize,
+    };
+  }
+
+  async deleteObject(key: string): Promise<void> {
+    const bucket = this.getBucket();
+    if (!bucket) return;
+    try {
+      await bucket.file(key).delete({ ignoreNotFound: true });
+    } catch {
+      // Ignored
+    }
   }
 }
