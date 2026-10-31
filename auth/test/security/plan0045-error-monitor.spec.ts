@@ -113,7 +113,7 @@ function createInMemoryErrorMonitorDb() {
     select: () => ({
       from: (table: any) => {
         const tableName = table?.[Symbol.for('drizzle:Name')] || '';
-        let currentRows = (): any[] => {
+        const currentRows = (): any[] => {
           if (tableName === 'error_monitor_groups') return [...groups.values()];
           if (tableName === 'error_monitor_occurrences') return [...occurrences];
           if (tableName === 'error_monitor_outbox') return [...outbox.values()];

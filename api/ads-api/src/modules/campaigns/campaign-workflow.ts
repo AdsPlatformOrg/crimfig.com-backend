@@ -74,7 +74,7 @@ export class CampaignWorkflow {
       const before = await this.snapshot(tx,c);
       const result = await work(tx,c);
       const [latest] = await tx.select().from(adsCampaigns).where(eq(adsCampaigns.id,id)).limit(1);
-      let after = await this.snapshot(tx,latest);
+      const after = await this.snapshot(tx,latest);
       let revision = c.contentRevision;
       if (fingerprint(before) !== fingerprint(after)) {
         revision++;

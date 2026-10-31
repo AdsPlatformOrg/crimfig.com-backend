@@ -101,7 +101,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
 
   describe('A04–A05: Canonical Slot Lifecycle & Suspended Slot Protection', () => {
     it('prevents creating slots on unverified websites and blocks owners from clearing admin slot suspension', async () => {
-      let websiteRecord: any = {
+      const websiteRecord: any = {
         id: 'site-unverified',
         promoterId: 'prom-1',
         domain: 'jed.com.ng',
@@ -109,7 +109,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
         policyStatus: 'unverified',
         isSuspended: false,
       };
-      let slotRecord: any = {
+      const slotRecord: any = {
         id: 'slot-suspended',
         promoterId: 'prom-1',
         websiteId: 'site-unverified',

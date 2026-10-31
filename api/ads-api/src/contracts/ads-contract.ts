@@ -62,8 +62,9 @@ const reviewResult = object({ campaign, decision, stage: str(), nextStage: str()
 export const apiErrorSchema = object({ status: enumeration('error'), statusCode: { type: 'integer' },
   code: str(), message: str(), requestId: str(), path: str(), timestamp: str(), fieldErrors: { type: 'object', additionalProperties: array(str()) } }, ['status', 'statusCode', 'code', 'message', 'requestId']);
 const success = (data: Schema): Schema => object({ status: enumeration('success'), data });
-const responseModels = new Map<Schema, Function>();
-function responseModel(data: Schema, name: string, envelope = true): Function {
+type AnyConstructor = new (...args: any[]) => any;
+const responseModels = new Map<Schema, AnyConstructor>();
+function responseModel(data: Schema, name: string, envelope = true): AnyConstructor {
   if (responseModels.has(data)) return responseModels.get(data)!;
   class ContractResponse {}
   Object.defineProperty(ContractResponse, 'name', { value: name });
@@ -112,7 +113,7 @@ const responses: Record<string, Record<string, Schema>> = {
 };
 
 /** Derive documentation from actual class-validator fields (including inline controller DTOs). */
-export function documentValidatedDto(dto: Function) {
+export function documentValidatedDto(dto: AnyConstructor) {
   const metas = getMetadataStorage().getTargetValidationMetadatas(dto, '', false, false);
   for (const property of new Set(metas.map(m => m.propertyName))) {
     const rules = metas.filter(m => m.propertyName === property);
@@ -146,7 +147,7 @@ export function documentValidatedDto(dto: Function) {
 }
 
 /** Attach complete contract metadata to existing handlers; new undocumented handlers fail export. */
-export function documentAdsController(controller: Function) {
+export function documentAdsController(controller: AnyConstructor) {
   for (const name of Object.getOwnPropertyNames(controller.prototype)) {
     const handler = controller.prototype[name];
     const method = typeof handler === 'function' ? Reflect.getMetadata(METHOD_METADATA, handler) : undefined;
