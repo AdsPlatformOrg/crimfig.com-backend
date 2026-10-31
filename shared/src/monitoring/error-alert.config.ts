@@ -99,8 +99,8 @@ export function resolveErrorMonitorConfig(
   env: Record<string, string | undefined> = process.env,
 ): ErrorMonitorRuntimeConfig {
   const environment = resolveErrorMonitorEnvironment(env);
-  const captureDefault = environment === 'production';
-  const emailDefault = false; // Require explicit opt-in or production toggle to prevent accidental email floods
+  const captureDefault = environment === 'production' || environment === 'staging';
+  const emailDefault = false; // Require explicit opt-in to prevent accidental email floods (especially on staging)
 
   const captureEnabled = parseBooleanFlag(env.ERROR_MONITOR_CAPTURE_ENABLED, captureDefault);
   const emailEnabled = parseBooleanFlag(env.ERROR_MONITOR_EMAIL_ENABLED, emailDefault);

@@ -201,7 +201,8 @@ describe('PLAN-0045: Platform Error Monitor in Auth & Email Notifications', () =
     it('disables email sending by default in staging/development unless explicitly enabled', () => {
       const stagingCfg = resolveErrorMonitorConfig({ NODE_ENV: 'staging' });
       expect(stagingCfg.environment).toBe('staging');
-      expect(stagingCfg.captureEnabled).toBe(false);
+      // PLAN-0057: staging captures error telemetry by default to populate error monitor dashboard
+      expect(stagingCfg.captureEnabled).toBe(true);
       expect(stagingCfg.emailEnabled).toBe(false);
 
       const prodCfg = resolveErrorMonitorConfig({
@@ -491,7 +492,7 @@ describe('PLAN-0045: Platform Error Monitor in Auth & Email Notifications', () =
         },
         env,
       );
-      const res404 = await service.recordEvent(excluded404, env);
+      const res404 = (await service.recordEvent(excluded404, env)) as any;
       if (!res404.recorded) throw new Error('Expected 404 to be recorded');
       expect(res404.emailEligibility).toBe('excluded_by_policy');
       expect(res404.outboxScheduled).toBe('none');
@@ -514,7 +515,7 @@ describe('PLAN-0045: Platform Error Monitor in Auth & Email Notifications', () =
       );
       const db503 = createInMemoryErrorMonitorDb();
       const service503 = new ErrorMonitorService(db503, fakeEmailService);
-      const firstRes = await service503.recordEvent(first503, env);
+      const firstRes = (await service503.recordEvent(first503, env)) as any;
       if (!firstRes.recorded) throw new Error('Expected 503 to be recorded');
       expect(firstRes.outboxScheduled).toBe('initial');
       expect(firstRes.occurrenceCount).toBe(1);
@@ -542,7 +543,7 @@ describe('PLAN-0045: Platform Error Monitor in Auth & Email Notifications', () =
           },
           env,
         );
-        const repRes = await service503.recordEvent(repeatEvent, env);
+        const repRes = (await service503.recordEvent(repeatEvent, env)) as any;
         if (!repRes.recorded) throw new Error('Expected repeat 503 to be recorded');
         expect(repRes.outboxScheduled).toBe('window_summary');
         expect(repRes.notificationState).toBe('suppressed_duplicate');
