@@ -25,13 +25,9 @@ export class AdsGlobalExceptionFilter implements ExceptionFilter {
       (request as Request & {requestId?:string}).requestId ?? request.headers['x-request-id']);
 
     if (status >= 500) {
-      const stack = exception instanceof Error ? exception.stack : String(exception);
       this.logger.error(
-        `[${request.method}] ${errorDetails.path} - Status ${status} - ${errorDetails.code} - request ${errorDetails.requestId}\n${stack}`,
+        `[${request.method}] ${errorDetails.path} - Status ${status} - ${errorDetails.code} - request ${errorDetails.requestId}`,
       );
-      if (process.env.NODE_ENV !== 'production' || process.env.DEBUG_DELIVERY_ERRORS === 'true') {
-        response.setHeader('X-Debug-Error-Detail', Buffer.from(String(exception instanceof Error ? exception.message : exception)).toString('base64url'));
-      }
     } else if (status === 403 || status === 401) {
       this.logger.warn(
         `[${request.method}] ${errorDetails.path} - Status ${status} - request ${errorDetails.requestId}`,
