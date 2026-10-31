@@ -44,7 +44,11 @@ export class ImpressionTokenService {
       typeof payload.ipHash === 'string' && /^(?:[a-f0-9]{16}|unknown)$/.test(payload.ipHash);
   }
 
-  verifyToken(token: string, clientIp?: string): ImpressionTokenPayload | null {
+  verifyToken(
+    token: string,
+    clientIp?: string,
+    options?: { allowIpMismatch?: boolean },
+  ): ImpressionTokenPayload | null {
     if (!this.configured() || typeof token !== 'string' || token.length > 2048) return null;
     const match = /^imp_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/.exec(token);
     if (!match) return null;
@@ -54,7 +58,8 @@ export class ImpressionTokenService {
     if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
     try {
       const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-      if (!this.validPayload(payload) || payload.ipHash !== this.hashIp(clientIp)) return null;
+      if (!this.validPayload(payload)) return null;
+      if (!options?.allowIpMismatch && payload.ipHash !== this.hashIp(clientIp)) return null;
       return payload;
     } catch { return null; }
   }

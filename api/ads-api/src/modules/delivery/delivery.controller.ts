@@ -6,7 +6,19 @@ import type { Response, Request } from 'express';
 import { IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, IsUUID, IsISO8601 } from 'class-validator';
 
 function extractClientIp(req: Request): string {
-  // Express resolves trusted proxies only when explicitly configured. Never trust arbitrary XFF.
+  // Respect trusted edge proxy headers when present (Cloudflare / Railway edge)
+  const cfIp = req.headers['cf-connecting-ip'];
+  if (typeof cfIp === 'string' && cfIp.trim()) return cfIp.trim();
+
+  const realIp = req.headers['x-real-ip'];
+  if (typeof realIp === 'string' && realIp.trim()) return realIp.trim();
+
+  const xff = req.headers['x-forwarded-for'];
+  if (typeof xff === 'string' && xff.trim()) {
+    const first = xff.split(',')[0].trim();
+    if (first) return first;
+  }
+
   return req.ip || req.socket.remoteAddress || '';
 }
 

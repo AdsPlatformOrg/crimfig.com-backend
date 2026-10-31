@@ -188,7 +188,7 @@ export class DeliveryService {
   }
 
   /** A valid signature is necessary but never sufficient: bind every identity to its stored serve. */
-  private async boundServe(payload: ImpressionTokenPayload): Promise<boolean> {
+  private async boundServe(payload: ImpressionTokenPayload, isHouseAd: boolean = false): Promise<boolean> {
     const [serve] = await this.db
       .select()
       .from(adsServes)
@@ -210,7 +210,7 @@ export class DeliveryService {
         : serve.campaignId === payload.campaignId &&
           serve.creativeId === payload.creativeId) &&
       (serve.promoterId === payload.promoterId || !serve.promoterId) &&
-      serve.ipHash === payload.ipHash &&
+      (isHouseAd || serve.ipHash === payload.ipHash) &&
       serve.servedAt.getTime() <= payload.timestamp &&
       payload.timestamp - serve.servedAt.getTime() <= 60_000
     );
@@ -1580,12 +1580,14 @@ export class DeliveryService {
     let promoterId: string | undefined;
     let destinationUrl: string | undefined;
 
-    // 1. Try to decode as cryptographically signed impression token
-    const tokenPayload = this.tokenService.verifyToken(token, clientIp);
+    // 1. Try to decode as cryptographically signed impression token (resilient to mobile proxy IP drift)
+    const tokenPayload =
+      this.tokenService.verifyToken(token, clientIp) ||
+      this.tokenService.verifyToken(token, clientIp, { allowIpMismatch: true });
 
     // Zero-charge CrimFig House/Shadow Ad click path (`G11`)
     if (tokenPayload && tokenPayload.campaignId === HOUSE_CAMPAIGN_UUID) {
-      if (!(await this.boundServe(tokenPayload)))
+      if (!(await this.boundServe(tokenPayload, true)))
         throw new NotFoundException('House click attribution is unavailable');
       await this.logInteraction({
         impToken: token,
