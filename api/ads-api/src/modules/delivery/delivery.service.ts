@@ -79,7 +79,12 @@ export const CRIMFIG_HOUSE_CREATIVE: HouseCreativeResolved = {
   width: 1024,
   height: 682,
   durationSeconds: null,
-  destinationUrl: 'https://ads.crimfig.com',
+  destinationUrl:
+    process.env.APP_ENV === 'staging' ||
+    process.env.RAILWAY_ENVIRONMENT_NAME === 'staging' ||
+    process.env.ADS_WEB_URL?.includes('staging')
+      ? 'https://staging-ads.crimfig.com'
+      : (process.env.ADS_WEB_URL || 'https://ads.crimfig.com'),
 };
 
 const SLOT_HANDLE_BY_ID: Record<string, string> = {
@@ -348,23 +353,27 @@ export class DeliveryService {
       }));
     }
     var card = document.createElement('div');
-    card.style.cssText = "border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:'Poppins',Arial,Helvetica,sans-serif;max-width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;";
-
-    var badge = document.createElement('div');
-    badge.style.cssText = 'font-size:10px;text-transform:uppercase;color:#94a3b8;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;letter-spacing:0.05em;';
-    var badgeLeft = document.createElement('span');
-    badgeLeft.textContent = ad.isHouseAd ? 'CrimFig House Ad' : (mode === 'owned_site_direct' ? 'Direct Partner' : 'Promoted');
-    var badgeRight = document.createElement('span');
-    badgeRight.textContent = 'CrimFig Ads';
-    badgeRight.style.cssText = 'font-weight:700;color:#D4143A;';
-    badge.appendChild(badgeLeft);
-    badge.appendChild(badgeRight);
-    card.appendChild(badge);
+    if (ad.adType === 'image') {
+      // Frameless, clean image serving without dark backgrounds, borders, or redundant text overlays
+      card.style.cssText = "background:transparent;border:0;padding:0;margin:0 auto;box-shadow:none;position:relative;overflow:hidden;box-sizing:border-box;display:block;max-width:min(100%, 728px);text-align:center;";
+    } else {
+      card.style.cssText = "border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:'Poppins',Arial,Helvetica,sans-serif;max-width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;";
+      var badge = document.createElement('div');
+      badge.style.cssText = 'font-size:10px;text-transform:uppercase;color:#94a3b8;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center;letter-spacing:0.05em;';
+      var badgeLeft = document.createElement('span');
+      badgeLeft.textContent = ad.isHouseAd ? 'CrimFig House Ad' : (mode === 'owned_site_direct' ? 'Direct Partner' : 'Promoted');
+      var badgeRight = document.createElement('span');
+      badgeRight.textContent = 'CrimFig Ads';
+      badgeRight.style.cssText = 'font-weight:700;color:#D4143A;';
+      badge.appendChild(badgeLeft);
+      badge.appendChild(badgeRight);
+      card.appendChild(badge);
+    }
 
     var videoSource = ad.adType === 'video' ? resolvedMedia(ad.videoUrl, activeBase) : '';
     if (videoSource) {
       var videoWrap = document.createElement('div');
-      videoWrap.style.cssText = 'position:relative;margin-bottom:12px;';
+      videoWrap.style.cssText = 'position:relative;margin:0 auto 12px auto;max-width:min(100%, 640px);';
       var video = document.createElement('video');
       readyAsset(video,'loadeddata');
       video.src = videoSource;
@@ -378,7 +387,7 @@ export class DeliveryService {
       video.setAttribute('disablePictureInPicture', '');
       video.setAttribute('disableRemotePlayback', '');
       video.setAttribute('aria-label', ad.headline || 'Advertisement video');
-      video.style.cssText = 'width:100%;height:180px;object-fit:cover;border-radius:8px;display:block;background:#0b1020;';
+      video.style.cssText = 'width:100%;height:auto;max-height:360px;object-fit:cover;border-radius:8px;display:block;background:#0b1020;';
       videoWrap.appendChild(video);
 
       var overlay = document.createElement('a');
@@ -435,13 +444,15 @@ export class DeliveryService {
       readyAsset(img,'load');
       img.src = resolvedMedia(ad.imageUrl, activeBase);
       img.alt = ad.headline || 'Advertisement';
-      img.style.cssText = 'width:100%;height:auto;object-fit:contain;border-radius:8px;margin-bottom:12px;display:block;';
+      // Strict standard max bounds: maximum 728px width, 280px height, centered, responsive
+      img.style.cssText = 'max-width:min(100%, 728px);max-height:280px;width:auto;height:auto;object-fit:contain;border-radius:8px;display:block;margin:0 auto;border:0;';
       if (ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
         var imgLink = document.createElement('a');
         imgLink.href = ad.clickUrl;
         imgLink.target = '_blank';
         imgLink.rel = 'noopener noreferrer';
         imgLink.setAttribute('aria-label', ad.headline || 'Open advertisement');
+        imgLink.style.cssText = 'display:inline-block;max-width:100%;margin:0 auto;text-decoration:none;';
         imgLink.appendChild(img);
         card.appendChild(imgLink);
       } else {
@@ -449,28 +460,31 @@ export class DeliveryService {
       }
     }
 
-    if (ad.headline) {
-      var headline = document.createElement('h4');
-      headline.style.cssText = 'margin:0 0 6px 0;font-size:16px;font-weight:700;color:#FFFFFF;line-height:1.3;';
-      headline.textContent = ad.headline;
-      card.appendChild(headline);
-    }
+    // Only render text overlays (headline, body, CTA button) for text-only ads
+    if (ad.adType !== 'image') {
+      if (ad.headline) {
+        var headline = document.createElement('h4');
+        headline.style.cssText = 'margin:0 0 6px 0;font-size:16px;font-weight:700;color:#FFFFFF;line-height:1.3;';
+        headline.textContent = ad.headline;
+        card.appendChild(headline);
+      }
 
-    if (ad.bodyText) {
-      var body = document.createElement('p');
-      body.style.cssText = 'margin:0 0 14px 0;font-size:13px;color:#F5F6F8;line-height:1.4;opacity:0.85;';
-      body.textContent = ad.bodyText;
-      card.appendChild(body);
-    }
+      if (ad.bodyText) {
+        var body = document.createElement('p');
+        body.style.cssText = 'margin:0 0 14px 0;font-size:13px;color:#F5F6F8;line-height:1.4;opacity:0.85;';
+        body.textContent = ad.bodyText;
+        card.appendChild(body);
+      }
 
-    if (ad.ctaText && ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
-      var button = document.createElement('a');
-      button.href = ad.clickUrl;
-      button.target = '_blank';
-      button.rel = 'noopener noreferrer';
-      button.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#D4143A,#A80F32);color:#FFFFFF;text-decoration:none;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;transition:opacity 0.2s;box-shadow:0 4px 12px rgba(212,20,58,0.25);';
-      button.textContent = ad.ctaText + ' \\u2192';
-      card.appendChild(button);
+      if (ad.ctaText && ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
+        var button = document.createElement('a');
+        button.href = ad.clickUrl;
+        button.target = '_blank';
+        button.rel = 'noopener noreferrer';
+        button.style.cssText = 'display:inline-block;background:linear-gradient(135deg,#D4143A,#A80F32);color:#FFFFFF;text-decoration:none;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;text-align:center;transition:opacity 0.2s;box-shadow:0 4px 12px rgba(212,20,58,0.25);';
+        button.textContent = ad.ctaText + ' \\u2192';
+        card.appendChild(button);
+      }
     }
 
     container.innerHTML = '';
