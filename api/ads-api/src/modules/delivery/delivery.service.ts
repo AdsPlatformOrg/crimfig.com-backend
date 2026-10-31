@@ -713,7 +713,7 @@ export class DeliveryService {
     clientGeo?: { country?: string; region?: string; device?: string };
   }) {
     const ipHash = this.tokenService.hashIp(params.clientIp);
-    const tieSeed = `${params.requestId}:${params.slotTagId}`;
+    const tieSeed = crypto.createHash('sha256').update(`${params.requestId}:${params.slotTagId}`).digest('hex');
     const decisionDraft = {
       requestId: params.requestId,
       slotHandle: params.slotTagId,

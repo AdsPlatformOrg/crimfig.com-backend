@@ -219,7 +219,7 @@ export class AuctionEngineService {
     const requestId =
       context.requestId ||
       '00000000-0000-4000-8000-000000000001';
-    const tieSeed = context.tieSeed || `${requestId}:${context.slotHandle}`;
+    const tieSeed = context.tieSeed || crypto.createHash('sha256').update(`${requestId}:${context.slotHandle}`).digest('hex');
     const policyVersion =
       context.policyVersion || DEFAULT_AUCTION_POLICY_VERSION;
     const bidderGroupingMode: BidderGroupingMode =
