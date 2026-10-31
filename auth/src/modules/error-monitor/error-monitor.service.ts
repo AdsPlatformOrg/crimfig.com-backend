@@ -936,10 +936,15 @@ export class ErrorMonitorService implements ErrorMonitorSink {
           : undefined,
       );
 
-    const byService = new Map(recordedSources.map((s) => [s.service, s]));
+    // Key by composite environment:service to prevent multi-environment collisions
+    const byKey = new Map(recordedSources.map((s) => [`${s.environment}:${s.service}`, s]));
+    const fallbackEnv = environment && environment !== 'all' ? environment : 'staging';
 
     return PLATFORM_ERROR_MONITOR_SOURCES.map((descriptor) => {
-      const recorded = byService.get(descriptor.service);
+      const recorded =
+        byKey.get(`${fallbackEnv}:${descriptor.service}`) ||
+        recordedSources.find((s) => s.service === descriptor.service);
+
       if (descriptor.defaultStatus === 'paused') {
         return {
           service: descriptor.service,
@@ -953,11 +958,20 @@ export class ErrorMonitorService implements ErrorMonitorSink {
         };
       }
 
+      // Compute age-based freshness
+      let status: 'active' | 'stale' | 'not_reporting' | 'paused' = recorded ? (recorded.status as any) : 'not_reporting';
+      if (recorded?.lastEventAt) {
+        const ageMs = Date.now() - new Date(recorded.lastEventAt).getTime();
+        if (ageMs > 24 * 60 * 60 * 1000 && status === 'active') {
+          status = 'stale';
+        }
+      }
+
       return {
         service: descriptor.service,
         displayName: descriptor.displayName,
         sourceType: descriptor.sourceType,
-        status: recorded ? recorded.status : 'not_reporting',
+        status,
         captureEnabled: recorded ? recorded.captureEnabled : false,
         statusNote: descriptor.statusNote,
         lastHeartbeatAt: recorded?.lastHeartbeatAt ?? null,
