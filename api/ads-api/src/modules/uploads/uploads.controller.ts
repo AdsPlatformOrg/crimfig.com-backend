@@ -185,7 +185,9 @@ export class UploadsController {
     res.setHeader("Accept-Ranges", "bytes");
     res.setHeader("Content-Disposition", "inline");
     res.setHeader("Cache-Control", cacheControl);
-    if (result.partial) res.setHeader("Content-Range", result.contentRange);
+    if (result.partial && result.contentRange) {
+      res.setHeader("Content-Range", result.contentRange);
+    }
     result.stream.pipe(res);
   }
 
