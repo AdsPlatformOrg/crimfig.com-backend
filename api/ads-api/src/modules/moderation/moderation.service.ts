@@ -97,8 +97,37 @@ export class ModerationService {
       .orderBy(desc(adsCampaigns.submittedAt))
       .limit(100);
 
+    // Fetch creative approval counts for each campaign
+    const creativeCounts = campaigns.length > 0
+      ? await this.db
+          .select({
+            campaignId: adsCreatives.campaignId,
+            totalCreatives: sql<number>`count(*)::int`,
+            approvedCreatives: sql<number>`count(*) filter (where ${adsCreatives.reviewStatus} = 'approved')::int`,
+          })
+          .from(adsCreatives)
+          .where(and(eq(adsCreatives.status, 'active')))
+          .groupBy(adsCreatives.campaignId)
+      : [];
+
+    const creativeCountMap = new Map<string, { total: number; approved: number }>();
+    for (const row of creativeCounts) {
+      creativeCountMap.set(row.campaignId, {
+        total: row.totalCreatives || 0,
+        approved: row.approvedCreatives || 0,
+      });
+    }
+
     return {
-      campaigns: campaigns.map((c) => ({ ...c, submissionId: c.currentSubmissionId })),
+      campaigns: campaigns.map((c) => {
+        const counts = creativeCountMap.get(c.id) || { total: 0, approved: 0 };
+        return {
+          ...c,
+          submissionId: c.currentSubmissionId,
+          totalCreativesCount: counts.total,
+          approvedCreativesCount: counts.approved,
+        };
+      }),
       stacks: stacks.map((s) => ({ ...s.stack, campaignTitle: s.campaignTitle, submissionId: s.submissionId, contentRevision: s.contentRevision })),
       creatives: creatives.map((r) => ({ ...r.creative, submissionId: r.submissionId, contentRevision: r.contentRevision })),
       totalPending: campaigns.length + stacks.length + creatives.length,
@@ -355,18 +384,18 @@ export class ModerationService {
           throw new ConflictException('This campaign review stage changed. Reload before deciding.');
         }
 
-        // Invariant: Campaign cannot be approved with zero approved stacks
+        // Invariant: Campaign cannot be approved with zero approved creatives across all its stacks
         if (params.decision === 'approved') {
-          const stacks = await tx
+          const ads = await tx
             .select()
-            .from(adsCreativeStacks)
-            .where(and(eq(adsCreativeStacks.campaignId, campaignId), eq(adsCreativeStacks.archived, false)));
-          const hasApprovedStack = stage === 'primary'
-            ? stacks.some((s) => s.reviewStatus === 'pending_manager_approval' || s.reviewStatus === 'approved')
-            : stacks.some((s) => s.reviewStatus === 'approved');
+            .from(adsCreatives)
+            .where(and(eq(adsCreatives.campaignId, campaignId), eq(adsCreatives.status, 'active')));
+          const hasApprovedAd = stage === 'primary'
+            ? ads.some((a) => a.reviewStatus === 'pending_manager_approval' || (a.reviewStatus as string) === 'approved')
+            : ads.some((a) => (a.reviewStatus as string) === 'approved');
 
-          if (!hasApprovedStack) {
-            throw new ConflictException('A campaign cannot be approved with zero approved Ad Stacks. Approve at least one stack first.');
+          if (!hasApprovedAd) {
+            throw new ConflictException('A campaign cannot be approved with zero approved Ads. Approve at least one creative first.');
           }
         }
 

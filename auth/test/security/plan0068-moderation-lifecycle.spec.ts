@@ -205,7 +205,7 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
       ).rejects.toThrow(/An Ad Stack cannot be approved with zero approved Ads/);
     });
 
-    it('rejects approving a campaign if it contains zero approved ad stacks', async () => {
+    it('rejects approving a campaign if it contains zero approved ads', async () => {
       const c = {
         id: campaignId,
         advertiserId,
@@ -230,8 +230,8 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
           orderBy: () => ch,
         };
         ch.then = (resolve: any) => {
-          // stacks query returns pending (0 approved)
-          resolve([{ id: stackId, reviewStatus: 'pending', archived: false }]);
+          // creatives query returns pending (0 approved)
+          resolve([{ id: creativeId, reviewStatus: 'pending', status: 'active' }]);
         };
         return ch;
       };
@@ -248,7 +248,7 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
           decision: 'approved',
           reviewerId: reviewer1Id,
         }),
-      ).rejects.toThrow(/A campaign cannot be approved with zero approved Ad Stacks/);
+      ).rejects.toThrow(/A campaign cannot be approved with zero approved Ads/);
     });
   });
 

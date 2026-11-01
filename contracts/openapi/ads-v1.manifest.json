@@ -2,7 +2,7 @@
   "service": "ads",
   "contractVersion": 1,
   "dialect": "3.0",
-  "sha256": "1c869547f96ced7675344ff22d1dc478952091f1bd6c78e919e7c628060b0c71",
+  "sha256": "171d41e552f95b5276349996516c9c593b132cc64fb4605cd2f687462db5ad8e",
   "operations": [
     "DELETE /api/v1/campaigns/{id}/ad-stacks/{stackId}",
     "DELETE /api/v1/campaigns/{id}/creatives/{creativeId}",
@@ -46,6 +46,6 @@
     "PUT /api/v1/campaigns/creatives/{id}/replace",
     "PUT /api/v1/campaigns/{id}/status"
   ],
-  "sourceSha256": "122dd804775fbe5c785e4ef8d893fb8096eeb6dc71b795c7ed11305ce4bbb25e",
+  "sourceSha256": "2e7af048650970f17dbdf9475aac12182f650b305a396c027917a28df2af514d",
   "generator": "openapi-typescript@7.13.0"
 }

@@ -1211,7 +1211,41 @@ export class CampaignsService {
       const counts=await tx.select({status:adsCampaigns.status,moderationStatus:adsCampaigns.moderationStatus,count:sql<number>`count(*)::int`}).from(adsCampaigns).where(owner).groupBy(adsCampaigns.status,adsCampaigns.moderationStatus);
       const summary:Record<string,number>={all:0};
       for(const row of counts){const key=['pending_primary_review','pending_manager_approval'].includes(row.moderationStatus)?'under_review':row.status;summary[key]=(summary[key]??0)+row.count;summary.all+=row.count;}
-      return {items:rows.map(c=>({...c,capabilities:campaignCapabilities(c)})),page,pageSize,total:total.count,counts:summary};
+
+      // Fetch creative counts for rows
+      const rowIds = rows.map(r => r.id);
+      const creativeCounts = rowIds.length > 0
+        ? await tx
+            .select({
+              campaignId: adsCreatives.campaignId,
+              totalCreatives: sql<number>`count(*)::int`,
+              approvedCreatives: sql<number>`count(*) filter (where ${adsCreatives.reviewStatus} = 'approved')::int`,
+            })
+            .from(adsCreatives)
+            .where(and(sql`${adsCreatives.campaignId} IN ${rowIds}`, eq(adsCreatives.status, 'active')))
+            .groupBy(adsCreatives.campaignId)
+        : [];
+
+      const creativeMap = new Map<string, { total: number; approved: number }>();
+      for (const cc of creativeCounts) {
+        creativeMap.set(cc.campaignId, { total: cc.totalCreatives || 0, approved: cc.approvedCreatives || 0 });
+      }
+
+      return {
+        items: rows.map(c => {
+          const counts = creativeMap.get(c.id) || { total: 0, approved: 0 };
+          return {
+            ...c,
+            capabilities: campaignCapabilities(c),
+            totalCreativesCount: counts.total,
+            approvedCreativesCount: counts.approved,
+          };
+        }),
+        page,
+        pageSize,
+        total: total.count,
+        counts: summary,
+      };
     },{isolationLevel:'repeatable read',accessMode:'read only'});
   }
 

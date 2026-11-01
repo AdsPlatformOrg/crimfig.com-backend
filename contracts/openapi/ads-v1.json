@@ -8354,6 +8354,9 @@
                         "advertiserId": {
                           "type": "string"
                         },
+                        "approvedCreativesCount": {
+                          "type": "integer"
+                        },
                         "budgetUsdCents": {
                           "type": "number"
                         },
@@ -8399,6 +8402,9 @@
                         },
                         "title": {
                           "type": "string"
+                        },
+                        "totalCreativesCount": {
+                          "type": "integer"
                         }
                       },
                       "required": [
@@ -8411,7 +8417,9 @@
                         "budgetUsdCents",
                         "createdAt",
                         "submissionId",
-                        "contentRevision"
+                        "contentRevision",
+                        "totalCreativesCount",
+                        "approvedCreativesCount"
                       ],
                       "type": "object"
                     },
