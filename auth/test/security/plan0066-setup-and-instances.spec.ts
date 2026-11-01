@@ -266,6 +266,18 @@ describe('PLAN-0066 loader: identities, instances and handshake', () => {
     expect(new Set(renders.map((b) => b.pageViewId)).size).toBe(1);
     expect(renders.map((b) => b.instancesDetected)).toEqual([2, 2]);
     expect(renders.map((b) => b.instanceIndex).sort()).toEqual([0, 1]);
+    const impressions = fetched
+      .filter((f) => f.url.includes('/delivery/interaction') && f.body?.type === 'impression')
+      .map((f) => f.body);
+    expect(impressions).toHaveLength(2);
+    for (const render of renders) {
+      const impression = impressions.find((b) => b.slotInstanceId === render.slotInstanceId);
+      expect(impression).toMatchObject({
+        pageViewId: render.pageViewId, opportunityId: render.opportunityId,
+        sdkInitializationId: render.sdkInitializationId,
+      });
+      expect(impression.eventId).not.toBe(render.eventId);
+    }
   });
 
   it('a repeated script include does not duplicate requests or events', async () => {

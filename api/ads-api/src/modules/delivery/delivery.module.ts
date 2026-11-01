@@ -1,3 +1,7 @@
+import {AdsStaffGrants} from '../security/ads-staff-grants';
+import {CfigWorker} from '../cfig/cfig.worker';
+import {CfigService} from '../cfig/cfig.service';
+import {PromoterCfigController,AdminCfigController} from '../cfig/cfig.controller';
 import { AdminPerformanceController } from './admin-performance.controller';
 import { EvidenceService } from './evidence.service';
 import { EvidenceController } from './evidence.controller';
@@ -12,8 +16,8 @@ import { VerificationModule } from '../verification/verification.module';
 
 @Module({
   imports: [VerificationModule, BillingModule],
-  controllers: [AdminPerformanceController, DeliveryController, EvidenceController, AdminHouseAdsController],
-  providers: [EvidenceService, DeliveryService, ImpressionTokenService, AuctionEngineService],
+  controllers: [PromoterCfigController, AdminCfigController, AdminPerformanceController, DeliveryController, EvidenceController, AdminHouseAdsController],
+  providers: [AdsStaffGrants, CfigWorker, CfigService, EvidenceService, DeliveryService, ImpressionTokenService, AuctionEngineService],
   exports: [DeliveryService, ImpressionTokenService, AuctionEngineService],
 })
 export class DeliveryModule {}

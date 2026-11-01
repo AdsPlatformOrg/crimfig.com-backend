@@ -246,6 +246,20 @@
       "when": 1793453600000,
       "tag": "0035_ad_stacks_review_and_campaign_lifecycle",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1793538000000,
+      "tag": "0036_cfig_virtual_ledger",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1793538000001,
+      "tag": "0037_cfig_deterministic_finalization",
+      "breakpoints": true
     }
   ]
 }

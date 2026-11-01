@@ -19,5 +19,12 @@ export async function appendAdEvidence(tx:any,eventId:string,payload:Record<stri
 export function adEventJournalMatches(event:any,journal:any):boolean {
   const payload=journal?.payload;
   if(!payload||journal.eventId!==event.id||payload.eventId!==event.eventId||payload.serveId!==event.serveId||payload.type!==event.type||payload.serverReceivedAt!==event.createdAt?.toISOString())return false;
+  // Historical journals predate instance claims. New journals bind every stored
+  // observation, including nulls, so projection tampering cannot relabel traffic.
+  if(Object.prototype.hasOwnProperty.call(payload,'instanceClaims')){
+    if(!payload.instanceClaims||typeof payload.instanceClaims!=='object')return false;
+    if(!['pageViewId','slotInstanceId','opportunityId','sdkInitId','instanceIndex','instancesDetected']
+      .every(k=>(payload.instanceClaims[k]??null)===(event[k]??null)))return false;
+  }
   return ['visibleRatio','durationMs','measurable','assessmentStatus','financialEligibility','verificationVersion','keyedIpHash','keyId','websiteId','slotId'].every(k=>(payload[k]??null)===(event[k]??null));
 }

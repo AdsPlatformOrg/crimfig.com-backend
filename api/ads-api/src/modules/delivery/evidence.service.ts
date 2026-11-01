@@ -77,6 +77,14 @@ export class EvidenceService {
     const analysis=await this.analyze(eventId);
     const outcome=await this.db.transaction(async(tx:any)=>{
       await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+      // House fraud decisions share the finalizer ordering boundary. A decision
+      // waiting behind a finalized day receives a current clock and is a later
+      // adjustment, never an invisible pre-cutoff assessment.
+      let houseAssessmentClock:Date|undefined;
+      if(analysis.inventoryClass==='house'||analysis.inventoryClass==='shadow'){
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('cfig:global-allocation',0))`);
+        const clock=await tx.execute(sql`SELECT clock_timestamp() AS now`);houseAssessmentClock=new Date((clock.rows??clock)[0].now);
+      }
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-assessment:${input.requestId}`},0))`);
       const [event]=await tx.select().from(s.adsInteractions).where(eq(s.adsInteractions.id,eventId)).limit(1);
       const [serve]=event?.serveId?await tx.select().from(s.adsServes).where(eq(s.adsServes.id,event.serveId)).limit(1):[];
@@ -94,7 +102,7 @@ export class EvidenceService {
       if(input.outcome==='eligible'&&(!process.env.ADS_TRAFFIC_ASSESSMENT_POLICY_VERSION||input.policyVersion!==process.env.ADS_TRAFFIC_ASSESSMENT_POLICY_VERSION||!analysis.integrity||serve.inventoryClass!=='paid'||!funded||!['ISSUED','CLAIMED'].includes(funded.state)||event.financialEligibility==='invalid'||event.assessmentStatus==='invalidated'))throw new ConflictException('This evidence cannot authorize a payable event');
       const signed={id:randomUUID(),eventId,campaignId:serve.campaignId,requestId:input.requestId,actorId,policyVersion:input.policyVersion,outcome:input.outcome,reasonCodes:input.reasonCodes,
         features:{evidenceDigest:adDigest(analysis),integrity:analysis.integrity},supersedesId:previous?.id??null,keyId:process.env.ADS_EVIDENCE_HASH_KEY_ID||'evidence-v1'};
-      const [assessment]=await tx.insert(s.adsEventAssessments).values({...signed,recordHash:evidenceSignature(signed)}).returning();return assessment;
+      const [assessment]=await tx.insert(s.adsEventAssessments).values({...signed,...(houseAssessmentClock?{createdAt:houseAssessmentClock}:{}),recordHash:evidenceSignature(signed)}).returning();return assessment;
     });
     // A crash here leaves a durable eligible assessment for the Billing reconciler; it never fabricates a claim.
     if(outcome.outcome==='eligible'||outcome.outcome==='invalid'){

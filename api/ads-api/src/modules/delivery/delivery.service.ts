@@ -1,3 +1,5 @@
+import {houseProgramRequested} from '../cfig/cfig-allocation';
+import { assertEventReplay, assertInstanceBinding } from './interaction-binding';
 import {DeliveryDeadlineError,DELIVERY_RUNTIME,requireDeliveryTime,withinDeliveryBudget} from './delivery-budgets';
 import {EvidenceService} from './evidence.service';
 import {OpportunityClient} from '../billing/opportunity-client';
@@ -926,6 +928,7 @@ export class DeliveryService {
     } catch (error) { throw error; }
 
 
+      let houseRewardContext:any=null;
       if(params.slotId){
         const [supply]=await tx.select({slot:adstationSlots,site:adsPromoterWebsites,promoter:adsPromoters}).from(adstationSlots)
           .innerJoin(adsPromoterWebsites,eq(adsPromoterWebsites.id,adstationSlots.websiteId)).innerJoin(adsPromoters,eq(adsPromoters.id,adstationSlots.promoterId)).where(eq(adstationSlots.id,params.slotId)).for('share').limit(1);
@@ -934,6 +937,16 @@ export class DeliveryService {
         if(owner?.status!=='ACTIVE')throw new ForbiddenException('Ad delivery is unavailable');
         const controls=await tx.execute(sql`SELECT 1 FROM ads_traffic_controls WHERE is_active AND (expires_at IS NULL OR expires_at>now()) AND ((target_scope='slot' AND target_id=${params.slotId}) OR(target_scope='website' AND target_id=${params.websiteId}) OR(target_scope='promoter' AND target_id=${params.promoterId})) LIMIT 1`);
         if(controls.rows.length){params.inventoryClass='shadow';params.deliveryMode='shadow';params.trafficRiskStatus='suspicious';}
+        let rewardPolicy:any=null;
+        if(houseProgramRequested()){
+          const result=await tx.execute(sql`SELECT id,terms FROM cfig_policies WHERE approved_at IS NOT NULL AND (terms->>'effectiveFrom')::timestamptz<=clock_timestamp() ORDER BY (terms->>'effectiveFrom')::timestamptz DESC,id DESC LIMIT 1`);
+          rewardPolicy=result.rows[0]??null;
+        }
+        houseRewardContext={websitePolicy:supply.site.policyStatus,websitePolicyRevision:supply.site.policyRevision,
+          ownershipStatus:supply.site.verificationStatus,ownershipExpiresAt:supply.site.verificationExpiresAt.toISOString(),
+          promoterUserId:supply.promoter.userId,slotPolicyRevision:supply.slot.policyRevision,
+          programAuthorized:!!rewardPolicy,policyId:rewardPolicy?.id??null,policyDigest:rewardPolicy?adDigest(rewardPolicy.terms):null};
+
       }
       const [decision]=await tx.insert(adsAuctionDecisions).values({
           requestId: params.requestId,
@@ -963,7 +976,9 @@ export class DeliveryService {
 .returning({id:adsAuctionDecisions.id});
       if(!decision?.id)throw new Error('House decision could not be recorded');
       const decisionId=decision.id;
+      const houseIssuedAt=new Date();
       const [serve]=await tx.insert(adsServes).values({
+          servedAt:houseIssuedAt,
           placementId: params.placementId,
           campaignId: null,
           creativeId: null,
@@ -993,6 +1008,7 @@ export class DeliveryService {
           geoRegion: params.clientGeo?.region || null,
           deviceType: params.clientGeo?.device || null,
           contentSnapshot: {
+            houseRewardContext,
             destinationUrl: activeHouseCreative.destinationUrl,
             adType: activeHouseCreative.adType,
             headline: activeHouseCreative.headline,
@@ -1007,6 +1023,7 @@ export class DeliveryService {
       await this.evidence.append(params.requestId,{
         version:1,
         stage:'issued',
+        houseRewardContext,serverServedAt:houseIssuedAt.toISOString(),
         serveId:serve.id,
         inventoryClass:params.inventoryClass,
         deliveryMode:params.deliveryMode,
@@ -2110,20 +2127,27 @@ export class DeliveryService {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ads-escrow:${signedPayload.campaignId}`},0))`);
       }
       const [existing]=await tx.select().from(adsInteractions).where(eq(adsInteractions.eventId,clientEventId)).limit(1);
-      if(existing){if(existing.serveId!==serveId||existing.type!==params.type)throw new ForbiddenException('Event identity changed');return existing;}
+      if(existing){assertEventReplay(existing,{...params.claims,serveId,type:params.type,source:params.source||'embed'});return existing;}
+      // Serialize every event for a serve before resolving its browser identity.
+      // This also protects first claims arriving concurrently on different stages.
+      if(serveId){
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-serve-binding:${serveId}`},0))`);
+        const observations=await tx.select({
+          pageViewId:sql<string>`max(${adsInteractions.pageViewId}::text)`,
+          slotInstanceId:sql<string>`max(${adsInteractions.slotInstanceId}::text)`,
+          opportunityId:sql<string>`max(${adsInteractions.opportunityId}::text)`,
+          sdkInitId:sql<string>`max(${adsInteractions.sdkInitId}::text)`
+        }).from(adsInteractions).where(eq(adsInteractions.serveId,serveId));
+        for(const prior of observations)assertInstanceBinding(prior,params.claims??{});
+      }
        // PLAN-0066 F2: durable once-per-serve stages (survives restarts/replicas; legacy beacons without eventId cannot duplicate).
        if(serveId&&['render','impression','viewable_impression'].includes(params.type)){
          await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-serve-stage:${serveId}:${params.type}`},0))`);
          const [stage]=await tx.select().from(adsInteractions).where(and(eq(adsInteractions.serveId,serveId),eq(adsInteractions.type,params.type as any))).limit(1);
          if(stage)return stage;
        }
-      // PLAN-0066 F4: first instance claim per serve wins; a later conflicting claim cannot relabel an issued serve.
-      let claims = params.claims ?? {};
-      if (serveId && claims.slotInstanceId) {
-        const [prior] = await tx.select({ id: adsInteractions.slotInstanceId }).from(adsInteractions)
-          .where(and(eq(adsInteractions.serveId, serveId), sql`${adsInteractions.slotInstanceId} is not null`)).limit(1);
-        if (prior && prior.id !== claims.slotInstanceId) claims = {};
-      }      const [event]=await tx.insert(adsInteractions).values({
+      const claims = params.claims ?? {};
+      const [event]=await tx.insert(adsInteractions).values({
         id:rawId,eventId:clientEventId,createdAt:new Date(),
         placementId:placementId===HOUSE_PLACEMENT_UUID?null:placementId,
         promoterId: promoterId || placementId,
@@ -2155,7 +2179,8 @@ export class DeliveryService {
       await this.evidence!.append(event.id,{version:1,serveId,eventId:clientEventId,type:event.type,serverReceivedAt:event.createdAt,
         clientOccurredAt:params.occurredAt??null,clientTimeTrust:'untrusted',visibleRatio:event.visibleRatio,durationMs:event.durationMs,
         measurable:event.measurable,verificationVersion:event.verificationVersion,assessmentStatus:event.assessmentStatus,financialEligibility:event.financialEligibility,
-        keyedIpHash:event.keyedIpHash,keyId:event.keyId,websiteId,slotId,referrer:safeReferrer},tx);
+        keyedIpHash:event.keyedIpHash,keyId:event.keyId,websiteId,slotId,referrer:safeReferrer,
+        instanceClaims:{pageViewId:event.pageViewId,slotInstanceId:event.slotInstanceId,opportunityId:event.opportunityId,sdkInitId:event.sdkInitId,instanceIndex:event.instanceIndex,instancesDetected:event.instancesDetected}},tx);
       return event;
     });
     if(recorded.serveId&&recorded.verificationVersion===2&&recorded.financialEligibility==='pending'&&['click','viewable_impression'].includes(recorded.type)){

@@ -34,7 +34,7 @@
     "solvencyInvariant": "rewards_fund.cash_balance_usd_cents == (rewards_fund.allocated_usd_cents + rewards_fund.available_usd_cents + rewards_fund.funded_pending_usd_cents) AND rewards_fund.allocated_usd_cents == SUM(user_outstanding_points * point_valuation_cents) AND rewards_fund.available_usd_cents >= 0 AND campaign_bonus_reserves.allocated_microusd == (campaign_bonus_reserves.consumed_microusd + campaign_bonus_reserves.released_microusd + campaign_bonus_reserves.remaining_microusd)",
     "fractionalCentAccounting": {
       "strategy": "INTEGER_MICROUSD_ACCUMULATOR",
-      "subCentUnitUsd": 0.000001,
+      "subCentUnitUsd": 1e-06,
       "microusdPerIntegerCent": 10000,
       "description": "One integer accumulator unit represents $0.000001 USD (1 microdollar; 0.0001 USD cents). 10,000 microdollars equal 1 integer USD cent. Calculations use exact integer arithmetic; whole cents are swept into available cash only when accumulated microdollars >= 10,000. Residual microdollars carry forward without rounding."
     },
@@ -301,7 +301,7 @@
       "stopWhenReserveDepleted": true,
       "dilutePromoterPaidShare": false,
       "accountingUnit": "MICROUSD",
-      "microdollarPrecision": 0.000001,
+      "microdollarPrecision": 1e-06,
       "reconciliationRule": "allocated_microusd == consumed_microusd + released_microusd + remaining_microusd",
       "ledgerFields": [
         "allocated_microusd",
@@ -463,5 +463,54 @@
         "description": "An exceptionally rare, long-term legacy recognition for advertisers who reach thirty qualifying years"
       }
     ]
+  },
+  "houseRewards": {
+    "enabled": false,
+    "conversionEnabled": false,
+    "policyVersion": "CFIG-HOUSE-REWARDS-v1.0.0",
+    "impressionsPerCfig": 5000,
+    "clicksPerCfig": 25,
+    "dailyCapApprovedCfig": 10,
+    "dailyCapTestingCfig": 0,
+    "monthlyCapPerPromoterCfig": 100,
+    "monthlyBudgetUsdCents": 5000,
+    "maxOutstandingUsdCents": 10000,
+    "proposedCfigPerFundedPoint": 100,
+    "finalizationHours": 72,
+    "pendingHoldHours": 72,
+    "qualifyingSupply": "approved_only",
+    "houseImpressionThresholds": [
+      100,
+      500,
+      1000,
+      10000,
+      50000,
+      100000,
+      500000,
+      1000000,
+      10000000,
+      50000000,
+      100000000,
+      1000000000,
+      100000000000,
+      1000000000000
+    ],
+    "houseClickThresholds": [
+      10,
+      50,
+      100,
+      1000,
+      5000,
+      10000,
+      50000,
+      100000,
+      1000000,
+      5000000,
+      10000000,
+      100000000,
+      10000000000,
+      100000000000
+    ],
+    "maxCandidatesPerDay": 200000
   }
 }
