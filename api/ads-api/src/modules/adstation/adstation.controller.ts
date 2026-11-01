@@ -13,6 +13,7 @@ import {
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AdstationService, UpdateAdstationSlotDto } from './adstation.service';
 import { PromotersService } from '../promoters/promoters.service';
+import { CreateSetupCheckDto, SetupChecksService } from './setup-checks.service';
 import {
   IsString,
   IsIn,
@@ -98,8 +99,22 @@ export class AdstationController {
   constructor(
     private readonly adstationService: AdstationService,
     private readonly promotersService: PromotersService,
+    private readonly setupChecks: SetupChecksService,
   ) {}
 
+  @Post('websites/:websiteId/setup-checks')
+  @ApiOperation({ summary: 'Create an owner-scoped, challenge-bound SDK setup check (idempotent by requestId)' })
+  async createSetupCheck(@Req() req: any, @Param('websiteId') websiteId: string, @Body() dto: CreateSetupCheckDto) {
+    const promoter = await this.promotersService.getOrCreatePromoter(req.user.sub, 'WEBSITE');
+    return { status: 'success', data: await this.setupChecks.create(promoter.id, websiteId, dto) };
+  }
+
+  @Get('setup-checks/:checkId')
+  @ApiOperation({ summary: 'Read explicit SDK/placement/telemetry setup evidence for an owned check' })
+  async getSetupCheck(@Req() req: any, @Param('checkId') checkId: string) {
+    const promoter = await this.promotersService.getOrCreatePromoter(req.user.sub, 'WEBSITE');
+    return { status: 'success', data: await this.setupChecks.get(promoter.id, checkId) };
+  }
   @Get('websites/:websiteId/slots')
   @ApiOperation({ summary: 'List AdStation slots for website' })
   async getSlots(@Req() req: any, @Param('websiteId') websiteId: string) {

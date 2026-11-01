@@ -4,7 +4,18 @@ import { DeliveryService } from './delivery.service';
 import { resolveClientIp, resolveClaimedIp } from './client-ip';
 import { Public } from '@crimfig/shared';
 import type { Response, Request } from 'express';
-import { IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, IsUUID, IsISO8601 } from 'class-validator';
+import { IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, IsUUID, IsISO8601 } from 'class-validator';
+
+function pickClaims(dto: any) {
+  return {
+    pageViewId: dto.pageViewId,
+    slotInstanceId: dto.slotInstanceId,
+    opportunityId: dto.opportunityId,
+    sdkInitId: dto.sdkInitializationId,
+    instanceIndex: dto.instanceIndex,
+    instancesDetected: dto.instancesDetected,
+  };
+}
 
 function extractClientIp(req: Request): string {
   // PLAN-0066 F1: explicit trusted-proxy boundary (see client-ip.ts).
@@ -48,7 +59,13 @@ export class TrackInteractionDto {
   type: 'hover' | 'touch' | 'render' | 'impression' | 'viewable_impression' | 'click' | 'reels_view' | 'video_q25' | 'video_q50' | 'video_q75' | 'video_complete';
   @IsOptional() @IsIn(['embed', 'share_link', 'reels', 'direct'])
   source?: string;
-}
+  // PLAN-0066 F4: optional browser-claimed correlation. Never authority; legacy tags omit these.
+  @IsOptional() @IsUUID() pageViewId?: string;
+  @IsOptional() @IsUUID() slotInstanceId?: string;
+  @IsOptional() @IsUUID() opportunityId?: string;
+  @IsOptional() @IsUUID() sdkInitializationId?: string;
+  @IsOptional() @IsInt() @Min(0) @Max(1000) instanceIndex?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(1000) instancesDetected?: number;}
 
 export class ViewabilityTelemetryDto {
   @IsOptional() @IsUUID() eventId?:string;
@@ -61,7 +78,13 @@ export class ViewabilityTelemetryDto {
   durationSeconds: number;
   @IsOptional() @IsIn(['banner', 'card', 'video', 'interstitial'])
   format?: string;
-}
+  // PLAN-0066 F4: optional browser-claimed correlation. Never authority; legacy tags omit these.
+  @IsOptional() @IsUUID() pageViewId?: string;
+  @IsOptional() @IsUUID() slotInstanceId?: string;
+  @IsOptional() @IsUUID() opportunityId?: string;
+  @IsOptional() @IsUUID() sdkInitializationId?: string;
+  @IsOptional() @IsInt() @Min(0) @Max(1000) instanceIndex?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(1000) instancesDetected?: number;}
 
 @ApiTags('Ad Delivery & Embed')
 @Controller('delivery')
@@ -84,6 +107,7 @@ export class DeliveryController {
       source: 'embed',
       clientIp,
       claimedIp: resolveClaimedIp(req as any),
+      claims: pickClaims(dto),
       userAgent,
       referrer,
       visibleRatio: dto.visibleRatio,
@@ -147,6 +171,7 @@ export class DeliveryController {
       source: dto.source,
       clientIp,
       claimedIp: resolveClaimedIp(req as any),
+      claims: pickClaims(dto),
       userAgent,
       referrer,
     });

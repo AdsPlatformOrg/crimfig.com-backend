@@ -225,6 +225,13 @@
       "when": 1793453300000,
       "tag": "0032_ads_interactions_claimed_ip",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1793453400000,
+      "tag": "0033_setup_checks_and_instance_claims",
+      "breakpoints": true
     }
   ]
 }

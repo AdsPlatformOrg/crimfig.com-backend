@@ -63,6 +63,13 @@ export const adsInteractions = pgTable(
     actorIp: varchar('actor_ip', { length: 45 }),
     // Client-claimed IP (forensics only; never used for decisions)
     claimedIp: varchar('claimed_ip', { length: 45 }),
+    // PLAN-0066 F4: browser-claimed correlation (never authority; first claim per serve wins)
+    pageViewId: uuid('page_view_id'),
+    slotInstanceId: uuid('slot_instance_id'),
+    opportunityId: uuid('opportunity_id'),
+    sdkInitId: uuid('sdk_init_id'),
+    instanceIndex: integer('instance_index'),
+    instancesDetected: integer('instances_detected'),
     userAgent: text('user_agent'),
 
     // Referrer URL (where the click came from)

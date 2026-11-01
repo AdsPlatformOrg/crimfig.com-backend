@@ -244,6 +244,26 @@ export class DeliveryService {
   if (typeof window !== 'undefined' && window.__cfLoaderV2) { window.__cfLoaderV2.scan(); return; }
   var instances = new Map(), lazySlots=new Map();
   function eventIdentity() { return window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : undefined; }
+  // PLAN-0066 F4: runtime and pageview identities exist only for the first (owning) runtime; duplicate includes return earlier.
+  var SDK_VERSION = 'cf-sdk/2';
+  var sdkInitializationId = eventIdentity(), pageViewId = eventIdentity();
+  function instanceIdentity(element) { if (!element.__cfInstanceId) element.__cfInstanceId = eventIdentity(); return element.__cfInstanceId; }
+  function claimsFor(element, token, opportunityId) {
+    var detected = 0, index = 0;
+    try {
+      var all = document.querySelectorAll('ins.crimfig-pub-slot');
+      for (var i = 0; i < all.length; i++) {
+        var t = all[i].getAttribute('data-ad-slot') || all[i].getAttribute('data-cf-placement');
+        if (t === token) { if (all[i] === element) index = detected; detected++; }
+      }
+    } catch (e) {}
+    return { pageViewId: pageViewId, slotInstanceId: instanceIdentity(element), opportunityId: opportunityId, sdkInitializationId: sdkInitializationId, instanceIndex: index, instancesDetected: detected };
+  }
+  function withClaims(ad, body) {
+    var c = ad && ad.__cf;
+    if (c) { for (var k in c) { if (c[k] !== undefined && c[k] !== null) body[k] = c[k]; } }
+    return body;
+  }
   function sendBeaconPost(url, data) {
     var body = JSON.stringify(data);
     if (typeof fetch === 'function') {
@@ -265,24 +285,24 @@ export class DeliveryService {
 
   function sendRenderBeacon(ad, baseOverride) {
     if (!ad || !ad.impToken) return;
-    sendBeaconPost((baseOverride || apiBase) + '/api/v1/delivery/interaction', {
+    sendBeaconPost((baseOverride || apiBase) + '/api/v1/delivery/interaction', withClaims(ad, {
       eventId: eventIdentity(),
       occurredAt: new Date().toISOString(),
       impToken: ad.impToken,
       type: 'render',
       source: 'embed'
-    });
+    }));
   }
 
   function sendImpressionBeacon(ad, baseOverride) {
     if (!ad || !ad.impToken) return;
-    sendBeaconPost((baseOverride || apiBase) + '/api/v1/delivery/interaction', {
+    sendBeaconPost((baseOverride || apiBase) + '/api/v1/delivery/interaction', withClaims(ad, {
       eventId: eventIdentity(),
       occurredAt: new Date().toISOString(),
       impToken: ad.impToken,
       type: 'impression',
       source: 'embed'
-    });
+    }));
   }
 
   function trackViewability(container, ad, minSeconds, baseOverride) {
@@ -305,14 +325,14 @@ export class DeliveryService {
       timer=setTimeout(function(){
         timer=null;if(!visible()){clear();return;}sent=true;
         var elapsed = (Date.now() - startedAt) / 1000;
-        sendBeaconPost((baseOverride||apiBase)+'/api/v1/delivery/viewability',{
+        sendBeaconPost((baseOverride||apiBase)+'/api/v1/delivery/viewability',withClaims(ad,{
           eventId:eventIdentity(),
           occurredAt:new Date().toISOString(),
           impToken:ad.impToken,
           visibleRatio:Math.min(1, Math.max(0.5, ratio)),
           durationSeconds:Math.max(minSeconds, elapsed),
           format:ad.format||undefined
-        });
+        }));
         cleanup();
       },minSeconds*1000);
     }
@@ -358,6 +378,7 @@ export class DeliveryService {
       .then(function(data){if(state.closed||instances.get(element)!==state||!element.isConnected)return;
         if(!data||!data.data){state.closed=true;clearTimeout(state.timer);collapseSlot();return;}
         var ad=data.data;
+        ad.__cf=claimsFor(element,token,state.generation);
         if(!ad.impToken||!['text','image','video'].includes(ad.adType)||ad.adType==='image'&&!resolvedMedia(ad.imageUrl,base)||ad.adType==='video'&&!resolvedMedia(ad.videoUrl,base))throw new Error('Invalid creative');
         return renderAdCard(element,ad,'publisher_network',base,state).then(function(){
           if(state.closed||instances.get(element)!==state||!element.isConnected)return;
@@ -532,14 +553,19 @@ export class DeliveryService {
 
     container.innerHTML = '';
     container.appendChild(card);
-    function engagement(type){sendBeaconPost(activeBase+'/api/v1/delivery/interaction',{eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,type:type,source:'embed'});}
+    function engagement(type){sendBeaconPost(activeBase+'/api/v1/delivery/interaction',withClaims(ad,{eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,type:type,source:'embed'}));}
     card.addEventListener('pointerenter',function(){engagement('hover');},{once:true});
     card.addEventListener('pointerdown',function(event){if(event.pointerType==='touch')engagement('touch');},{once:true});
     return Promise.all(assets);
   }
 
   if (typeof window !== 'undefined') {
-    window.__cfLoaderV2={scan:initSlots,refresh:function(element){if(!element)return;dispose(element);element.replaceChildren();initSlots();}};
+    window.__cfLoaderV2={scan:initSlots,version:SDK_VERSION,refresh:function(element){if(!element)return;dispose(element);element.replaceChildren();initSlots();}};
+    // PLAN-0066 F5: scoped SDK execution acknowledgement, valid with zero slots; only when a setup challenge is in the page URL.
+    try {
+      var setup = /[?&]cf_setup=([A-Za-z0-9_-]{8,64})/.exec((window.location && window.location.search) || '');
+      if (setup) sendBeaconPost(apiBase + '/api/v1/delivery/sdk-handshake', { challenge: setup[1], sdkVersion: SDK_VERSION, sdkInitializationId: sdkInitializationId, pageViewId: pageViewId, host: window.location.hostname });
+    } catch (e) {}
     var scheduled=false;
     new MutationObserver(function(){if(!scheduled){scheduled=true;setTimeout(function(){scheduled=false;initSlots();},100);}}).observe(document.documentElement,{childList:true,subtree:true});
     window.addEventListener('pagehide',function(){instances.forEach(function(state,element){dispose(element);});});
@@ -1868,6 +1894,7 @@ export class DeliveryService {
     source?: string;
     clientIp?: string;
     claimedIp?: string | null;
+    claims?: { pageViewId?: string; slotInstanceId?: string; opportunityId?: string; sdkInitId?: string; instanceIndex?: number; instancesDetected?: number };
     userAgent?: string;
     referrer?: string;
     visibleRatio?: number;
@@ -2056,7 +2083,13 @@ export class DeliveryService {
          const [stage]=await tx.select().from(adsInteractions).where(and(eq(adsInteractions.serveId,serveId),eq(adsInteractions.type,params.type as any))).limit(1);
          if(stage)return stage;
        }
-      const [event]=await tx.insert(adsInteractions).values({
+      // PLAN-0066 F4: first instance claim per serve wins; a later conflicting claim cannot relabel an issued serve.
+      let claims = params.claims ?? {};
+      if (serveId && claims.slotInstanceId) {
+        const [prior] = await tx.select({ id: adsInteractions.slotInstanceId }).from(adsInteractions)
+          .where(and(eq(adsInteractions.serveId, serveId), sql`${adsInteractions.slotInstanceId} is not null`)).limit(1);
+        if (prior && prior.id !== claims.slotInstanceId) claims = {};
+      }      const [event]=await tx.insert(adsInteractions).values({
         id:rawId,eventId:clientEventId,createdAt:new Date(),
         placementId:placementId===HOUSE_PLACEMENT_UUID?null:placementId,
         promoterId: promoterId || placementId,
@@ -2066,6 +2099,8 @@ export class DeliveryService {
         type: params.type,
         source: params.source || 'embed',
         actorIp: params.clientIp ? params.clientIp.slice(0,45) : null,claimedIp: params.claimedIp ? params.claimedIp.slice(0,45) : null,
+        pageViewId: claims.pageViewId ?? null, slotInstanceId: claims.slotInstanceId ?? null, opportunityId: claims.opportunityId ?? null,
+        sdkInitId: claims.sdkInitId ?? null, instanceIndex: claims.instanceIndex ?? null, instancesDetected: claims.instancesDetected ?? null,
         userAgent: params.userAgent?.slice(0,512),
         referrer: safeReferrer,
         visibleRatio: visibleRatioStr,

@@ -144,7 +144,9 @@ describe('PLAN-0055 actual loader lifecycle in a DOM fixture', () => {
     f.run(); await flush(); expect(f.fetch).toHaveBeenCalledTimes(1);
     f.nodes.find(n => n.tagName === 'IMG').dispatchEvent(new Event('load')); await flush();
     expect(f.slot.getAttribute('data-cf-state')).toBe('rendered');
-    expect(f.fetch.mock.calls.filter(c => c[0].includes('/interaction'))).toHaveLength(1);
+    const beacons = (f.fetch.mock.calls as any[]).filter(c => c[0].includes('/interaction')).map(c => JSON.parse(c[1].body).type);
+    // PLAN-0065: one render receipt and one impression, only after the asset loaded.
+    expect(beacons.sort()).toEqual(['impression', 'render']);
   });
   it('never reserves space if the script does not run, and loads an offscreen slot from its measurable anchor', async () => {
     const f = fixture(() => Promise.resolve({ ok: true, json: async () => ({ data: ad }) }), 2000);
@@ -153,7 +155,9 @@ describe('PLAN-0055 actual loader lifecycle in a DOM fixture', () => {
     f.setTop(10); f.observers[0].callback([{ isIntersecting: true }]); await flush();
     expect(f.slot.getAttribute('data-cf-state')).toBe('rendered');
     expect(f.slot.style.minHeight).toBe('0px');
-    expect(f.fetch.mock.calls.filter(c => c[0].includes('/interaction'))).toHaveLength(1);
+    const beacons = (f.fetch.mock.calls as any[]).filter(c => c[0].includes('/interaction')).map(c => JSON.parse(c[1].body).type);
+    // PLAN-0065: one render receipt and one impression, only after the asset loaded.
+    expect(beacons.sort()).toEqual(['impression', 'render']);
     f.window.__cfLoaderV2.scan(); expect(f.fetch.mock.calls.filter(c => c[0].includes('/delivery/ad/'))).toHaveLength(1);
   });
 });
