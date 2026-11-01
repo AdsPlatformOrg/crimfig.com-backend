@@ -28,7 +28,7 @@ const format = enumeration('banner', 'card', 'video', 'interstitial');
 const status = enumeration('draft', 'active', 'paused', 'completed', 'cancelled', 'under_review', 'pending_manager_approval', 'rejected', 'suspended', 'trash');
 const moderationStatus = enumeration('draft', 'pending_primary_review', 'pending_manager_approval', 'approved', 'rejected');
 const jsonArrayField = (items: Schema): Schema => ({ anyOf: [str(), array(items)], nullable: true });
-const imageSpecs = optionalObject({ width: num(), height: num(), bytes: num(), mimeType: str(), sha256: nullable(str()),
+const imageSpecs = optionalObject({ width: nullable(num()), height: nullable(num()), bytes: num(), mimeType: str(), sha256: nullable(str()),
   preparation: nullable(json()), renditions: array(json()) });
 const creative = object({ id: str(), campaignId: str(), adStackId: nullable(str()), adType: enumeration('text', 'image', 'video'),
   headline: nullable(str()), bodyText: nullable(str()), ctaText: nullable(str()), destinationUrl: str(),

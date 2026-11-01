@@ -210,6 +210,7 @@
                         "type": "number"
                       },
                       "height": {
+                        "nullable": true,
                         "type": "number"
                       },
                       "mimeType": {
@@ -232,6 +233,7 @@
                         "type": "string"
                       },
                       "width": {
+                        "nullable": true,
                         "type": "number"
                       }
                     },
@@ -369,6 +371,7 @@
                                     "type": "number"
                                   },
                                   "height": {
+                                    "nullable": true,
                                     "type": "number"
                                   },
                                   "mimeType": {
@@ -391,6 +394,7 @@
                                     "type": "string"
                                   },
                                   "width": {
+                                    "nullable": true,
                                     "type": "number"
                                   }
                                 },
@@ -917,6 +921,7 @@
                               "type": "number"
                             },
                             "height": {
+                              "nullable": true,
                               "type": "number"
                             },
                             "mimeType": {
@@ -939,6 +944,7 @@
                               "type": "string"
                             },
                             "width": {
+                              "nullable": true,
                               "type": "number"
                             }
                           },
@@ -1356,6 +1362,7 @@
                                           "type": "number"
                                         },
                                         "height": {
+                                          "nullable": true,
                                           "type": "number"
                                         },
                                         "mimeType": {
@@ -1378,6 +1385,7 @@
                                           "type": "string"
                                         },
                                         "width": {
+                                          "nullable": true,
                                           "type": "number"
                                         }
                                       },
@@ -1904,6 +1912,7 @@
                                     "type": "number"
                                   },
                                   "height": {
+                                    "nullable": true,
                                     "type": "number"
                                   },
                                   "mimeType": {
@@ -1926,6 +1935,7 @@
                                     "type": "string"
                                   },
                                   "width": {
+                                    "nullable": true,
                                     "type": "number"
                                   }
                                 },
@@ -2358,6 +2368,7 @@
                                     "type": "number"
                                   },
                                   "height": {
+                                    "nullable": true,
                                     "type": "number"
                                   },
                                   "mimeType": {
@@ -2380,6 +2391,7 @@
                                     "type": "string"
                                   },
                                   "width": {
+                                    "nullable": true,
                                     "type": "number"
                                   }
                                 },
@@ -2906,6 +2918,7 @@
                               "type": "number"
                             },
                             "height": {
+                              "nullable": true,
                               "type": "number"
                             },
                             "mimeType": {
@@ -2928,6 +2941,7 @@
                               "type": "string"
                             },
                             "width": {
+                              "nullable": true,
                               "type": "number"
                             }
                           },
@@ -3335,6 +3349,7 @@
                               "type": "number"
                             },
                             "height": {
+                              "nullable": true,
                               "type": "number"
                             },
                             "mimeType": {
@@ -3357,6 +3372,7 @@
                               "type": "string"
                             },
                             "width": {
+                              "nullable": true,
                               "type": "number"
                             }
                           },
@@ -3905,6 +3921,7 @@
                                     "type": "number"
                                   },
                                   "height": {
+                                    "nullable": true,
                                     "type": "number"
                                   },
                                   "mimeType": {
@@ -3927,6 +3944,7 @@
                                     "type": "string"
                                   },
                                   "width": {
+                                    "nullable": true,
                                     "type": "number"
                                   }
                                 },
@@ -4453,6 +4471,7 @@
                               "type": "number"
                             },
                             "height": {
+                              "nullable": true,
                               "type": "number"
                             },
                             "mimeType": {
@@ -4475,6 +4494,7 @@
                               "type": "string"
                             },
                             "width": {
+                              "nullable": true,
                               "type": "number"
                             }
                           },
@@ -4886,6 +4906,7 @@
                                   "type": "number"
                                 },
                                 "height": {
+                                  "nullable": true,
                                   "type": "number"
                                 },
                                 "mimeType": {
@@ -4908,6 +4929,7 @@
                                   "type": "string"
                                 },
                                 "width": {
+                                  "nullable": true,
                                   "type": "number"
                                 }
                               },
@@ -5434,6 +5456,7 @@
                             "type": "number"
                           },
                           "height": {
+                            "nullable": true,
                             "type": "number"
                           },
                           "mimeType": {
@@ -5456,6 +5479,7 @@
                             "type": "string"
                           },
                           "width": {
+                            "nullable": true,
                             "type": "number"
                           }
                         },
@@ -5867,6 +5891,7 @@
                                     "type": "number"
                                   },
                                   "height": {
+                                    "nullable": true,
                                     "type": "number"
                                   },
                                   "mimeType": {
@@ -5889,6 +5914,7 @@
                                     "type": "string"
                                   },
                                   "width": {
+                                    "nullable": true,
                                     "type": "number"
                                   }
                                 },
@@ -6415,6 +6441,7 @@
                               "type": "number"
                             },
                             "height": {
+                              "nullable": true,
                               "type": "number"
                             },
                             "mimeType": {
@@ -6437,6 +6464,7 @@
                               "type": "string"
                             },
                             "width": {
+                              "nullable": true,
                               "type": "number"
                             }
                           },
@@ -7020,6 +7048,7 @@
                                     "type": "number"
                                   },
                                   "height": {
+                                    "nullable": true,
                                     "type": "number"
                                   },
                                   "mimeType": {
@@ -7042,6 +7071,7 @@
                                     "type": "string"
                                   },
                                   "width": {
+                                    "nullable": true,
                                     "type": "number"
                                   }
                                 },
@@ -7568,6 +7598,7 @@
                               "type": "number"
                             },
                             "height": {
+                              "nullable": true,
                               "type": "number"
                             },
                             "mimeType": {
@@ -7590,6 +7621,7 @@
                               "type": "string"
                             },
                             "width": {
+                              "nullable": true,
                               "type": "number"
                             }
                           },
@@ -8442,6 +8474,7 @@
                               "type": "number"
                             },
                             "height": {
+                              "nullable": true,
                               "type": "number"
                             },
                             "mimeType": {
@@ -8464,6 +8497,7 @@
                               "type": "string"
                             },
                             "width": {
+                              "nullable": true,
                               "type": "number"
                             }
                           },
@@ -8622,6 +8656,7 @@
                                         "type": "number"
                                       },
                                       "height": {
+                                        "nullable": true,
                                         "type": "number"
                                       },
                                       "mimeType": {
@@ -8644,6 +8679,7 @@
                                         "type": "string"
                                       },
                                       "width": {
+                                        "nullable": true,
                                         "type": "number"
                                       }
                                     },
@@ -9170,6 +9206,7 @@
                                   "type": "number"
                                 },
                                 "height": {
+                                  "nullable": true,
                                   "type": "number"
                                 },
                                 "mimeType": {
@@ -9192,6 +9229,7 @@
                                   "type": "string"
                                 },
                                 "width": {
+                                  "nullable": true,
                                   "type": "number"
                                 }
                               },
@@ -9646,6 +9684,7 @@
                             "type": "number"
                           },
                           "height": {
+                            "nullable": true,
                             "type": "number"
                           },
                           "mimeType": {
@@ -9668,6 +9707,7 @@
                             "type": "string"
                           },
                           "width": {
+                            "nullable": true,
                             "type": "number"
                           }
                         },
@@ -9847,6 +9887,7 @@
                                         "type": "number"
                                       },
                                       "height": {
+                                        "nullable": true,
                                         "type": "number"
                                       },
                                       "mimeType": {
@@ -9869,6 +9910,7 @@
                                         "type": "string"
                                       },
                                       "width": {
+                                        "nullable": true,
                                         "type": "number"
                                       }
                                     },
@@ -10395,6 +10437,7 @@
                                   "type": "number"
                                 },
                                 "height": {
+                                  "nullable": true,
                                   "type": "number"
                                 },
                                 "mimeType": {
@@ -10417,6 +10460,7 @@
                                   "type": "string"
                                 },
                                 "width": {
+                                  "nullable": true,
                                   "type": "number"
                                 }
                               },
@@ -10815,6 +10859,7 @@
                                             "type": "number"
                                           },
                                           "height": {
+                                            "nullable": true,
                                             "type": "number"
                                           },
                                           "mimeType": {
@@ -10837,6 +10882,7 @@
                                             "type": "string"
                                           },
                                           "width": {
+                                            "nullable": true,
                                             "type": "number"
                                           }
                                         },
@@ -11363,6 +11409,7 @@
                                       "type": "number"
                                     },
                                     "height": {
+                                      "nullable": true,
                                       "type": "number"
                                     },
                                     "mimeType": {
@@ -11385,6 +11432,7 @@
                                       "type": "string"
                                     },
                                     "width": {
+                                      "nullable": true,
                                       "type": "number"
                                     }
                                   },
@@ -11767,6 +11815,7 @@
                                   "type": "number"
                                 },
                                 "height": {
+                                  "nullable": true,
                                   "type": "number"
                                 },
                                 "mimeType": {
@@ -11789,6 +11838,7 @@
                                   "type": "string"
                                 },
                                 "width": {
+                                  "nullable": true,
                                   "type": "number"
                                 }
                               },
@@ -11906,6 +11956,7 @@
                                         "type": "number"
                                       },
                                       "height": {
+                                        "nullable": true,
                                         "type": "number"
                                       },
                                       "mimeType": {
@@ -11928,6 +11979,7 @@
                                         "type": "string"
                                       },
                                       "width": {
+                                        "nullable": true,
                                         "type": "number"
                                       }
                                     },
