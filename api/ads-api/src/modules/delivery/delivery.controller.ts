@@ -1,25 +1,14 @@
 import { Controller, Get, Post, Body, Param, Query, Req, Res, Header, HttpCode, HttpStatus, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DeliveryService } from './delivery.service';
+import { resolveClientIp, resolveClaimedIp } from './client-ip';
 import { Public } from '@crimfig/shared';
 import type { Response, Request } from 'express';
 import { IsIn, IsNumber, IsOptional, IsString, Max, MaxLength, Min, IsUUID, IsISO8601 } from 'class-validator';
 
 function extractClientIp(req: Request): string {
-  // Respect trusted edge proxy headers when present (Cloudflare / Railway edge)
-  const cfIp = req.headers['cf-connecting-ip'];
-  if (typeof cfIp === 'string' && cfIp.trim()) return cfIp.trim();
-
-  const realIp = req.headers['x-real-ip'];
-  if (typeof realIp === 'string' && realIp.trim()) return realIp.trim();
-
-  const xff = req.headers['x-forwarded-for'];
-  if (typeof xff === 'string' && xff.trim()) {
-    const first = xff.split(',')[0].trim();
-    if (first) return first;
-  }
-
-  return req.ip || req.socket.remoteAddress || '';
+  // PLAN-0066 F1: explicit trusted-proxy boundary (see client-ip.ts).
+  return resolveClientIp(req as any);
 }
 
 /**
@@ -94,6 +83,7 @@ export class DeliveryController {
       type: 'viewable_impression',
       source: 'embed',
       clientIp,
+      claimedIp: resolveClaimedIp(req as any),
       userAgent,
       referrer,
       visibleRatio: dto.visibleRatio,
@@ -156,6 +146,7 @@ export class DeliveryController {
       type: dto.type,
       source: dto.source,
       clientIp,
+      claimedIp: resolveClaimedIp(req as any),
       userAgent,
       referrer,
     });

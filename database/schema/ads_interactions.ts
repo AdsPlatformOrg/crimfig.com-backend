@@ -59,7 +59,10 @@ export const adsInteractions = pgTable(
     source: varchar('source', { length: 30 }),
 
     // For fraud detection — never exposed via API
+    // Trusted (proxy-verified) client IP used for decisions - see client-ip.ts (PLAN-0066)
     actorIp: varchar('actor_ip', { length: 45 }),
+    // Client-claimed IP (forensics only; never used for decisions)
+    claimedIp: varchar('claimed_ip', { length: 45 }),
     userAgent: text('user_agent'),
 
     // Referrer URL (where the click came from)

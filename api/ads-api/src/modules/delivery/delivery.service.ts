@@ -1588,7 +1588,8 @@ export class DeliveryService {
         type: 'impression',
         source:
           canonicalSlot || placement.websiteId ? 'embed' : 'share_link',
-        actorIp: clientIp,
+        // PLAN-0066: trusted (proxy-verified) IP is stored and used for decisions.
+        actorIp: clientIp || null,
         userAgent,
         referrer: referrerDomain,
         isValid: true,
@@ -1866,6 +1867,7 @@ export class DeliveryService {
       | 'video_complete';
     source?: string;
     clientIp?: string;
+    claimedIp?: string | null;
     userAgent?: string;
     referrer?: string;
     visibleRatio?: number;
@@ -2048,6 +2050,12 @@ export class DeliveryService {
       }
       const [existing]=await tx.select().from(adsInteractions).where(eq(adsInteractions.eventId,clientEventId)).limit(1);
       if(existing){if(existing.serveId!==serveId||existing.type!==params.type)throw new ForbiddenException('Event identity changed');return existing;}
+       // PLAN-0066 F2: durable once-per-serve stages (survives restarts/replicas; legacy beacons without eventId cannot duplicate).
+       if(serveId&&['render','impression','viewable_impression'].includes(params.type)){
+         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-serve-stage:${serveId}:${params.type}`},0))`);
+         const [stage]=await tx.select().from(adsInteractions).where(and(eq(adsInteractions.serveId,serveId),eq(adsInteractions.type,params.type as any))).limit(1);
+         if(stage)return stage;
+       }
       const [event]=await tx.insert(adsInteractions).values({
         id:rawId,eventId:clientEventId,createdAt:new Date(),
         placementId:placementId===HOUSE_PLACEMENT_UUID?null:placementId,
@@ -2057,7 +2065,7 @@ export class DeliveryService {
         slotId,
         type: params.type,
         source: params.source || 'embed',
-        actorIp: null,
+        actorIp: params.clientIp ? params.clientIp.slice(0,45) : null,claimedIp: params.claimedIp ? params.claimedIp.slice(0,45) : null,
         userAgent: params.userAgent?.slice(0,512),
         referrer: safeReferrer,
         visibleRatio: visibleRatioStr,
