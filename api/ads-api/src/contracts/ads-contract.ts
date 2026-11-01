@@ -57,8 +57,10 @@ const campaign = object(campaignProperties, ['id', 'title', 'format', 'status', 
 const asset = object({ assetId: str(), cdnUrl: nullable(str()), storageKey: str(), bytes: num(), mimeType: str(),
   width: nullable(num()), height: nullable(num()), sha256: nullable(str()), preparation: nullable(json()), status: str() }, ['assetId', 'cdnUrl', 'status']);
 const storedAsset = object({ id: str(), ownerId: str(), storageKey: str(), cdnUrl: nullable(str()), status: str(), bytes: num(), mimeType: str() }, ['id', 'status']);
-const decision = object({ id: str(), targetType: enumeration('campaign', 'creative'), targetId: str(), reviewerId: str(), decision: str() });
+const decision = object({ id: str(), targetType: enumeration('campaign', 'creative', 'stack'), targetId: str(), reviewerId: str(), decision: str() });
 const reviewResult = object({ campaign, decision, stage: str(), nextStage: str(), live: bool(), isEmergencyOverride: bool() }, ['campaign', 'decision']);
+const stackReviewResult = object({ stack, decision, stage: str(), nextStage: str() }, ['stack', 'decision']);
+const creativeReviewResult = object({ creative, decision, stage: str(), nextStage: str() }, ['creative', 'decision']);
 export const apiErrorSchema = object({ status: enumeration('error'), statusCode: { type: 'integer' },
   code: str(), message: str(), requestId: str(), path: str(), timestamp: str(), fieldErrors: { type: 'object', additionalProperties: array(str()) } }, ['status', 'statusCode', 'code', 'message', 'requestId']);
 const success = (data: Schema): Schema => object({ status: enumeration('success'), data });
@@ -103,10 +105,17 @@ const responses: Record<string, Record<string, Schema>> = {
   },
   ModerationController: { getQueue: object({ campaigns: array(object({ id: str(), advertiserId: str(), title: str(), status, moderationStatus,
       pricingModel: str(), budgetUsdCents: num(), createdAt: str(),submissionId:str(),contentRevision:{type:'integer'} })),
-      creatives: array(object({...creative.properties,submissionId:str(),contentRevision:{type:'integer'}},[...creative.required,'submissionId','contentRevision'])), totalPending: num() }),
+      stacks: array(object({ id: str(), campaignId: str(), name: str(), campaignTitle: str(), reviewStatus: str(), submissionId: str(), contentRevision: {type:'integer'} })),
+      creatives: array(object({...creative.properties,submissionId:str(),contentRevision:{type:'integer'}},[...creative.required,'submissionId','contentRevision'])), totalPending: num() }, ['campaigns', 'creatives', 'totalPending']),
     submissionDetail:object({campaign:object(campaignProperties,campaign.required),submissionId:str(),contentRevision:{type:'integer'},snapshot:object({campaign:object(campaignProperties,campaign.required),stacks:array(stack),creatives:array(creative),targets:array(json())})}),
     changeAudit:array(object({id:str(),actorId:str(),action:str(),requestId:str(),priorRevision:{type:'integer'},contentRevision:{type:'integer'},previousSubmissionId:nullable(str()),submissionId:nullable(str()),beforeHash:str(),afterHash:str(),changedFields:array(str()),entityIds:array(str()),createdAt:str()})),
-    reviewCreative: object({ creative, decision }), primaryReviewCampaign: reviewResult, managerApprovalCampaign: reviewResult,
+    reviewCreative: object({ creative, decision }),
+    primaryReviewCreative: creativeReviewResult,
+    managerApprovalCreative: creativeReviewResult,
+    primaryReviewStack: stackReviewResult,
+    managerApprovalStack: stackReviewResult,
+    primaryReviewCampaign: reviewResult,
+    managerApprovalCampaign: reviewResult,
     reviewCampaign: reviewResult, emergencyOverride: reviewResult,
     suspendPromoter: object({ id: str(), isSuspended: bool() }),
   },

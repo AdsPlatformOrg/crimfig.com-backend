@@ -8559,6 +8559,45 @@
                     },
                     "type": "array"
                   },
+                  "stacks": {
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "campaignId": {
+                          "type": "string"
+                        },
+                        "campaignTitle": {
+                          "type": "string"
+                        },
+                        "contentRevision": {
+                          "type": "integer"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "reviewStatus": {
+                          "type": "string"
+                        },
+                        "submissionId": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "campaignId",
+                        "name",
+                        "campaignTitle",
+                        "reviewStatus",
+                        "submissionId",
+                        "contentRevision"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
                   "totalPending": {
                     "type": "number"
                   }
@@ -9576,7 +9615,8 @@
                       "targetType": {
                         "enum": [
                           "campaign",
-                          "creative"
+                          "creative",
+                          "stack"
                         ],
                         "type": "string"
                       }
@@ -9605,6 +9645,750 @@
                 },
                 "required": [
                   "campaign",
+                  "decision"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "Moderation_primaryReviewCreativeResponse": {
+        "properties": {
+          "data": {
+            "allOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "creative": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "adFormat": {
+                        "enum": [
+                          "banner",
+                          "card",
+                          "video",
+                          "interstitial"
+                        ],
+                        "type": "string"
+                      },
+                      "adStackId": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "adType": {
+                        "enum": [
+                          "text",
+                          "image",
+                          "video"
+                        ],
+                        "type": "string"
+                      },
+                      "bodyText": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "campaignId": {
+                        "type": "string"
+                      },
+                      "ctaText": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "destinationUrl": {
+                        "type": "string"
+                      },
+                      "headline": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "imageSpecs": {
+                        "additionalProperties": true,
+                        "nullable": true,
+                        "properties": {
+                          "bytes": {
+                            "type": "number"
+                          },
+                          "height": {
+                            "nullable": true,
+                            "type": "number"
+                          },
+                          "mimeType": {
+                            "type": "string"
+                          },
+                          "preparation": {
+                            "additionalProperties": true,
+                            "nullable": true,
+                            "type": "object"
+                          },
+                          "renditions": {
+                            "items": {
+                              "additionalProperties": true,
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "sha256": {
+                            "nullable": true,
+                            "type": "string"
+                          },
+                          "width": {
+                            "nullable": true,
+                            "type": "number"
+                          }
+                        },
+                        "required": [],
+                        "type": "object"
+                      },
+                      "imageUrl": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "mediaAssetId": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "mediaFormat": {
+                        "enum": [
+                          "image",
+                          "gif",
+                          "video"
+                        ],
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "posterUrl": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "rejectionReason": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "reviewStatus": {
+                        "enum": [
+                          "pending",
+                          "approved",
+                          "rejected"
+                        ],
+                        "type": "string"
+                      },
+                      "status": {
+                        "type": "string"
+                      },
+                      "videoUrl": {
+                        "nullable": true,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "campaignId",
+                      "destinationUrl"
+                    ],
+                    "type": "object"
+                  },
+                  "decision": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "decision": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "reviewerId": {
+                        "type": "string"
+                      },
+                      "targetId": {
+                        "type": "string"
+                      },
+                      "targetType": {
+                        "enum": [
+                          "campaign",
+                          "creative",
+                          "stack"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "targetType",
+                      "targetId",
+                      "reviewerId",
+                      "decision"
+                    ],
+                    "type": "object"
+                  },
+                  "nextStage": {
+                    "type": "string"
+                  },
+                  "stage": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "creative",
+                  "decision"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "Moderation_primaryReviewStackResponse": {
+        "properties": {
+          "data": {
+            "allOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "decision": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "decision": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "reviewerId": {
+                        "type": "string"
+                      },
+                      "targetId": {
+                        "type": "string"
+                      },
+                      "targetType": {
+                        "enum": [
+                          "campaign",
+                          "creative",
+                          "stack"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "targetType",
+                      "targetId",
+                      "reviewerId",
+                      "decision"
+                    ],
+                    "type": "object"
+                  },
+                  "nextStage": {
+                    "type": "string"
+                  },
+                  "stack": {
+                    "additionalProperties": true,
+                    "properties": {
+                      "campaignId": {
+                        "type": "string"
+                      },
+                      "creatives": {
+                        "items": {
+                          "additionalProperties": true,
+                          "properties": {
+                            "adFormat": {
+                              "enum": [
+                                "banner",
+                                "card",
+                                "video",
+                                "interstitial"
+                              ],
+                              "type": "string"
+                            },
+                            "adStackId": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "adType": {
+                              "enum": [
+                                "text",
+                                "image",
+                                "video"
+                              ],
+                              "type": "string"
+                            },
+                            "bodyText": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "campaignId": {
+                              "type": "string"
+                            },
+                            "ctaText": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "destinationUrl": {
+                              "type": "string"
+                            },
+                            "headline": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "id": {
+                              "type": "string"
+                            },
+                            "imageSpecs": {
+                              "additionalProperties": true,
+                              "nullable": true,
+                              "properties": {
+                                "bytes": {
+                                  "type": "number"
+                                },
+                                "height": {
+                                  "nullable": true,
+                                  "type": "number"
+                                },
+                                "mimeType": {
+                                  "type": "string"
+                                },
+                                "preparation": {
+                                  "additionalProperties": true,
+                                  "nullable": true,
+                                  "type": "object"
+                                },
+                                "renditions": {
+                                  "items": {
+                                    "additionalProperties": true,
+                                    "type": "object"
+                                  },
+                                  "type": "array"
+                                },
+                                "sha256": {
+                                  "nullable": true,
+                                  "type": "string"
+                                },
+                                "width": {
+                                  "nullable": true,
+                                  "type": "number"
+                                }
+                              },
+                              "required": [],
+                              "type": "object"
+                            },
+                            "imageUrl": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "mediaAssetId": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "mediaFormat": {
+                              "enum": [
+                                "image",
+                                "gif",
+                                "video"
+                              ],
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "posterUrl": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "rejectionReason": {
+                              "nullable": true,
+                              "type": "string"
+                            },
+                            "reviewStatus": {
+                              "enum": [
+                                "pending",
+                                "approved",
+                                "rejected"
+                              ],
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string"
+                            },
+                            "videoUrl": {
+                              "nullable": true,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "id",
+                            "campaignId",
+                            "destinationUrl"
+                          ],
+                          "type": "object"
+                        },
+                        "type": "array"
+                      },
+                      "effectiveSettings": {
+                        "additionalProperties": true,
+                        "properties": {
+                          "geoMode": {
+                            "enum": [
+                              "inherit",
+                              "global",
+                              "targeted"
+                            ],
+                            "type": "string"
+                          },
+                          "locations": {
+                            "items": {
+                              "additionalProperties": true,
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "schedule": {
+                            "oneOf": [
+                              {
+                                "additionalProperties": true,
+                                "properties": {
+                                  "mode": {
+                                    "enum": [
+                                      "inherit"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "version": {
+                                    "enum": [
+                                      1
+                                    ],
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "mode"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "additionalProperties": true,
+                                "properties": {
+                                  "mode": {
+                                    "enum": [
+                                      "round_the_clock",
+                                      "custom"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "ranges": {
+                                    "items": {
+                                      "additionalProperties": true,
+                                      "properties": {
+                                        "endMinute": {
+                                          "maximum": 1439,
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        },
+                                        "startMinute": {
+                                          "maximum": 1439,
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        }
+                                      },
+                                      "required": [
+                                        "startMinute",
+                                        "endMinute"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "timezone": {
+                                    "enum": [
+                                      "Africa/Lagos"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "version": {
+                                    "enum": [
+                                      1
+                                    ],
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "mode",
+                                  "timezone",
+                                  "ranges"
+                                ],
+                                "type": "object"
+                              }
+                            ]
+                          },
+                          "targetDevices": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "targetHours": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [],
+                        "type": "object"
+                      },
+                      "geoMode": {
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "position": {
+                        "type": "number"
+                      },
+                      "schedule": {
+                        "nullable": true,
+                        "oneOf": [
+                          {
+                            "additionalProperties": true,
+                            "properties": {
+                              "mode": {
+                                "enum": [
+                                  "inherit"
+                                ],
+                                "type": "string"
+                              },
+                              "version": {
+                                "enum": [
+                                  1
+                                ],
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "version",
+                              "mode"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": true,
+                            "properties": {
+                              "mode": {
+                                "enum": [
+                                  "round_the_clock",
+                                  "custom"
+                                ],
+                                "type": "string"
+                              },
+                              "ranges": {
+                                "items": {
+                                  "additionalProperties": true,
+                                  "properties": {
+                                    "endMinute": {
+                                      "maximum": 1439,
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    },
+                                    "startMinute": {
+                                      "maximum": 1439,
+                                      "minimum": 0,
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "startMinute",
+                                    "endMinute"
+                                  ],
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              "timezone": {
+                                "enum": [
+                                  "Africa/Lagos"
+                                ],
+                                "type": "string"
+                              },
+                              "version": {
+                                "enum": [
+                                  1
+                                ],
+                                "type": "integer"
+                              }
+                            },
+                            "required": [
+                              "version",
+                              "mode",
+                              "timezone",
+                              "ranges"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "settings": {
+                        "additionalProperties": true,
+                        "properties": {
+                          "geoMode": {
+                            "enum": [
+                              "inherit",
+                              "global",
+                              "targeted"
+                            ],
+                            "type": "string"
+                          },
+                          "locations": {
+                            "items": {
+                              "additionalProperties": true,
+                              "type": "object"
+                            },
+                            "type": "array"
+                          },
+                          "schedule": {
+                            "oneOf": [
+                              {
+                                "additionalProperties": true,
+                                "properties": {
+                                  "mode": {
+                                    "enum": [
+                                      "inherit"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "version": {
+                                    "enum": [
+                                      1
+                                    ],
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "mode"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "additionalProperties": true,
+                                "properties": {
+                                  "mode": {
+                                    "enum": [
+                                      "round_the_clock",
+                                      "custom"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "ranges": {
+                                    "items": {
+                                      "additionalProperties": true,
+                                      "properties": {
+                                        "endMinute": {
+                                          "maximum": 1439,
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        },
+                                        "startMinute": {
+                                          "maximum": 1439,
+                                          "minimum": 0,
+                                          "type": "integer"
+                                        }
+                                      },
+                                      "required": [
+                                        "startMinute",
+                                        "endMinute"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    "type": "array"
+                                  },
+                                  "timezone": {
+                                    "enum": [
+                                      "Africa/Lagos"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "version": {
+                                    "enum": [
+                                      1
+                                    ],
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "version",
+                                  "mode",
+                                  "timezone",
+                                  "ranges"
+                                ],
+                                "type": "object"
+                              }
+                            ]
+                          },
+                          "targetDevices": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "type": "array"
+                          },
+                          "targetHours": {
+                            "items": {
+                              "type": "number"
+                            },
+                            "type": "array"
+                          }
+                        },
+                        "required": [],
+                        "type": "object"
+                      },
+                      "targetDevices": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "targetHours": {
+                        "nullable": true,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "campaignId",
+                      "name"
+                    ],
+                    "type": "object"
+                  },
+                  "stage": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "stack",
                   "decision"
                 ],
                 "type": "object"
@@ -9780,7 +10564,8 @@
                       "targetType": {
                         "enum": [
                           "campaign",
-                          "creative"
+                          "creative",
+                          "stack"
                         ],
                         "type": "string"
                       }
@@ -12581,6 +13366,10 @@
       },
       "ReviewDecisionDto": {
         "properties": {
+          "advertiserNote": {
+            "nullable": true,
+            "type": "string"
+          },
           "decision": {
             "enum": [
               "approved",
@@ -12591,6 +13380,10 @@
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
+          },
+          "internalNote": {
+            "nullable": true,
+            "type": "string"
           },
           "note": {
             "nullable": true,
@@ -14136,7 +14929,9 @@
           "Admin Moderation"
         ],
         "x-ads-roles": [
-          "ads_reviewer"
+          "ads_reviewer",
+          "ads_admin",
+          "super_admin"
         ]
       }
     },
@@ -14428,7 +15223,311 @@
           "Admin Moderation"
         ],
         "x-ads-roles": [
-          "ads_reviewer"
+          "ads_reviewer",
+          "ads_admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/moderation/creatives/{id}/manager-approval": {
+      "post": {
+        "operationId": "Moderation_managerApprovalCreative",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Moderation_primaryReviewCreativeResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Admin Moderation"
+        ],
+        "x-ads-roles": [
+          "ads_manager",
+          "ads_admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/moderation/creatives/{id}/primary-review": {
+      "post": {
+        "operationId": "Moderation_primaryReviewCreative",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Moderation_primaryReviewCreativeResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Admin Moderation"
+        ],
+        "x-ads-roles": [
+          "ads_reviewer",
+          "ads_admin",
+          "super_admin"
         ]
       }
     },
@@ -14725,6 +15824,308 @@
           "ads_reviewer",
           "ads_manager",
           "ads_support",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/moderation/stacks/{id}/manager-approval": {
+      "post": {
+        "operationId": "Moderation_managerApprovalStack",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Moderation_primaryReviewStackResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Admin Moderation"
+        ],
+        "x-ads-roles": [
+          "ads_manager",
+          "ads_admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/moderation/stacks/{id}/primary-review": {
+      "post": {
+        "operationId": "Moderation_primaryReviewStack",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewDecisionDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Moderation_primaryReviewStackResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Admin Moderation"
+        ],
+        "x-ads-roles": [
+          "ads_reviewer",
+          "ads_admin",
           "super_admin"
         ]
       }

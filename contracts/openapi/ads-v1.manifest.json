@@ -2,7 +2,7 @@
   "service": "ads",
   "contractVersion": 1,
   "dialect": "3.0",
-  "sha256": "e2d1e404267afad64272ae497ac526fff029a1da8c8c8232cc2b4cde64a3d42d",
+  "sha256": "1c869547f96ced7675344ff22d1dc478952091f1bd6c78e919e7c628060b0c71",
   "operations": [
     "DELETE /api/v1/campaigns/{id}/ad-stacks/{stackId}",
     "DELETE /api/v1/campaigns/{id}/creatives/{creativeId}",
@@ -29,7 +29,11 @@
     "POST /api/v1/admin/ads/moderation/campaigns/{id}/manager-approval",
     "POST /api/v1/admin/ads/moderation/campaigns/{id}/primary-review",
     "POST /api/v1/admin/ads/moderation/creatives/{id}/decision",
+    "POST /api/v1/admin/ads/moderation/creatives/{id}/manager-approval",
+    "POST /api/v1/admin/ads/moderation/creatives/{id}/primary-review",
     "POST /api/v1/admin/ads/moderation/promoters/{id}/suspend",
+    "POST /api/v1/admin/ads/moderation/stacks/{id}/manager-approval",
+    "POST /api/v1/admin/ads/moderation/stacks/{id}/primary-review",
     "POST /api/v1/campaigns",
     "POST /api/v1/campaigns/{id}/ad-stacks",
     "POST /api/v1/campaigns/{id}/begin-edit",
@@ -42,6 +46,6 @@
     "PUT /api/v1/campaigns/creatives/{id}/replace",
     "PUT /api/v1/campaigns/{id}/status"
   ],
-  "sourceSha256": "71187c4da00632e38ac29c0b9919fbefcdec00cd677e5055c148c57d227356da",
+  "sourceSha256": "122dd804775fbe5c785e4ef8d893fb8096eeb6dc71b795c7ed11305ce4bbb25e",
   "generator": "openapi-typescript@7.13.0"
 }

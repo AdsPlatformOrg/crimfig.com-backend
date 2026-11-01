@@ -26,6 +26,9 @@ export const adsHouseCreatives = pgTable(
     posterUrl: text('poster_url'),
     width: integer('width'),
     height: integer('height'),
+    targetPreset: varchar('target_preset', { length: 64 }),
+    renditionWidth: integer('rendition_width'),
+    renditionHeight: integer('rendition_height'),
     priority: integer('priority').notNull().default(10), // Higher priority evaluated first
     isActive: boolean('is_active').notNull().default(true),
     isArchived: boolean('is_archived').notNull().default(false),

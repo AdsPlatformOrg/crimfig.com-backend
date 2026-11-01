@@ -1,6 +1,7 @@
 import { pgTable, uuid, varchar, text, integer, timestamp, pgEnum, index } from 'drizzle-orm/pg-core';
 import { adsCampaigns, adFormatEnum } from './ads_campaigns';
 import { adsCreativeStacks } from './ads_creative_stacks';
+import { users } from './users';
 
 /**
  * ads_creatives
@@ -22,6 +23,7 @@ export const creativeStatusEnum = pgEnum('ads_creative_status', [
 
 export const assetReviewStatusEnum = pgEnum('ads_asset_review_status', [
   'pending',
+  'pending_manager_approval',
   'approved',
   'rejected',
 ]);
@@ -75,6 +77,12 @@ export const adsCreatives = pgTable(
     reviewStatus: assetReviewStatusEnum('review_status').notNull().default('pending'),
     rejectionReason: text('rejection_reason'),
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+
+    // Dual review tracking
+    primaryReviewerId: uuid('primary_reviewer_id').references(() => users.id, { onDelete: 'set null' }),
+    primaryReviewedAt: timestamp('primary_reviewed_at', { withTimezone: true }),
+    managerReviewerId: uuid('manager_reviewer_id').references(() => users.id, { onDelete: 'set null' }),
+    managerReviewedAt: timestamp('manager_reviewed_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

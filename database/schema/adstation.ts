@@ -69,6 +69,12 @@ export const adstationSlots = pgTable(
     installationDiagnostic: text('installation_diagnostic'),
     policyRevision: integer('policy_revision').notNull().default(1),
 
+    // PLAN-0067: Nine Approved Presets & Sizing Policy
+    // 'auto_any_approved' | 'fixed' | 'allowed_set'
+    presetPolicy: varchar('preset_policy', { length: 32 }).notNull().default('auto_any_approved'),
+    allowedPresetIds: text('allowed_preset_ids'), // JSON array of preset ids e.g. ["medium_rectangle"]
+    presetPolicyVersion: integer('preset_policy_version').notNull().default(1),
+
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

@@ -232,6 +232,20 @@
       "when": 1793453400000,
       "tag": "0033_setup_checks_and_instance_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1793453500000,
+      "tag": "0034_slot_preset_policy_and_variations",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1793453600000,
+      "tag": "0035_ad_stacks_review_and_campaign_lifecycle",
+      "breakpoints": true
     }
   ]
 }

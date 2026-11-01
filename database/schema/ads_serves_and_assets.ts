@@ -200,6 +200,7 @@ export type NewAdsServe = typeof adsServes.$inferInsert;
 export const moderationTargetTypeEnum = pgEnum("ads_moderation_target_type", [
   "campaign",
   "creative",
+  "stack",
 ]);
 
 export const moderationDecisionEnum = pgEnum("ads_moderation_decision", [
@@ -225,6 +226,8 @@ export const adsModerationDecisions = pgTable(
     decision: moderationDecisionEnum("decision").notNull(),
     reasonCode: varchar("reason_code", { length: 50 }),
     note: text("note"),
+    advertiserNote: text("advertiser_note"),
+    internalNote: text("internal_note"),
 
     // Super Admin Emergency Override tracking
     isEmergencyOverride: boolean("is_emergency_override")

@@ -31,6 +31,12 @@ import {
   Min,
   Max,
 } from 'class-validator';
+import {
+  isApprovedImagePreset,
+  getImagePreset,
+  findPresetByExactDimensions,
+  APPROVED_IMAGE_PRESET_IDS,
+} from '../uploads/image-ad-presets';
 
 export class CreateHouseCreativeDto {
   @IsString()
@@ -80,6 +86,18 @@ export class CreateHouseCreativeDto {
   @Min(50)
   @Max(2160)
   height?: number;
+
+  @IsOptional()
+  @IsString()
+  targetPreset?: string;
+
+  @IsOptional()
+  @IsInt()
+  renditionWidth?: number;
+
+  @IsOptional()
+  @IsInt()
+  renditionHeight?: number;
 
   @IsOptional()
   @IsInt()
@@ -145,6 +163,18 @@ export class UpdateHouseCreativeDto {
   height?: number;
 
   @IsOptional()
+  @IsString()
+  targetPreset?: string;
+
+  @IsOptional()
+  @IsInt()
+  renditionWidth?: number;
+
+  @IsOptional()
+  @IsInt()
+  renditionHeight?: number;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   @Max(1000)
@@ -194,6 +224,27 @@ export class AdminHouseAdsController {
       throw new BadRequestException('Video creative requires videoUrl');
     }
 
+    // PLAN-0067: Validate target preset if provided or resolve from dimensions
+    let targetPreset = dto.targetPreset || null;
+    let renditionWidth = dto.renditionWidth || dto.width || null;
+    let renditionHeight = dto.renditionHeight || dto.height || null;
+
+    if (targetPreset) {
+      if (!isApprovedImagePreset(targetPreset)) {
+        throw new BadRequestException(`Target preset must be one of: ${APPROVED_IMAGE_PRESET_IDS.join(', ')}`);
+      }
+      const preset = getImagePreset(targetPreset);
+      if (preset) {
+        renditionWidth = preset.width;
+        renditionHeight = preset.height;
+      }
+    } else if (renditionWidth && renditionHeight) {
+      const match = findPresetByExactDimensions(renditionWidth, renditionHeight);
+      if (match) {
+        targetPreset = match.id;
+      }
+    }
+
     const [created] = await this.db
       .insert(adsHouseCreatives)
       .values({
@@ -208,8 +259,11 @@ export class AdminHouseAdsController {
         videoAssetId:dto.videoAssetId||null,
         imageUrl: dto.imageUrl || null,
         videoUrl: dto.videoUrl || null,
-        width: dto.width || (dto.adType === 'image' ? 1024 : 728),
-        height: dto.height || (dto.adType === 'image' ? 682 : 90),
+        width: renditionWidth || (dto.adType === 'image' ? 300 : 728),
+        height: renditionHeight || (dto.adType === 'image' ? 250 : 90),
+        targetPreset,
+        renditionWidth,
+        renditionHeight,
         priority: dto.priority !== undefined ? dto.priority : 10,
         isActive: dto.isActive !== undefined ? dto.isActive : true,
         createdBy: req.user?.id || req.user?.sub || null,
@@ -266,6 +320,9 @@ export class AdminHouseAdsController {
         ...(dto.videoAssetId!==undefined?{videoAssetId:dto.videoAssetId}:{}),
         ...(dto.imageUrl !== undefined ? { imageUrl: dto.imageUrl, imageAssetId:dto.imageAssetId||null } : {}),
         ...(dto.videoUrl !== undefined ? { videoUrl: dto.videoUrl, videoAssetId:dto.videoAssetId||null } : {}),
+        ...(dto.targetPreset !== undefined ? { targetPreset: dto.targetPreset } : {}),
+        ...(dto.renditionWidth !== undefined ? { renditionWidth: dto.renditionWidth } : {}),
+        ...(dto.renditionHeight !== undefined ? { renditionHeight: dto.renditionHeight } : {}),
         ...(dto.width !== undefined ? { width: dto.width } : {}),
         ...(dto.height !== undefined ? { height: dto.height } : {}),
         ...(dto.priority !== undefined ? { priority: dto.priority } : {}),

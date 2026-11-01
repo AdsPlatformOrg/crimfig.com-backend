@@ -45,6 +45,17 @@ export interface AdsMediaUploadSettings {
     /** Do NOT compress or optimize on server. Reject outright if exceeding limits. */
     serverOptimizationEnabled: boolean;
   };
+  imagePresetsPolicyVersion?: number;
+  approvedImagePresets?: readonly {
+    id: string;
+    name: string;
+    width: number;
+    height: number;
+    ratioNumerator: number;
+    ratioDenominator: number;
+    priority: string;
+    category: string;
+  }[];
 }
 
 export const ADS_MEDIA_UPLOAD_SETTINGS: AdsMediaUploadSettings = {
@@ -109,4 +120,16 @@ export const ADS_MEDIA_UPLOAD_SETTINGS: AdsMediaUploadSettings = {
   processing: {
     serverOptimizationEnabled: false,
   },
+  imagePresetsPolicyVersion: 1,
+  approvedImagePresets: [
+    { id: 'medium_rectangle', name: 'Medium Rectangle', width: 300, height: 250, ratioNumerator: 6, ratioDenominator: 5, priority: 'initial', category: 'rectangle' },
+    { id: 'large_rectangle', name: 'Large Rectangle', width: 336, height: 280, ratioNumerator: 6, ratioDenominator: 5, priority: 'required', category: 'rectangle' },
+    { id: 'leaderboard', name: 'Leaderboard', width: 728, height: 90, ratioNumerator: 364, ratioDenominator: 45, priority: 'initial', category: 'banner' },
+    { id: 'mobile_banner', name: 'Mobile Banner', width: 320, height: 50, ratioNumerator: 32, ratioDenominator: 5, priority: 'initial', category: 'banner' },
+    { id: 'large_mobile_banner', name: 'Large Mobile Banner', width: 320, height: 100, ratioNumerator: 16, ratioDenominator: 5, priority: 'required', category: 'banner' },
+    { id: 'half_page', name: 'Half Page', width: 300, height: 600, ratioNumerator: 1, ratioDenominator: 2, priority: 'required', category: 'vertical' },
+    { id: 'billboard', name: 'Billboard', width: 970, height: 250, ratioNumerator: 97, ratioDenominator: 25, priority: 'required', category: 'large_display' },
+    { id: 'square', name: 'Square', width: 250, height: 250, ratioNumerator: 1, ratioDenominator: 1, priority: 'high', category: 'square' },
+    { id: 'large_square', name: 'Large Square', width: 300, height: 300, ratioNumerator: 1, ratioDenominator: 1, priority: 'high', category: 'square' },
+  ],
 };

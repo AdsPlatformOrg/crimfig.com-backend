@@ -56,6 +56,10 @@ export class CreateSlotDto {
   @IsOptional()
   @IsArray()
   allowedAdTypes?: string[];
+
+  @IsOptional()
+  @IsArray()
+  allowedPresetIds?: string[];
 }
 
 export class UpdateDeliveryPreferenceDto {

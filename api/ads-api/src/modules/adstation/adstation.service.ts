@@ -20,6 +20,10 @@ import {
 } from '@crimfig/database/schema';
 import { and, eq, desc, gte, sql } from 'drizzle-orm';
 import * as crypto from 'crypto';
+import {
+  normalizeSlotPresetPolicy,
+  CURRENT_IMAGE_PRESETS_POLICY_VERSION,
+} from '../uploads/image-ad-presets';
 
 export interface CreateAdstationSlotDto {
   websiteId: string;
@@ -31,6 +35,7 @@ export interface CreateAdstationSlotDto {
   height?: number;
   responsive?: boolean;
   allowedAdTypes?: string[];
+  allowedPresetIds?: string[];
 }
 
 export interface UpdateAdstationSlotDto {
@@ -42,6 +47,7 @@ export interface UpdateAdstationSlotDto {
   height?: number;
   responsive?: boolean;
   allowedAdTypes?: string[];
+  allowedPresetIds?: string[];
 }
 
 export interface CreateDirectCampaignDto {
@@ -120,6 +126,8 @@ export class AdstationService {
     const initialLifecycle =
       website.policyStatus === 'approved' ? 'testing' : 'testing';
 
+    const normalizedPolicy = normalizeSlotPresetPolicy(dto.allowedPresetIds);
+
     const [slot] = await this.db
       .insert(adstationSlots)
       .values({
@@ -139,6 +147,12 @@ export class AdstationService {
         allowedAdTypes: dto.allowedAdTypes
           ? JSON.stringify(dto.allowedAdTypes)
           : null,
+        presetPolicy: normalizedPolicy.policy,
+        allowedPresetIds:
+          dto.allowedPresetIds && dto.allowedPresetIds.length > 0
+            ? JSON.stringify(normalizedPolicy.allowedPresetIds)
+            : null,
+        presetPolicyVersion: CURRENT_IMAGE_PRESETS_POLICY_VERSION,
         installationStatus: 'unchecked',
         policyRevision: 1,
         isActive: true,
@@ -222,6 +236,19 @@ export class AdstationService {
         nextLifecycle !== 'paused' && nextLifecycle !== 'disabled';
     }
 
+    let presetUpdates = {};
+    if (dto.allowedPresetIds !== undefined) {
+      const normalized = normalizeSlotPresetPolicy(dto.allowedPresetIds);
+      presetUpdates = {
+        presetPolicy: normalized.policy,
+        allowedPresetIds:
+          dto.allowedPresetIds && dto.allowedPresetIds.length > 0
+            ? JSON.stringify(normalized.allowedPresetIds)
+            : null,
+        presetPolicyVersion: CURRENT_IMAGE_PRESETS_POLICY_VERSION,
+      };
+    }
+
     const [updated] = await this.db
       .update(adstationSlots)
       .set({
@@ -236,6 +263,7 @@ export class AdstationService {
         ...(dto.allowedAdTypes
           ? { allowedAdTypes: JSON.stringify(dto.allowedAdTypes) }
           : {}),
+        ...presetUpdates,
         lifecycleStatus: nextLifecycle,
         isActive: nextIsActive,
         policyRevision: (slot.policyRevision || 1) + 1,

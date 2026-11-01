@@ -419,7 +419,8 @@ export class DeliveryService {
     var card = document.createElement('div');
     if (ad.adType === 'image') {
       // Frameless, clean image serving without dark backgrounds, borders, or redundant text overlays
-      card.style.cssText = "background:transparent;border:0;padding:0;margin:0 auto;box-shadow:none;position:relative;overflow:hidden;box-sizing:border-box;display:block;max-width:min(100%, 728px);text-align:center;";
+      var cardMaxWidth = ad.width ? Math.min(ad.width, 970) + 'px' : 'min(100%, 728px)';
+      card.style.cssText = "background:transparent;border:0;padding:0;margin:0 auto;box-shadow:none;position:relative;overflow:hidden;box-sizing:border-box;display:block;max-width:" + cardMaxWidth + ";text-align:center;";
     } else {
       card.style.cssText = "border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:'Poppins',Arial,Helvetica,sans-serif;max-width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;";
       var badge = document.createElement('div');
@@ -508,8 +509,10 @@ export class DeliveryService {
       readyAsset(img,'load');
       img.src = resolvedMedia(ad.imageUrl, activeBase);
       img.alt = ad.headline || 'Advertisement';
-      // Strict standard max bounds: maximum 728px width, 280px height, centered, responsive
-      img.style.cssText = 'max-width:min(100%, 728px);max-height:280px;width:auto;height:auto;object-fit:contain;border-radius:8px;display:block;margin:0 auto;border:0;';
+      // Responsive image sizing bounded by target rendition dimensions, scaling down on mobile viewports
+      var imgMaxW = ad.width ? Math.min(ad.width, 970) + 'px' : 'min(100%, 728px)';
+      var imgMaxH = ad.height ? Math.min(ad.height, 600) + 'px' : '280px';
+      img.style.cssText = 'max-width:min(100%, ' + imgMaxW + ');max-height:' + imgMaxH + ';width:auto;height:auto;object-fit:contain;border-radius:8px;display:block;margin:0 auto;border:0;';
       if (ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
         var imgLink = document.createElement('a');
         imgLink.href = ad.clickUrl;
@@ -865,7 +868,38 @@ export class DeliveryService {
         .for('share');
 
       if (dbHouseCreatives && dbHouseCreatives.length > 0) {
-        const preferred = dbHouseCreatives.find(c => this.allowedAdTypes(params.format).includes(c.adType as any) && (c.format === params.format || c.format === 'any') && (c.adType === 'text' || c.adType === 'image' && !!c.imageUrl || c.adType === 'video' && !!c.videoUrl));
+        // PLAN-0067: Size-aware House creative matching considering slot allowed preset policy
+        let candidateCreatives = dbHouseCreatives.filter(c => 
+          this.allowedAdTypes(params.format).includes(c.adType as any) &&
+          (c.format === params.format || c.format === 'any') &&
+          (c.adType === 'text' || (c.adType === 'image' && !!c.imageUrl) || (c.adType === 'video' && !!c.videoUrl))
+        );
+
+        // If slot has specific allowed presets, prefer creative matching one of them
+        let preferred = candidateCreatives[0];
+        if (params.slotId) {
+          const [slotRecord] = await tx
+            .select({
+              presetPolicy: adstationSlots.presetPolicy,
+              allowedPresetIds: adstationSlots.allowedPresetIds,
+            })
+            .from(adstationSlots)
+            .where(eq(adstationSlots.id, params.slotId))
+            .limit(1);
+
+          if (slotRecord?.allowedPresetIds) {
+            try {
+              const allowed: string[] = JSON.parse(slotRecord.allowedPresetIds);
+              const matchingPreset = candidateCreatives.find(c => c.targetPreset && allowed.includes(c.targetPreset));
+              if (matchingPreset) {
+                preferred = matchingPreset;
+              }
+            } catch {
+              // fallback to default candidate
+            }
+          }
+        }
+
         if (!preferred) return null;
         if (preferred) {
           chosenHouseCreativeId = preferred.id;
@@ -881,8 +915,8 @@ export class DeliveryService {
             imageUrl: preferred.imageUrl || null,
             videoUrl: preferred.videoUrl || null,
             posterUrl: preferred.posterUrl || null,
-            width: preferred.width || 1024,
-            height: preferred.height || 682,
+            width: preferred.renditionWidth || preferred.width || 300,
+            height: preferred.renditionHeight || preferred.height || 250,
             durationSeconds: null,
             destinationUrl: preferred.destinationUrl || 'https://ads.crimfig.com',
           };

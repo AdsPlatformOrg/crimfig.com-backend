@@ -11,6 +11,7 @@ import {
   boolean,
 } from "drizzle-orm/pg-core";
 import { adsCampaigns } from "./ads_campaigns";
+import { users } from "./users";
 
 /**
  * ads_creative_stacks
@@ -41,6 +42,14 @@ export const adsCreativeStacks = pgTable(
     targetDevices: text("target_devices"), // JSON stringified string[]
     targetHours: text("target_hours"), // JSON stringified number[]
     schedule: jsonb("schedule"),
+
+    // PLAN-0068: Dual review tracking for creative stacks
+    reviewStatus: varchar('review_status', { length: 32 }).notNull().default('pending'),
+    primaryReviewerId: uuid('primary_reviewer_id').references(() => users.id, { onDelete: 'set null' }),
+    primaryReviewedAt: timestamp('primary_reviewed_at', { withTimezone: true }),
+    managerReviewerId: uuid('manager_reviewer_id').references(() => users.id, { onDelete: 'set null' }),
+    managerReviewedAt: timestamp('manager_reviewed_at', { withTimezone: true }),
+    rejectionReason: text('rejection_reason'),
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

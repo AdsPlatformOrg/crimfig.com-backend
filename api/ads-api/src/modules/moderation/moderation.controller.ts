@@ -19,6 +19,14 @@ export class ReviewDecisionDto extends MutationDto {
   @IsOptional()
   @IsString()
   note?: string;
+
+  @IsOptional()
+  @IsString()
+  advertiserNote?: string;
+
+  @IsOptional()
+  @IsString()
+  internalNote?: string;
 }
 
 export class EmergencyOverrideDto extends MutationDto {
@@ -60,9 +68,73 @@ export class ModerationController {
   @Get('campaigns/:id/change-audit')
   async changeAudit(@Param('id',new ParseUUIDPipe()) id:string,@Query('offset') offset?:string) {return {status:'success',data:await this.moderationService.changeAudit(id, Number(offset)||0)};}
 
-  @AdsRoles('ads_reviewer')
+  @AdsRoles('ads_reviewer', 'ads_admin', 'super_admin')
+  @Post('creatives/:id/primary-review')
+  @ApiOperation({ summary: 'Tier-1 primary review for creative asset' })
+  async primaryReviewCreative(
+    @Param('id', new ParseUUIDPipe()) creativeId: string,
+    @Body() dto: ReviewDecisionDto,
+    @Req() req: any,
+  ) {
+    const reviewerId = req.user.sub;
+    const result = await this.moderationService.reviewCreativePrimary(creativeId, {
+      ...dto,
+      reviewerId,
+    });
+    return { status: 'success', data: result };
+  }
+
+  @AdsRoles('ads_manager', 'ads_admin', 'super_admin')
+  @Post('creatives/:id/manager-approval')
+  @ApiOperation({ summary: 'Tier-2 manager approval for creative asset' })
+  async managerApprovalCreative(
+    @Param('id', new ParseUUIDPipe()) creativeId: string,
+    @Body() dto: ReviewDecisionDto,
+    @Req() req: any,
+  ) {
+    const reviewerId = req.user.sub;
+    const result = await this.moderationService.reviewCreativeManager(creativeId, {
+      ...dto,
+      reviewerId,
+    });
+    return { status: 'success', data: result };
+  }
+
+  @AdsRoles('ads_reviewer', 'ads_admin', 'super_admin')
+  @Post('stacks/:id/primary-review')
+  @ApiOperation({ summary: 'Tier-1 primary review for ad stack' })
+  async primaryReviewStack(
+    @Param('id', new ParseUUIDPipe()) stackId: string,
+    @Body() dto: ReviewDecisionDto,
+    @Req() req: any,
+  ) {
+    const reviewerId = req.user.sub;
+    const result = await this.moderationService.reviewStackPrimary(stackId, {
+      ...dto,
+      reviewerId,
+    });
+    return { status: 'success', data: result };
+  }
+
+  @AdsRoles('ads_manager', 'ads_admin', 'super_admin')
+  @Post('stacks/:id/manager-approval')
+  @ApiOperation({ summary: 'Tier-2 manager approval for ad stack' })
+  async managerApprovalStack(
+    @Param('id', new ParseUUIDPipe()) stackId: string,
+    @Body() dto: ReviewDecisionDto,
+    @Req() req: any,
+  ) {
+    const reviewerId = req.user.sub;
+    const result = await this.moderationService.reviewStackManager(stackId, {
+      ...dto,
+      reviewerId,
+    });
+    return { status: 'success', data: result };
+  }
+
+  @AdsRoles('ads_reviewer', 'ads_admin', 'super_admin')
   @Post('creatives/:id/decision')
-  @ApiOperation({ summary: 'Approve or reject creative asset' })
+  @ApiOperation({ summary: 'Approve or reject creative asset (Legacy/fallback)' })
   async reviewCreative(
     @Param('id',new ParseUUIDPipe()) creativeId: string,
     @Body() dto: ReviewDecisionDto,
@@ -71,15 +143,12 @@ export class ModerationController {
     const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCreative(creativeId, {
       ...dto,
-      decision: dto.decision,
-      reasonCode: dto.reasonCode,
-      note: dto.note,
       reviewerId,
     });
     return { status: 'success', data: result };
   }
 
-  @AdsRoles('ads_reviewer')
+  @AdsRoles('ads_reviewer', 'ads_admin', 'super_admin')
   @Post('campaigns/:id/primary-review')
   @ApiOperation({ summary: 'Tier-1 primary review by ADS ADMIN Reviewer (under_review -> pending_manager_approval | rejected)' })
   async primaryReviewCampaign(
@@ -90,9 +159,6 @@ export class ModerationController {
     const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCampaignPrimary(campaignId, {
       ...dto,
-      decision: dto.decision,
-      reasonCode: dto.reasonCode,
-      note: dto.note,
       reviewerId,
     });
     return { status: 'success', data: result };
@@ -109,9 +175,6 @@ export class ModerationController {
     const reviewerId = req.user.sub;
     const result = await this.moderationService.reviewCampaignManager(campaignId, {
       ...dto,
-      decision: dto.decision,
-      reasonCode: dto.reasonCode,
-      note: dto.note,
       reviewerId,
     });
     return { status: 'success', data: result };
