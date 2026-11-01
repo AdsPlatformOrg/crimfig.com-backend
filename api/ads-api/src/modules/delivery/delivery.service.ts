@@ -244,19 +244,53 @@ export class DeliveryService {
   if (typeof window !== 'undefined' && window.__cfLoaderV2) { window.__cfLoaderV2.scan(); return; }
   var instances = new Map(), lazySlots=new Map();
   function eventIdentity() { return window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : undefined; }
-  function sendRenderBeacon(ad, baseOverride) {
-    if (!ad || !ad.impToken || typeof fetch !== 'function') return;
-    fetch((baseOverride || apiBase) + '/api/v1/delivery/interaction', {
-      method:'POST', credentials:'omit', keepalive:true, headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,type:'render',source:'embed'})
-    }).catch(function() {});
+  function sendBeaconPost(url, data) {
+    var body = JSON.stringify(data);
+    if (typeof fetch === 'function') {
+      fetch(url, {
+        method: 'POST',
+        credentials: 'omit',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: body
+      }).catch(function() {
+        if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function' && typeof Blob !== 'undefined') {
+          try { navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })); } catch (e) {}
+        }
+      });
+    } else if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function' && typeof Blob !== 'undefined') {
+      try { navigator.sendBeacon(url, new Blob([body], { type: 'application/json' })); } catch (e) {}
+    }
   }
+
+  function sendRenderBeacon(ad, baseOverride) {
+    if (!ad || !ad.impToken) return;
+    sendBeaconPost((baseOverride || apiBase) + '/api/v1/delivery/interaction', {
+      eventId: eventIdentity(),
+      occurredAt: new Date().toISOString(),
+      impToken: ad.impToken,
+      type: 'render',
+      source: 'embed'
+    });
+  }
+
+  function sendImpressionBeacon(ad, baseOverride) {
+    if (!ad || !ad.impToken) return;
+    sendBeaconPost((baseOverride || apiBase) + '/api/v1/delivery/interaction', {
+      eventId: eventIdentity(),
+      occurredAt: new Date().toISOString(),
+      impToken: ad.impToken,
+      type: 'impression',
+      source: 'embed'
+    });
+  }
+
   function trackViewability(container, ad, minSeconds, baseOverride) {
-    if (!ad || !ad.impToken || !('IntersectionObserver' in window)) return;
+    if (!container || !ad || !ad.impToken || !('IntersectionObserver' in window)) return;
     var sent=false, timer=null, ratio=0, startedAt=0;
     function clear(){if(timer)clearTimeout(timer);timer=null;startedAt=0;}
     function visible(){
-      if(!container.isConnected || document.visibilityState!=='visible' || (document.hasFocus&&!document.hasFocus()) || ratio<0.5)return false;
+      if(!container.isConnected || document.visibilityState!=='visible' || ratio<0.5)return false;
       var rect=container.getBoundingClientRect();
       var x=Math.max(0,Math.min(window.innerWidth-1,rect.left+rect.width/2));
       var y=Math.max(0,Math.min(window.innerHeight-1,rect.top+rect.height/2));
@@ -270,10 +304,16 @@ export class DeliveryService {
       startedAt=Date.now();
       timer=setTimeout(function(){
         timer=null;if(!visible()){clear();return;}sent=true;
-        fetch((baseOverride||apiBase)+'/api/v1/delivery/viewability',{
-          method:'POST',credentials:'omit',keepalive:true,headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,visibleRatio:ratio,durationSeconds:(Date.now()-startedAt)/1000,format:ad.format||undefined})
-        }).catch(function(){});cleanup();
+        var elapsed = (Date.now() - startedAt) / 1000;
+        sendBeaconPost((baseOverride||apiBase)+'/api/v1/delivery/viewability',{
+          eventId:eventIdentity(),
+          occurredAt:new Date().toISOString(),
+          impToken:ad.impToken,
+          visibleRatio:Math.min(1, Math.max(0.5, ratio)),
+          durationSeconds:Math.max(minSeconds, elapsed),
+          format:ad.format||undefined
+        });
+        cleanup();
       },minSeconds*1000);
     }
     var observer=new window.IntersectionObserver(function(entries){entries.forEach(function(entry){ratio=entry.intersectionRatio;update();});},{threshold:[0,0.5,1]});
@@ -323,7 +363,9 @@ export class DeliveryService {
           if(state.closed||instances.get(element)!==state||!element.isConnected)return;
           clearTimeout(state.timer);state.closed=true;
           element.style.minHeight='0px';element.style.height='';element.setAttribute('data-cf-state','rendered');
-          sendRenderBeacon(ad,base);trackViewability(element.firstElementChild,ad,ad.adType==='video'?2:1,base);
+          sendRenderBeacon(ad,base);
+          sendImpressionBeacon(ad,base);
+          trackViewability(element.firstElementChild||element,ad,ad.adType==='video'?2:1,base);
         });})
       .catch(function(){clearTimeout(state.timer);if(instances.get(element)===state){state.closed=true;collapseSlot();}});
   }
@@ -490,7 +532,7 @@ export class DeliveryService {
 
     container.innerHTML = '';
     container.appendChild(card);
-    function engagement(type){fetch(activeBase+'/api/v1/delivery/interaction',{method:'POST',credentials:'omit',keepalive:true,headers:{'Content-Type':'application/json'},body:JSON.stringify({eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,type:type,source:'embed'})}).catch(function(){});}
+    function engagement(type){sendBeaconPost(activeBase+'/api/v1/delivery/interaction',{eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,type:type,source:'embed'});}
     card.addEventListener('pointerenter',function(){engagement('hover');},{once:true});
     card.addEventListener('pointerdown',function(event){if(event.pointerType==='touch')engagement('touch');},{once:true});
     return Promise.all(assets);
@@ -1948,6 +1990,7 @@ export class DeliveryService {
           durationSeconds: params.durationSeconds,
           minDurationSeconds: minDuration,
           isViewableEvent: params.type === 'viewable_impression',
+          eventType: params.type as any,
         });
         isValid = validation.isValid;
         invalidReason = validation.reasonCode || null;

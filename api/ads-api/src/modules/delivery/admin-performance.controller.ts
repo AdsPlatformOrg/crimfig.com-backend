@@ -138,8 +138,10 @@ export class AdminPerformanceController {
             ? sql`d.is_archived AS "isArchived", d.ad_type AS "adType", d.format,`
             : sql``;
     const base = sql`WITH events AS (
-      SELECT serve_id, bool_or(type='render') AS rendered, bool_or(type='impression') AS impressed,
-        bool_or(type='viewable_impression') AS viewable, bool_or(type='impression' AND measurable) AS measurable,
+      SELECT serve_id, bool_or(type='render') AS rendered,
+        bool_or(type IN ('impression', 'viewable_impression')) AS impressed,
+        bool_or(type='viewable_impression') AS viewable,
+        bool_or(type IN ('impression', 'viewable_impression') AND measurable) AS measurable,
         bool_or(type='click') AS clicked, max(created_at) AS last_event, max(created_at) FILTER(WHERE type='render') AS last_render
       FROM ads_interactions WHERE created_at >= ${window.from}::timestamptz AND created_at < ${window.to}::timestamptz
       GROUP BY serve_id

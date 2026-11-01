@@ -46,6 +46,7 @@ export interface ImpressionValidationParams {
   durationSeconds?: number;
   minDurationSeconds?: number;
   isViewableEvent?: boolean;
+  eventType?: 'render' | 'impression' | 'viewable_impression';
 }
 
 export interface SupplyRiskParams {
@@ -275,9 +276,9 @@ export class FraudRulesService {
   validateImpression(params: ImpressionValidationParams): ValidationResult {
     const ua = (params.userAgent || '').toLowerCase();
     const ip = params.clientIp || 'unknown';
-    const eventType = params.isViewableEvent
-      ? 'viewable_impression'
-      : 'impression';
+    const eventType =
+      params.eventType ||
+      (params.isViewableEvent ? 'viewable_impression' : 'impression');
 
     // 0. Duplicate (serveId, eventType) check
     if (this.isDuplicateServeEvent(params.serveId, eventType)) {
