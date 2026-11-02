@@ -1,3 +1,4 @@
+import * as rewardPolicy from "../../../api/billing-api/src/modules/rewards/reward-program-policy";
 import { validateSync } from "class-validator";
 import { ConversionDto } from "../../../shared/src/reward-program.dto";
 import { observeDiagnosticResponse } from "../../../shared/src/monitoring/request-diagnostics";
@@ -202,5 +203,45 @@ describe("release boundary regression coverage", () => {
     observeDiagnosticResponse(req, res);
     expect(res.json({ ok: true }, "extra", 123)).toBe("original-result");
     expect(original).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Billing worker native lifecycle", () => {
+  it("does not schedule a disabled rewards program", () => {
+    jest.useFakeTimers();
+    try {
+      const worker = new RewardProgramWorker(
+        { execute: jest.fn() } as any,
+        {} as any,
+      );
+      worker.onModuleInit();
+      expect(jest.getTimerCount()).toBe(0);
+      worker.onModuleDestroy();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it("schedules only the granted opt-in program and clears the interval on shutdown", async () => {
+    jest.useFakeTimers();
+    const old = process.env.BILLING_REWARDS_WORKER_OPERATOR_ID;
+    process.env.BILLING_REWARDS_WORKER_OPERATOR_ID = id;
+    jest.spyOn(rewardPolicy, "gate").mockReturnValue(true);
+    const db: any = { execute: jest.fn(async () => ({ rows: [] })) };
+    const worker = new RewardProgramWorker(db, {} as any);
+    try {
+      worker.onModuleInit();
+      worker.onModuleInit();
+      expect(jest.getTimerCount()).toBe(1);
+      await jest.advanceTimersByTimeAsync(60000);
+      expect(db.execute).toHaveBeenCalledTimes(1);
+      worker.onModuleDestroy();
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      worker.onModuleDestroy();
+      jest.useRealTimers();
+      if (old === undefined)
+        delete process.env.BILLING_REWARDS_WORKER_OPERATOR_ID;
+      else process.env.BILLING_REWARDS_WORKER_OPERATOR_ID = old;
+    }
   });
 });

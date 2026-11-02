@@ -1,5 +1,10 @@
-import { Inject, Injectable, Logger } from "@nestjs/common";
-import { Interval } from "@nestjs/schedule";
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from "@nestjs/common";
 import { sql } from "drizzle-orm";
 import { adDigest } from "@crimfig/shared";
 import { gate } from "./reward-program-policy";
@@ -9,14 +14,33 @@ export function paidRewardRequestId(eventId: string, allocationId: string) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 @Injectable()
-export class RewardProgramWorker {
+export class RewardProgramWorker implements OnModuleInit, OnModuleDestroy {
+  private timer?: ReturnType<typeof setInterval>;
   private running = false;
   private readonly logger = new Logger(RewardProgramWorker.name);
   constructor(
     @Inject("DATABASE_CONNECTION") private readonly db: any,
     private readonly service: RewardProgramService,
   ) {}
-  @Interval(60000) async reconcile() {
+  onModuleInit() {
+    if (
+      this.timer ||
+      !gate("paid") ||
+      !process.env.BILLING_REWARDS_WORKER_OPERATOR_ID
+    )
+      return;
+    this.timer = setInterval(() => {
+      void this.reconcile().catch(() =>
+        this.logger.warn("Reward reconciliation remains unconfirmed"),
+      );
+    }, 60000);
+    this.timer.unref();
+  }
+  onModuleDestroy() {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = undefined;
+  }
+  async reconcile() {
     const actor = process.env.BILLING_REWARDS_WORKER_OPERATOR_ID;
     if (this.running || !gate("paid") || !actor) return;
     this.running = true;
