@@ -1,3 +1,301 @@
+-- Canonical funded-rewards prerequisites: definitions already present in schema, previously missing from migration history.
+-- DDL only: no fund, settings, user balance, point, or provider-payment rows are seeded.
+CREATE TYPE "public"."rewards_fund_ledger_type" AS ENUM('sweep_in', 'allocate', 'release', 'spend', 'adjust_in', 'adjust_out');
+--> statement-breakpoint
+CREATE TYPE "public"."rewards_proposal_status" AS ENUM('pending', 'approved', 'rejected', 'executed', 'cancelled');
+--> statement-breakpoint
+CREATE TYPE "public"."rewards_point_state" AS ENUM('pending', 'available', 'redemption_reserved', 'redeemed', 'reversed', 'expired');
+--> statement-breakpoint
+CREATE TYPE "public"."rewards_redemption_type" AS ENUM('wallet_credit', 'ad_credit', 'subscription');
+--> statement-breakpoint
+CREATE TYPE "public"."rewards_redemption_status" AS ENUM('requested', 'reserved', 'review_required', 'processing', 'completed', 'rejected', 'failed');
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "rewards_fund" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"currency" varchar(10) DEFAULT 'USD' NOT NULL,
+	"cash_balance_usd_cents" bigint DEFAULT 0 NOT NULL,
+	"allocated_usd_cents" bigint DEFAULT 0 NOT NULL,
+	"available_usd_cents" bigint DEFAULT 0 NOT NULL,
+	"funded_pending_usd_cents" bigint DEFAULT 0 NOT NULL,
+	"spent_usd_cents" bigint DEFAULT 0 NOT NULL,
+	"reserve_floor_usd_cents" bigint DEFAULT 10000 NOT NULL,
+	"fractional_residual_microusd" bigint DEFAULT 0 NOT NULL,
+	"version" integer DEFAULT 0 NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "rewards_fund_currency_unique" UNIQUE("currency")
+);
+
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "rewards_fund_ledger" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"fund_id" uuid NOT NULL,
+	"type" "rewards_fund_ledger_type" NOT NULL,
+	"amount_cents" bigint NOT NULL,
+	"from_bucket" varchar(32) NOT NULL,
+	"to_bucket" varchar(32) NOT NULL,
+	"cash_balance_after_cents" bigint NOT NULL,
+	"available_after_cents" bigint NOT NULL,
+	"allocated_after_cents" bigint NOT NULL,
+	"funded_pending_after_cents" bigint NOT NULL,
+	"source_ref" varchar(128) NOT NULL,
+	"description" text,
+	"actor_id" uuid,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "rewards_fund_settings" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"version" integer NOT NULL,
+	"is_active" boolean DEFAULT false NOT NULL,
+	"rewards_fund_seed_percent" integer DEFAULT 10 NOT NULL,
+	"bonus_promoter_incentive_percent" integer DEFAULT 5 NOT NULL,
+	"reserve_floor_percent" integer DEFAULT 20 NOT NULL,
+	"reserve_floor_min_cents" integer DEFAULT 10000 NOT NULL,
+	"daily_emission_cap_points" integer DEFAULT 50000 NOT NULL,
+	"monthly_emission_cap_points" integer DEFAULT 1000000 NOT NULL,
+	"per_user_daily_cap_points" integer DEFAULT 200 NOT NULL,
+	"per_user_monthly_cap_points" integer DEFAULT 3000 NOT NULL,
+	"min_redemption_points" integer DEFAULT 1000 NOT NULL,
+	"high_value_review_points" integer DEFAULT 2000 NOT NULL,
+	"pending_hold_hours" integer DEFAULT 72 NOT NULL,
+	"points_expiry_days" integer DEFAULT 365 NOT NULL,
+	"ads_rewards_global_paused" boolean DEFAULT false NOT NULL,
+	"approved_by" text[] NOT NULL,
+	"effective_from" timestamp with time zone DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "rewards_fund_settings_version_unique" UNIQUE("version")
+);
+
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "rewards_settings_proposals" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"proposal_type" varchar(64) NOT NULL,
+	"proposed_payload" jsonb NOT NULL,
+	"status" "rewards_proposal_status" DEFAULT 'pending' NOT NULL,
+	"proposer_id" uuid NOT NULL,
+	"approver_id" uuid,
+	"proposer_note" text,
+	"approver_note" text,
+	"executed_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "ads_rewards_suspension_audit" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"scope" varchar(32) NOT NULL,
+	"target_user_id" uuid,
+	"action" varchar(32) NOT NULL,
+	"reason" text NOT NULL,
+	"performed_by" uuid NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "rewards_points_balances" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" uuid NOT NULL,
+	"pending_points" integer DEFAULT 0 NOT NULL,
+	"available_points" integer DEFAULT 0 NOT NULL,
+	"reserved_points" integer DEFAULT 0 NOT NULL,
+	"lifetime_earned_points" integer DEFAULT 0 NOT NULL,
+	"lifetime_redeemed_points" integer DEFAULT 0 NOT NULL,
+	"accumulated_reward_microusd" bigint DEFAULT 0 NOT NULL,
+	"is_rewards_suspended" boolean DEFAULT false NOT NULL,
+	"version" integer DEFAULT 0 NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "rewards_points_balances_user_id_unique" UNIQUE("user_id")
+);
+
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "rewards_points_ledger" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"lot_id" varchar(64) NOT NULL,
+	"user_id" uuid NOT NULL,
+	"delta_points" integer NOT NULL,
+	"state" "rewards_point_state" NOT NULL,
+	"activity_code" varchar(64) NOT NULL,
+	"source_ref" varchar(128) NOT NULL,
+	"idempotency_key" varchar(128) NOT NULL,
+	"valuation_microusd" bigint NOT NULL,
+	"rate_version" integer DEFAULT 1 NOT NULL,
+	"expires_at" timestamp with time zone,
+	"cleared_at" timestamp with time zone,
+	"earned_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "rewards_points_ledger_idempotency_key_unique" UNIQUE("idempotency_key")
+);
+
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "deferred_reward_entitlements" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" uuid NOT NULL,
+	"reward_key" varchar(64) NOT NULL,
+	"points_entitled" integer NOT NULL,
+	"usd_equivalent_cents" integer NOT NULL,
+	"badge_title" varchar(128) NOT NULL,
+	"badge_icon" varchar(32) NOT NULL,
+	"status" varchar(32) DEFAULT 'queued' NOT NULL,
+	"funded_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "rewards_badges" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" uuid NOT NULL,
+	"badge_key" varchar(64) NOT NULL,
+	"badge_title" varchar(128) NOT NULL,
+	"badge_icon" varchar(32) NOT NULL,
+	"tier" integer,
+	"achieved_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "rewards_redemptions" (
+	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"user_id" uuid NOT NULL,
+	"type" "rewards_redemption_type" NOT NULL,
+	"status" "rewards_redemption_status" DEFAULT 'requested' NOT NULL,
+	"points_redeemed" integer NOT NULL,
+	"usd_cents_amount" integer NOT NULL,
+	"destination_ref" varchar(128),
+	"idempotency_key" varchar(128) NOT NULL,
+	"reviewer_id" uuid,
+	"reviewer_note" text,
+	"reviewed_at" timestamp with time zone,
+	"completed_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "rewards_redemptions_idempotency_key_unique" UNIQUE("idempotency_key")
+);
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "rewards_fund_ledger" ADD CONSTRAINT "rewards_fund_ledger_fund_id_rewards_fund_id_fk" FOREIGN KEY ("fund_id") REFERENCES "public"."rewards_fund"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "rewards_fund_ledger" ADD CONSTRAINT "rewards_fund_ledger_actor_id_users_id_fk" FOREIGN KEY ("actor_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "rewards_settings_proposals" ADD CONSTRAINT "rewards_settings_proposals_proposer_id_users_id_fk" FOREIGN KEY ("proposer_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "rewards_settings_proposals" ADD CONSTRAINT "rewards_settings_proposals_approver_id_users_id_fk" FOREIGN KEY ("approver_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "ads_rewards_suspension_audit" ADD CONSTRAINT "ads_rewards_suspension_audit_target_user_id_users_id_fk" FOREIGN KEY ("target_user_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "ads_rewards_suspension_audit" ADD CONSTRAINT "ads_rewards_suspension_audit_performed_by_users_id_fk" FOREIGN KEY ("performed_by") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "rewards_points_balances" ADD CONSTRAINT "rewards_points_balances_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "rewards_points_ledger" ADD CONSTRAINT "rewards_points_ledger_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "deferred_reward_entitlements" ADD CONSTRAINT "deferred_reward_entitlements_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "rewards_badges" ADD CONSTRAINT "rewards_badges_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "rewards_redemptions" ADD CONSTRAINT "rewards_redemptions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "rewards_redemptions" ADD CONSTRAINT "rewards_redemptions_reviewer_id_users_id_fk" FOREIGN KEY ("reviewer_id") REFERENCES "public"."users"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_fund_currency_idx" ON "rewards_fund" USING btree ("currency");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_fund_ledger_fund_id_idx" ON "rewards_fund_ledger" USING btree ("fund_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_fund_ledger_source_ref_idx" ON "rewards_fund_ledger" USING btree ("source_ref");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_fund_ledger_created_at_idx" ON "rewards_fund_ledger" USING btree ("created_at");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_fund_settings_version_idx" ON "rewards_fund_settings" USING btree ("version");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_settings_proposals_status_idx" ON "rewards_settings_proposals" USING btree ("status");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "ads_rewards_suspension_audit_target_idx" ON "ads_rewards_suspension_audit" USING btree ("target_user_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_points_balances_user_id_idx" ON "rewards_points_balances" USING btree ("user_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_points_ledger_user_id_idx" ON "rewards_points_ledger" USING btree ("user_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_points_ledger_lot_id_idx" ON "rewards_points_ledger" USING btree ("lot_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_points_ledger_activity_code_idx" ON "rewards_points_ledger" USING btree ("activity_code");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_points_ledger_state_idx" ON "rewards_points_ledger" USING btree ("state");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_points_ledger_expires_at_idx" ON "rewards_points_ledger" USING btree ("expires_at");
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "deferred_reward_entitlements_user_key_idx" ON "deferred_reward_entitlements" USING btree ("user_id","reward_key");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "deferred_reward_entitlements_status_idx" ON "deferred_reward_entitlements" USING btree ("status");
+--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "rewards_badges_user_key_idx" ON "rewards_badges" USING btree ("user_id","badge_key");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_badges_user_id_idx" ON "rewards_badges" USING btree ("user_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_redemptions_user_id_idx" ON "rewards_redemptions" USING btree ("user_id");
+--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "rewards_redemptions_status_idx" ON "rewards_redemptions" USING btree ("status");
+--> statement-breakpoint
 -- Reuse rewards_fund and rewards_points_*; no second funded wallet.
 ALTER TABLE cfig_ledger ADD COLUMN converted_delta bigint NOT NULL DEFAULT 0;
 DO $$ DECLARE c record; BEGIN
@@ -61,3 +359,7 @@ CREATE TABLE reward_reconciliation_approvals (
 );
 CREATE TRIGGER reward_reconciliation_reviews_immutable BEFORE UPDATE OR DELETE ON reward_reconciliation_reviews FOR EACH ROW EXECUTE FUNCTION reject_cfig_history_mutation();
 CREATE TRIGGER reward_reconciliation_approvals_immutable BEFORE UPDATE OR DELETE ON reward_reconciliation_approvals FOR EACH ROW EXECUTE FUNCTION reject_cfig_history_mutation();
+
+-- Existing canonical funded ledgers are append-only; state changes append compensating entries.
+CREATE TRIGGER rewards_fund_history_immutable BEFORE UPDATE OR DELETE ON rewards_fund_ledger FOR EACH ROW EXECUTE FUNCTION reject_cfig_history_mutation();
+CREATE TRIGGER rewards_points_history_immutable BEFORE UPDATE OR DELETE ON rewards_points_ledger FOR EACH ROW EXECUTE FUNCTION reject_cfig_history_mutation();
