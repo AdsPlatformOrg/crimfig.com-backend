@@ -269,7 +269,8 @@ export function observeDiagnosticResponse(req: any, res: any) {
   for (const method of ["json", "send"]) {
     const original = res[method];
     if (typeof original !== "function") continue;
-    res[method] = function (body: any) {
+    res[method] = function (...args: any[]) {
+      const [body] = args;
       try {
         if (!Buffer.isBuffer(body) && !req.__monitorResponseBody) {
           let parsed = body;
@@ -288,7 +289,7 @@ export function observeDiagnosticResponse(req: any, res: any) {
           reason: "Capture failed",
         };
       }
-      return original.apply(this, arguments);
+      return original.apply(this, args);
     };
   }
 }

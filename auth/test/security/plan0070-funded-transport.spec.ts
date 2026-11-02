@@ -1,3 +1,6 @@
+import { validateSync } from "class-validator";
+import { ConversionDto } from "../../../shared/src/reward-program.dto";
+import { observeDiagnosticResponse } from "../../../shared/src/monitoring/request-diagnostics";
 import { ConfigService } from "@nestjs/config";
 import { FundedRewardsClient } from "../../../api/ads-api/src/modules/billing/funded-rewards.client";
 import { RewardProgramInternalController } from "../../../api/billing-api/src/modules/rewards/reward-program-internal.controller";
@@ -44,13 +47,11 @@ describe("funded authority transport fails closed", () => {
   it.each([403, 409, 500])(
     "rejects HTTP %s without fabricated success or retries",
     async (status) => {
-      const call = jest
-        .spyOn(global, "fetch")
-        .mockResolvedValue({
-          ok: false,
-          status,
-          json: async () => ({}),
-        } as any);
+      const call = jest.spyOn(global, "fetch").mockResolvedValue({
+        ok: false,
+        status,
+        json: async () => ({}),
+      } as any);
       await expect(
         new FundedRewardsClient(config()).command(id, "convert", input),
       ).rejects.toThrow();
@@ -64,21 +65,19 @@ describe("funded authority transport fails closed", () => {
     { policyId: other },
     { authorityVersion: "wrong" },
   ])("rejects mismatched immutable conversion receipt %j", async (patch) => {
-    jest
-      .spyOn(global, "fetch")
-      .mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({
-          status: "success",
-          data: {
-            authorityVersion: "rewards-program-v1",
-            userId: id,
-            ...input,
-            ...patch,
-          },
-        }),
-      } as any);
+    jest.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: "success",
+        data: {
+          authorityVersion: "rewards-program-v1",
+          userId: id,
+          ...input,
+          ...patch,
+        },
+      }),
+    } as any);
     await expect(
       new FundedRewardsClient(config()).command(id, "convert", input),
     ).rejects.toThrow(/unconfirmed/);
@@ -90,13 +89,11 @@ describe("funded authority transport fails closed", () => {
       ...input,
       points: "1",
     };
-    const call = jest
-      .spyOn(global, "fetch")
-      .mockResolvedValue({
-        ok: true,
-        status: 200,
-        json: async () => ({ status: "success", data }),
-      } as any);
+    const call = jest.spyOn(global, "fetch").mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ status: "success", data }),
+    } as any);
     await expect(
       new FundedRewardsClient(config()).command(id, "convert", input),
     ).resolves.toEqual(data);
@@ -181,5 +178,29 @@ describe("existing funded engine safeguards", () => {
       ),
     ).toBe(true);
     expect(views[0].key).toBe("promo_impressions_100");
+  });
+});
+
+describe("release boundary regression coverage", () => {
+  it("DTO declarations do not create fake defaults or bypass required validation", () => {
+    const empty = new ConversionDto();
+    expect(
+      validateSync(empty)
+        .map((e) => e.property)
+        .sort(),
+    ).toEqual(["allocationId", "microCfig", "policyId", "requestId"]);
+    expect(validateSync(Object.assign(new ConversionDto(), input))).toEqual([]);
+  });
+  it("diagnostic response wrapping preserves receiver, complete arguments and return value", () => {
+    const req: any = {};
+    const original = jest.fn(function (this: any, ...args: any[]) {
+      expect(this.marker).toBe("response");
+      expect(args).toEqual([{ ok: true }, "extra", 123]);
+      return "original-result";
+    });
+    const res: any = { marker: "response", json: original };
+    observeDiagnosticResponse(req, res);
+    expect(res.json({ ok: true }, "extra", 123)).toBe("original-result");
+    expect(original).toHaveBeenCalledTimes(1);
   });
 });
