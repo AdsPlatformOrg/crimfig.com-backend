@@ -1,3 +1,4 @@
+import { responsiveImageBounds } from './image-sizing';
 import {houseProgramRequested} from '../cfig/cfig-allocation';
 import { assertEventReplay, assertInstanceBinding } from './interaction-binding';
 import {DeliveryDeadlineError,DELIVERY_RUNTIME,requireDeliveryTime,withinDeliveryBudget} from './delivery-budgets';
@@ -406,6 +407,7 @@ export class DeliveryService {
     });
   }
 
+  var imageBounds = ${responsiveImageBounds.toString()};
   function renderAdCard(container, ad, mode, slotApiBase, state) {
     var activeBase = slotApiBase || apiBase;
     var assets=[];
@@ -421,7 +423,8 @@ export class DeliveryService {
     var card = document.createElement('div');
     if (ad.adType === 'image') {
       // Frameless, clean image serving without dark backgrounds, borders, or redundant text overlays
-      var cardMaxWidth = ad.width ? Math.min(ad.width, 970) + 'px' : 'min(100%, 728px)';
+      var bounds=imageBounds(ad.width,ad.height);
+      var cardMaxWidth = bounds.width ? bounds.width + 'px' : 'min(100%, 728px)';
       card.style.cssText = "background:transparent;border:0;padding:0;margin:0 auto;box-shadow:none;position:relative;overflow:hidden;box-sizing:border-box;display:block;max-width:" + cardMaxWidth + ";text-align:center;";
     } else {
       card.style.cssText = "border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:'Poppins',Arial,Helvetica,sans-serif;max-width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;";
@@ -512,9 +515,10 @@ export class DeliveryService {
       img.src = resolvedMedia(ad.imageUrl, activeBase);
       img.alt = ad.headline || 'Advertisement';
       // Responsive image sizing bounded by target rendition dimensions, scaling down on mobile viewports
-      var imgMaxW = ad.width ? Math.min(ad.width, 970) + 'px' : 'min(100%, 728px)';
-      var imgMaxH = ad.height ? Math.min(ad.height, 600) + 'px' : '280px';
-      img.style.cssText = 'max-width:min(100%, ' + imgMaxW + ');max-height:' + imgMaxH + ';width:auto;height:auto;object-fit:contain;border-radius:8px;display:block;margin:0 auto;border:0;';
+      var bounds=imageBounds(ad.width,ad.height);
+      var imgMaxW=bounds.width?bounds.width+'px':'728px';
+      img.style.cssText='max-width:min(100%, '+imgMaxW+');width:'+(bounds.width?'100%':'auto')+';height:auto;object-fit:contain;display:block;margin:0 auto;border:0;';
+      if(bounds.ratio){img.width=bounds.intrinsicWidth;img.height=bounds.intrinsicHeight;img.style.aspectRatio='auto '+bounds.ratio;}
       if (ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
         var imgLink = document.createElement('a');
         imgLink.href = ad.clickUrl;

@@ -1,6 +1,7 @@
 import { AdsRoles } from '../security/ads-staff-grants';
 import {
   Controller,
+  ParseUUIDPipe,
   Get,
   Post,
   Put,
@@ -169,12 +170,9 @@ export class AdstationController {
   @ApiOperation({
     summary: 'Get environment-safe HTML and Next.js embed snippet for a slot',
   })
-  async getSlotEmbed(@Req() req: any, @Param('slotId') slotId: string) {
+  async getSlotEmbed(@Req() req: any, @Param('slotId',new ParseUUIDPipe()) slotId: string) {
     const userId = req.user.sub;
-    const promoter = await this.promotersService.getOrCreatePromoter(
-      userId,
-      'WEBSITE',
-    );
+    const promoter = await this.promotersService.getExistingPromoter(userId);
     const embed = await this.adstationService.getSlotEmbedInstructions(
       promoter.id,
       slotId,

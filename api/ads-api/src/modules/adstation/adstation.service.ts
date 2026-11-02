@@ -1,3 +1,4 @@
+import { slotDeliveryDiagnostics } from '../delivery/paid-delivery-policy';
 import {
   Injectable,
   Inject,
@@ -312,6 +313,9 @@ export class AdstationService {
       .where(eq(adsPromoterWebsites.id, slot.websiteId))
       .limit(1);
 
+    if(!website)throw new NotFoundException('Website not found');
+    if(website.promoterId!==promoterId)throw new ForbiddenException('Website ownership changed');
+
     const adsPublicUrl = (
       process.env.ADS_PUBLIC_URL ||
       process.env.NEXT_PUBLIC_ADS_API_URL ||
@@ -346,6 +350,7 @@ export class AdstationService {
       domain: website?.domain || null,
       lifecycleStatus: slot.lifecycleStatus,
       installationStatus: slot.installationStatus,
+      deliveryReadiness:slotDeliveryDiagnostics(slot,website),
       adsPublicUrl,
       htmlSnippet,
       nextJsSnippet,

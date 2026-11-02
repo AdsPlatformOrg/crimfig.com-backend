@@ -90,6 +90,14 @@ export class PromotersService {
     private readonly db: NodePgDatabase<typeof schema>,
   ) {}
 
+  /** Read-only lookup: diagnostic views must not provision or mutate profiles. */
+  async getExistingPromoter(userId:string){
+    if(!userId)throw new BadRequestException('User ID is required');
+    const [promoter]=await this.db.select().from(adsPromoters).where(eq(adsPromoters.userId,userId)).limit(1);
+    if(!promoter)throw new NotFoundException('Promoter profile not found');
+    return promoter;
+  }
+
   /**
    * Get or create a promoter profile for a user.
    * When an explicit type or displayName is supplied (e.g., registering as WEBSITE),

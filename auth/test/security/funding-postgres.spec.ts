@@ -1,3 +1,10 @@
+import { Module, ValidationPipe } from '@nestjs/common';
+import { NestFactory, Reflector } from '@nestjs/core';
+import { AdstationController } from '../../../api/ads-api/src/modules/adstation/adstation.controller';
+import { AdstationService } from '../../../api/ads-api/src/modules/adstation/adstation.service';
+import { SetupChecksService } from '../../../api/ads-api/src/modules/adstation/setup-checks.service';
+import { AdsAccessGuard } from '../../../api/ads-api/src/modules/security/ads-access.guard';
+import { AdsStaffGrants } from '../../../api/ads-api/src/modules/security/ads-staff-grants';
 import { AdRejectionService } from '../../../api/billing-api/src/modules/ecosystem/ad-rejection.service';
 import { AdClearanceService } from '../../../api/billing-api/src/modules/ecosystem/ad-clearance.service';
 import { AdSettlementService } from '../../../api/billing-api/src/modules/ecosystem/ad-settlement.service';
@@ -57,7 +64,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query('create table apps(id uuid primary key)');
     // Actual Drizzle columns/defaults/enums/unique constraints/FKs, not the serialized mock adapter.
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
-    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
+    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
     const enums = new Set<string>();
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
       if (col.enum && !enums.has(col.enum.enumName)) {
@@ -81,6 +88,22 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query("insert into billing_exchange_rates(id,usd_to_ngn,source) values($1,100,'exchangerate_api')",[rateId]);
   });
   afterAll(async () => { await pool?.end(); });
+  test('PLAN0079 owner-scoped embed readiness HTTP is non-writing and refuses foreign or missing profiles',async()=>{
+    const [promoter]=await db.insert(schema.adsPromoters).values({userId:owner,type:'WEBSITE'}).returning();
+    const [website]=await db.insert(schema.adsPromoterWebsites).values({promoterId:promoter.id,url:'https://example.test',domain:'example.test',verificationToken:randomUUID(),verificationMethod:'dns_txt',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'testing'}).returning();
+    const [slot]=await db.insert(schema.adstationSlots).values({websiteId:website.id,promoterId:promoter.id,name:'Diagnostic slot',slotTagId:'cf-slot-diagnostic',slotType:'network',format:'banner',lifecycleStatus:'testing',isActive:true}).returning();
+    const other=randomUUID(),missingProfile=randomUUID();
+    await pool.query("insert into users(id,email,status) values($1,'other@example.test','ACTIVE'),($2,'missing@example.test','ACTIVE')",[other,missingProfile]);
+    await db.insert(schema.adsPromoters).values({userId:other,type:'WEBSITE'});
+    const service=new AdstationService(db),promoters=new PromotersService(db);
+    @Module({controllers:[AdstationController],providers:[{provide:AdstationService,useValue:service},{provide:PromotersService,useValue:promoters},{provide:SetupChecksService,useValue:{}}]})class LocalDiagnosticModule{}
+    const jwt=new JwtService({secret:'plan0079-local-http-only-key'}),grants={rolesFor:()=>[]} as unknown as AdsStaffGrants;
+    const app=await NestFactory.create(LocalDiagnosticModule,{logger:false});app.setGlobalPrefix('api/v1');app.useGlobalPipes(new ValidationPipe({transform:true,whitelist:true}));app.useGlobalGuards(new AdsAccessGuard(jwt,new Reflector(),db,grants));await app.listen(0,'127.0.0.1');
+    const get=async(actor:string|undefined,id=slot.id)=>{const res=await fetch((await app.getUrl())+'/api/v1/adstation/slots/'+id+'/embed',{headers:actor?{Authorization:'Bearer '+jwt.sign({sub:actor,email:'fixture@example.test',type:'access'},{expiresIn:'2m'})}:{},signal:AbortSignal.timeout(10000)});return {status:res.status,body:await res.json() as any};};
+    const counts=async()=>{const result:any={};for(const table of ['ads_promoters','ads_serves','ads_interactions','billing_wallets','billing_transactions'])result[table]=(await pool.query('select count(*)::int n from '+table)).rows[0].n;return result;};
+    try{const before=await counts();expect((await get(undefined)).status).toBe(401);expect((await get(other)).status).toBe(404);expect((await get(missingProfile)).status).toBe(404);expect((await get(owner,randomUUID())).status).toBe(404);expect((await get(owner,'not-a-uuid')).status).toBe(400);const response=await get(owner);expect(response.status).toBe(200);expect(response.body.data.deliveryReadiness.blockers).toContain('WEBSITE_APPROVAL_REQUIRED');expect(response.body.data.deliveryReadiness.remainingChecks).toContain('MEASUREMENT_CONSENT');expect(await counts()).toEqual(before);expect((await pool.query('select policy_status from ads_promoter_websites')).rows[0].policy_status).toBe('testing');expect((await pool.query('select lifecycle_status from adstation_slots')).rows[0].lifecycle_status).toBe('testing');}
+    finally{await app.close();}
+  });
   test('parallel account initialization creates one profile and one default consent', async () => {
     const service = new PromotersService(db);
     const types = ['WEBSITE', 'MOBILE_APP', 'INDIVIDUAL', 'INDIVIDUAL', 'WEBSITE', 'MOBILE_APP', 'INDIVIDUAL'] as const;
