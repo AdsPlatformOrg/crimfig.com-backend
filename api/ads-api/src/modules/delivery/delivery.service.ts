@@ -1,4 +1,5 @@
 import { responsiveImageBounds } from './image-sizing';
+import { APPROVED_IMAGE_AD_PRESETS } from '../uploads/image-ad-presets';
 import {houseProgramRequested} from '../cfig/cfig-allocation';
 import { assertEventReplay, assertInstanceBinding } from './interaction-binding';
 import {DeliveryDeadlineError,DELIVERY_RUNTIME,requireDeliveryTime,withinDeliveryBudget} from './delivery-budgets';
@@ -408,8 +409,12 @@ export class DeliveryService {
   }
 
   var imageBounds = ${responsiveImageBounds.toString()};
+  var imageFormats = ${JSON.stringify(Object.fromEntries([...APPROVED_IMAGE_AD_PRESETS.map(p=>[p.id,{width:p.width,height:p.height}]),['banner',{width:728,height:250}],['card',{width:336,height:280}],['sidebar_sticky',{width:300,height:600}]]))};
   function renderAdCard(container, ad, mode, slotApiBase, state) {
     var activeBase = slotApiBase || apiBase;
+    var imageFormat=container.getAttribute('data-ad-format')||ad.format||'banner';
+    var limits=Object.prototype.hasOwnProperty.call(imageFormats,imageFormat)?imageFormats[imageFormat]:imageFormats.banner;
+    var bounds=imageBounds(ad.width,ad.height,limits.width,limits.height);
     var assets=[];
     function readyAsset(asset,event){
       assets.push(new Promise(function(resolve,reject){
@@ -423,8 +428,7 @@ export class DeliveryService {
     var card = document.createElement('div');
     if (ad.adType === 'image') {
       // Frameless, clean image serving without dark backgrounds, borders, or redundant text overlays
-      var bounds=imageBounds(ad.width,ad.height);
-      var cardMaxWidth = bounds.width ? bounds.width + 'px' : 'min(100%, 728px)';
+      var cardMaxWidth = (bounds.width || limits.width) + 'px';
       card.style.cssText = "background:transparent;border:0;padding:0;margin:0 auto;box-shadow:none;position:relative;overflow:hidden;box-sizing:border-box;display:block;max-width:" + cardMaxWidth + ";text-align:center;";
     } else {
       card.style.cssText = "border:1px solid rgba(255,255,255,0.08);background:#171B2A;color:#FFFFFF;border-radius:12px;padding:16px;font-family:'Poppins',Arial,Helvetica,sans-serif;max-width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.3);position:relative;overflow:hidden;box-sizing:border-box;margin:12px 0;";
@@ -515,9 +519,7 @@ export class DeliveryService {
       img.src = resolvedMedia(ad.imageUrl, activeBase);
       img.alt = ad.headline || 'Advertisement';
       // Responsive image sizing bounded by target rendition dimensions, scaling down on mobile viewports
-      var bounds=imageBounds(ad.width,ad.height);
-      var imgMaxW=bounds.width?bounds.width+'px':'728px';
-      img.style.cssText='max-width:min(100%, '+imgMaxW+');width:'+(bounds.width?'100%':'auto')+';height:auto;object-fit:contain;display:block;margin:0 auto;border:0;';
+      img.style.cssText='max-width:100%;max-height:'+limits.height+'px;width:'+(bounds.width?bounds.width+'px':'auto')+';height:auto;object-fit:contain;display:block;margin:0 auto;border:0;';
       if(bounds.ratio){img.width=bounds.intrinsicWidth;img.height=bounds.intrinsicHeight;img.style.aspectRatio='auto '+bounds.ratio;}
       if (ad.clickUrl && /^https?:\\/\\//i.test(ad.clickUrl)) {
         var imgLink = document.createElement('a');
