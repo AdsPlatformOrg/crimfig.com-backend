@@ -260,6 +260,13 @@
       "when": 1793538000001,
       "tag": "0037_cfig_deterministic_finalization",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1793538000002,
+      "tag": "0038_funded_rewards_authority",
+      "breakpoints": true
     }
   ]
 }

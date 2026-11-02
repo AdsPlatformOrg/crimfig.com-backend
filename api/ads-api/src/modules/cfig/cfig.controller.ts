@@ -1,4 +1,11 @@
 import {
+  ReconciliationDto,
+  ConversionDto,
+  AllocationDto,
+  RewardRequestDto,
+  RecoveryDto,
+} from "../../../../../shared/src/reward-program.dto";
+import {
   Body,
   Controller,
   Get,
@@ -73,8 +80,24 @@ export class PromoterCfigController {
       ),
     };
   }
-  @Post("conversions") convert() {
-    return this.service.conversion();
+  @Post("conversions") async convert(
+    @Req() req: any,
+    @Body() body: ConversionDto,
+  ) {
+    return { data: await this.service.conversion(req.user.sub, body) };
+  }
+  @Get("conversions/options") async options(@Req() req: any) {
+    return { data: await this.service.fundedCommand(req.user.sub, "options") };
+  }
+  @Get("conversions/:id") async receipt(
+    @Req() req: any,
+    @Param("id", new ParseUUIDPipe()) id: string,
+  ) {
+    return {
+      data: await this.service.fundedCommand(req.user.sub, "receipt", {
+        requestId: id,
+      }),
+    };
   }
 }
 @AdsRoles("super_admin", "ads_finance")
@@ -133,7 +156,65 @@ export class AdminCfigController {
   @Get("reserve/allocations") async reserve() {
     return { data: await this.service.reserve() };
   }
-  @Post("reserve/allocations") allocate() {
-    return this.service.conversion();
+  @Post("reconciliations") async prepareReconciliation(
+    @Req() req: any,
+    @Body() body: ReconciliationDto,
+  ) {
+    return {
+      data: await this.service.fundedCommand(
+        req.user.sub,
+        "prepareReconciliation",
+        body as any,
+      ),
+    };
+  }
+  @Post("reconciliations/:id/approve") async approveReconciliation(
+    @Req() req: any,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body() body: RewardRequestDto,
+  ) {
+    return {
+      data: await this.service.fundedCommand(
+        req.user.sub,
+        "approveReconciliation",
+        { ...body, id },
+      ),
+    };
+  }
+  @Get("funded-programs") async funded(@Req() req: any) {
+    return { data: await this.service.fundedCommand(req.user.sub, "list") };
+  }
+  @Post("reserve/allocations") async allocate(
+    @Req() req: any,
+    @Body() body: AllocationDto,
+  ) {
+    return {
+      data: await this.service.fundedCommand(
+        req.user.sub,
+        "propose",
+        body as any,
+      ),
+    };
+  }
+  @Post("reserve/allocations/:id/approve") async approveAllocation(
+    @Req() req: any,
+    @Param("id", new ParseUUIDPipe()) id: string,
+    @Body() body: RewardRequestDto,
+  ) {
+    return {
+      data: await this.service.fundedCommand(req.user.sub, "approve", {
+        ...body,
+        id,
+      }),
+    };
+  }
+  @Post("recovery") async recover(@Req() req: any, @Body() body: RecoveryDto) {
+    return {
+      data: await this.service.fundedCommand(
+        req.user.sub,
+        "recovery",
+        body as any,
+      ),
+    };
   }
 }

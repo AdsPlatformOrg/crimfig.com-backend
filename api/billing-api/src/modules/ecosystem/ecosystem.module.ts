@@ -1,3 +1,7 @@
+import {RewardProgramWorker} from '../rewards/reward-program.worker';
+import {RewardProgramInternalController} from '../rewards/reward-program-internal.controller';
+import {RewardProgramService} from '../rewards/reward-program.service';
+import {RewardProgramController} from '../rewards/reward-program.controller';
 import { Module } from '@nestjs/common';
 import { EcosystemController } from './ecosystem.controller';
 import { CampaignEscrowService } from './campaign-escrow.service';
@@ -15,8 +19,8 @@ import { FinancialPolicyController } from '../security/financial-policy.controll
 
 @Module({
   imports: [WalletModule],
-  controllers: [EcosystemController, AdClearanceController, AdRejectionController,AdOpportunityController, FinancialPolicyController],
-  providers: [
+  controllers: [RewardProgramInternalController,RewardProgramController,EcosystemController, AdClearanceController, AdRejectionController,AdOpportunityController, FinancialPolicyController],
+  providers: [RewardProgramWorker,RewardProgramService,
     CampaignEscrowService,
     AdOpportunityService,
     AdOpportunityWorker,

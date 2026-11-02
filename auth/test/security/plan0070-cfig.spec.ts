@@ -194,7 +194,7 @@ describe("PLAN-0070 safeguards and canonical policy", () => {
   it("preserves zero virtual balances and never claims backing", async () => {
     const s = new CfigService({
       execute: async () => ({
-        rows: [{ pending: "0", available: "0", invalid: "0" }],
+        rows: [{ pending: "0", available: "0", invalid: "0", converted: "0" }],
       }),
     });
     expect(await s.balances(id)).toMatchObject({

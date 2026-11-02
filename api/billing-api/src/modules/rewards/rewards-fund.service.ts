@@ -78,6 +78,9 @@ export class RewardsFundService {
     if (netDynamicPoolCents <= 0) return { sweptCents: 0, residualMicrousd: 0 };
 
     return await this.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('rewards-fund:USD',0))`);
+
       // 1. Lock fund row for update
       const [fund] = await tx
         .select()
@@ -187,6 +190,9 @@ export class RewardsFundService {
     }
 
     return await this.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('rewards-fund:USD',0))`);
+
       if (scope === 'global') {
         const isPaused = action === 'pause';
         await tx

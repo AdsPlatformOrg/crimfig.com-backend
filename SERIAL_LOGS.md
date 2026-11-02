@@ -662,3 +662,7 @@ Drafted PLAN-0063 (DRAFT/PENDING): typed masked request/response/stack/cause and
 
 ## 2026-10-31 — PLAN-0064 admin repair plan
 Drafted PLAN-0064 DRAFT/PENDING after reviewing PLAN-0061–0063 source and owner screenshots: diagnose House list 500/migration registration, complete bounded reporting scopes and missing diagnostic pipeline. Source does not establish deployed schema or 500 root cause. Required API/page/unit coverage matrix included. Documentation only; no tests, runtime changes or deployments.
+
+
+## 2026-11-02 — PLAN-0070 remaining code and unit scope
+Implemented gated Billing source reconciliation/independent approval, real-backed program allocation, frozen shared caps, settled CPC/CPM loop issuance/prestige, original-cohort atomic cfig conversion, source-bound legacy clearance, recovery review and optional worker; Ads bridge/endpoints report actual converted units. New migration0038 written/registered NOT applied. All existing economic values preserved and activation flagsOFF. Final focused209 tests/14 suites PASS, including persistence-failure and existing delivery regressions; mocked transactions are not real DB/concurrency assurance. See docs/reviews/plan-0070/funded-integration-20261102.md and unit-test-results.txt. Broader build/type/lint/browser/staging/provider/real DB checks DEFERRED — OWNER REQUEST. No migration execution, deployment, funding/earning/conversion activation, commit, merge or push.

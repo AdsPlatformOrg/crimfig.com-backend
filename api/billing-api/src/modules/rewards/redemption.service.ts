@@ -1,7 +1,13 @@
-import { Injectable, Inject, Logger, BadRequestException, ConflictException } from '@nestjs/common';
-import { DATABASE_TOKEN } from '../database/database.module';
-import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
-import * as schema from '@crimfig/database/schema';
+import {
+  Injectable,
+  Inject,
+  Logger,
+  BadRequestException,
+  ConflictException,
+} from "@nestjs/common";
+import { DATABASE_TOKEN } from "../database/database.module";
+import type { NodePgDatabase } from "drizzle-orm/node-postgres";
+import * as schema from "@crimfig/database/schema";
 import {
   rewardsFund,
   rewardsFundLedger,
@@ -10,9 +16,9 @@ import {
   rewardsRedemptions,
   billingWallets,
   billingTransactions,
-} from '@crimfig/database/schema';
-import { eq, sql, and } from 'drizzle-orm';
-import { WalletService } from '../wallet/wallet.service';
+} from "@crimfig/database/schema";
+import { eq, sql, and, lte, desc } from "drizzle-orm";
+import { WalletService } from "../wallet/wallet.service";
 
 @Injectable()
 export class RedemptionService {
@@ -35,13 +41,29 @@ export class RedemptionService {
    * 4. Credit destination billing_wallets balance_usd_cents.
    * 5. Append immutable rows in rewards_fund_ledger, rewards_points_ledger, and rewards_redemptions.
    */
-  async redeemToWallet(userId: string, pointsToRedeem: number, idempotencyKey: string) {
-    if (pointsToRedeem < 1000) {
-      throw new BadRequestException('Minimum redemption threshold is 1,000 points ($10.00 USD)');
+  async redeemToWallet(
+    userId: string,
+    pointsToRedeem: number,
+    idempotencyKey: string,
+  ) {
+    if (
+      typeof idempotencyKey !== "string" ||
+      !idempotencyKey.trim() ||
+      idempotencyKey.length > 128
+    )
+      throw new BadRequestException(
+        "Stable redemption request identity required",
+      );
+    if (!Number.isSafeInteger(pointsToRedeem) || pointsToRedeem < 1000) {
+      throw new BadRequestException(
+        "Minimum redemption threshold is 1,000 points ($10.00 USD)",
+      );
     }
 
     if (pointsToRedeem % 100 !== 0) {
-      throw new BadRequestException('Redemptions must be in whole 100-point increments ($1.00)');
+      throw new BadRequestException(
+        "Redemptions must be in whole 100-point increments ($1.00)",
+      );
     }
 
     const cashCreditCents = pointsToRedeem; // 1 point = 1 cent
@@ -54,16 +76,55 @@ export class RedemptionService {
       .limit(1);
 
     if (existingRedemption) {
-      return { status: 'already_processed', redemption: existingRedemption };
+      if (
+        existingRedemption.userId !== userId ||
+        existingRedemption.pointsRedeemed !== pointsToRedeem
+      )
+        throw new ConflictException("Redemption identity changed");
+      return { status: "already_processed", redemption: existingRedemption };
     }
 
     return await this.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout='5s'`);
+      await tx.execute(sql`set local statement_timeout='8s'`);
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended('rewards-fund:USD',0))`,
+      );
+      const [replayed] = await tx
+        .select()
+        .from(rewardsRedemptions)
+        .where(eq(rewardsRedemptions.idempotencyKey, idempotencyKey))
+        .limit(1);
+      if (replayed) {
+        if (
+          replayed.userId !== userId ||
+          replayed.pointsRedeemed !== pointsToRedeem
+        )
+          throw new ConflictException("Redemption identity changed");
+        return { status: "already_processed", redemption: replayed };
+      }
+
+      const [settings] = await tx
+        .select()
+        .from(schema.rewardsFundSettings)
+        .where(
+          and(
+            eq(schema.rewardsFundSettings.isActive, true),
+            lte(schema.rewardsFundSettings.effectiveFrom, new Date()),
+          ),
+        )
+        .orderBy(desc(schema.rewardsFundSettings.version))
+        .limit(1);
+      if (!settings || settings.adsRewardsGlobalPaused)
+        throw new ConflictException(
+          "Rewards redemption is paused or unavailable",
+        );
       // 1. Lock user point balance
       const [userBalance] = await tx
         .select()
         .from(rewardsPointsBalances)
         .where(eq(rewardsPointsBalances.userId, userId))
-        .for('update');
+        .for("update");
 
       if (!userBalance || userBalance.availablePoints < pointsToRedeem) {
         throw new BadRequestException(
@@ -72,18 +133,37 @@ export class RedemptionService {
       }
 
       if (userBalance.isRewardsSuspended) {
-        throw new BadRequestException('Account rewards activity is suspended. Cannot redeem points.');
+        throw new BadRequestException(
+          "Account rewards activity is suspended. Cannot redeem points.",
+        );
       }
 
       // 2. Lock Rewards Fund
       const [fund] = await tx
         .select()
         .from(rewardsFund)
-        .where(eq(rewardsFund.currency, 'USD'))
-        .for('update');
+        .where(eq(rewardsFund.currency, "USD"))
+        .for("update");
 
+      if (
+        !fund ||
+        ![
+          fund.cashBalanceUsdCents,
+          fund.allocatedUsdCents,
+          fund.availableUsdCents,
+          fund.fundedPendingUsdCents,
+          fund.spentUsdCents,
+        ].every((v) => Number.isSafeInteger(v) && v >= 0) ||
+        fund.cashBalanceUsdCents !==
+          fund.allocatedUsdCents +
+            fund.availableUsdCents +
+            fund.fundedPendingUsdCents
+      )
+        throw new ConflictException("Rewards Fund needs reconciliation");
       if (fund.allocatedUsdCents < cashCreditCents) {
-        throw new ConflictException('Solvency anomaly: Fund allocated cash is less than redemption amount');
+        throw new ConflictException(
+          "Solvency anomaly: Fund allocated cash is less than redemption amount",
+        );
       }
 
       const newAllocated = fund.allocatedUsdCents - cashCreditCents;
@@ -105,10 +185,10 @@ export class RedemptionService {
       // Append to rewards_fund_ledger
       await tx.insert(rewardsFundLedger).values({
         fundId: fund.id,
-        type: 'spend',
+        type: "spend",
         amountCents: cashCreditCents,
-        fromBucket: 'allocated',
-        toBucket: 'spent',
+        fromBucket: "allocated",
+        toBucket: "spent",
         cashBalanceAfterCents: newCashBalance,
         availableAfterCents: fund.availableUsdCents,
         allocatedAfterCents: newAllocated,
@@ -134,8 +214,8 @@ export class RedemptionService {
         lotId: `redemption-${Date.now()}`,
         userId,
         deltaPoints: -pointsToRedeem,
-        state: 'redeemed',
-        activityCode: 'point_redemption_wallet',
+        state: "redeemed",
+        activityCode: "point_redemption_wallet",
         sourceRef: idempotencyKey,
         idempotencyKey,
         valuationMicrousd: cashCreditCents * 10000,
@@ -147,7 +227,7 @@ export class RedemptionService {
         .select()
         .from(billingWallets)
         .where(eq(billingWallets.userId, userId))
-        .for('update');
+        .for("update");
 
       let walletId: string;
       if (wallet) {
@@ -177,8 +257,8 @@ export class RedemptionService {
         .insert(rewardsRedemptions)
         .values({
           userId,
-          type: 'wallet_credit',
-          status: 'completed',
+          type: "wallet_credit",
+          status: "completed",
           pointsRedeemed: pointsToRedeem,
           usdCentsAmount: cashCreditCents,
           destinationRef: walletId,
@@ -188,7 +268,7 @@ export class RedemptionService {
         .returning();
 
       return {
-        status: 'completed',
+        status: "completed",
         pointsRedeemed: pointsToRedeem,
         creditedUsdCents: cashCreditCents,
         destinationWalletId: walletId,

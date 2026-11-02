@@ -512,5 +512,32 @@
       100000000000
     ],
     "maxCandidatesPerDay": 200000
+  },
+  "fundedRewards": {
+    "enabled": false,
+    "fundingEnabled": false,
+    "conversionEnabled": false,
+    "policyVersion": "FUNDED-REWARDS-v1.0.0",
+    "dailyEmissionPercent": 2,
+    "monthlyEmissionPercent": 30,
+    "conversionMinimumPoints": 1,
+    "conversionMonthlyMaxPoints": 100,
+    "reserveFloorBasis": "cash_balance",
+    "paidClickThresholds": [
+      10,
+      50,
+      100,
+      1000,
+      5000,
+      10000,
+      50000,
+      100000,
+      1000000,
+      5000000,
+      10000000,
+      100000000,
+      10000000000,
+      100000000000
+    ]
   }
 }

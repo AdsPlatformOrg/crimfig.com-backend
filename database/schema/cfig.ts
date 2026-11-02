@@ -55,6 +55,7 @@ export const cfigLedger = pgTable(
     kind: text("kind").notNull(),
     pendingDelta: bigint("pending_delta", { mode: "bigint" }).notNull(),
     availableDelta: bigint("available_delta", { mode: "bigint" }).notNull(),
+    convertedDelta: bigint("converted_delta", { mode: "bigint" }).notNull().default(0n),
     invalidDelta: bigint("invalid_delta", { mode: "bigint" }).notNull(),
     actorId: uuid("actor_id")
       .notNull()
@@ -65,7 +66,7 @@ export const cfigLedger = pgTable(
       .defaultNow(),
   },
   (t) => [
-    uniqueIndex("cfig_ledger_event_kind_uq").on(t.eventId, t.kind),
+    uniqueIndex("cfig_ledger_event_kind_uq").on(t.eventId, t.kind).where(sql`${t.kind} <> 'convert'`),
     index("cfig_ledger_promoter_created").on(t.promoterId, t.createdAt),
     index("cfig_ledger_event_created").on(t.eventId, t.createdAt),
   ],

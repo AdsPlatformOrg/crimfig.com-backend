@@ -96,3 +96,31 @@ export function earnedLoopDelta(
     issuedPoints: "0",
   };
 }
+
+/** Prestige only; preserve impression identities and never duplicate monetary bonuses. */
+export function paidBadgeAwards(model: "cpc" | "cpm", total: bigint) {
+  const tiers = constants.categoryAMilestones.filter(
+    (m) => m.metric === "viewable_impressions",
+  );
+  return tiers.flatMap((tier, i) => {
+    const threshold =
+      model === "cpc"
+        ? constants.fundedRewards.paidClickThresholds[i]
+        : tier.threshold;
+    return threshold !== undefined && total >= BigInt(threshold)
+      ? [
+          {
+            key: model === "cpc" ? "paid_click_tier_" + tier.tier : tier.key,
+            title:
+              tier.badgeTitle +
+              " - " +
+              (model === "cpc" ? "Click" : "Impression") +
+              " Edition",
+            icon: model === "cpc" ? "mouse-pointer" : "eye",
+            tier: tier.tier,
+            pointsAwarded: 0,
+          },
+        ]
+      : [];
+  });
+}

@@ -1,3 +1,4 @@
+import { FundedRewardsClient } from "../billing/funded-rewards.client";
 import {
   canonicalHousePolicy,
   houseProgramRequested,
@@ -9,6 +10,7 @@ import {
 import { evidenceSignature } from "@crimfig/shared";
 import {
   Inject,
+  Optional,
   Injectable,
   BadRequestException,
   ConflictException,
@@ -47,7 +49,10 @@ const serveObservation = (s: any) => ({
 });
 @Injectable()
 export class CfigService {
-  constructor(@Inject("DATABASE_CONNECTION") private readonly db: any) {}
+  constructor(
+    @Inject("DATABASE_CONNECTION") private readonly db: any,
+    @Optional() private readonly funded?: FundedRewardsClient,
+  ) {}
   private async locked<T>(
     key: string,
     fn: (tx: any) => Promise<T>,
@@ -100,12 +105,12 @@ export class CfigService {
   async balances(promoterId?: string) {
     const [balance] = rows(
       await this.db.execute(
-        sql`SELECT coalesce(sum(pending_delta),0)::text AS pending,coalesce(sum(available_delta),0)::text AS available,coalesce(sum(invalid_delta),0)::text AS invalid FROM cfig_ledger WHERE (${promoterId ?? null}::uuid IS NULL OR promoter_id=${promoterId ?? null}::uuid)`,
+        sql`SELECT coalesce(sum(pending_delta),0)::text AS pending,coalesce(sum(available_delta),0)::text AS available,coalesce(sum(invalid_delta),0)::text AS invalid,coalesce(sum(converted_delta),0)::text AS converted FROM cfig_ledger WHERE (${promoterId ?? null}::uuid IS NULL OR promoter_id=${promoterId ?? null}::uuid)`,
       ),
     );
     return {
       ...this.status(),
-      balances: { ...balance, converted: "0" },
+      balances: { ...balance },
       units: "micro-cfig",
       backedValue: null,
     };
@@ -115,7 +120,7 @@ export class CfigService {
       throw new BadRequestException("Invalid page");
     const data = rows(
       await this.db.execute(
-        sql`SELECT id,event_id,promoter_id,policy_id,kind,pending_delta::text,available_delta::text,invalid_delta::text,reason,created_at FROM cfig_ledger WHERE (${promoterId ?? null}::uuid IS NULL OR promoter_id=${promoterId ?? null}::uuid) ORDER BY created_at DESC,id DESC LIMIT 26 OFFSET ${(page - 1) * 25}`,
+        sql`SELECT id,event_id,promoter_id,policy_id,kind,pending_delta::text,available_delta::text,invalid_delta::text,converted_delta::text,reason,created_at FROM cfig_ledger WHERE (${promoterId ?? null}::uuid IS NULL OR promoter_id=${promoterId ?? null}::uuid) ORDER BY created_at DESC,id DESC LIMIT 26 OFFSET ${(page - 1) * 25}`,
       ),
     );
     return { items: data.slice(0, 25), page, hasNext: data.length > 25 };
@@ -244,7 +249,7 @@ export class CfigService {
       }
       const movements = rows(
         await tx.execute(
-          sql`SELECT id,kind,actor_id,reason,pending_delta::text,available_delta::text,invalid_delta::text,created_at FROM cfig_ledger WHERE event_id=${eventId} ORDER BY created_at,id`,
+          sql`SELECT id,kind,actor_id,reason,pending_delta::text,available_delta::text,invalid_delta::text,converted_delta::text,created_at FROM cfig_ledger WHERE event_id=${eventId} ORDER BY created_at,id`,
         ),
       );
       const reviews = rows(
@@ -741,7 +746,7 @@ export class CfigService {
       );
       const [outstanding] = rows(
         await tx.execute(
-          sql`SELECT (coalesce((SELECT sum(allocated) FROM cfig_allocations WHERE day<${day}::date),0)+coalesce((SELECT sum(l.pending_delta+l.available_delta) FROM cfig_ledger l WHERE l.kind='invalidate' AND (l.created_at AT TIME ZONE 'UTC')::date<=${day}::date AND EXISTS(SELECT 1 FROM cfig_allocations a WHERE a.event_id=l.event_id)),0)+coalesce((SELECT sum(l.pending_delta+l.available_delta) FROM cfig_ledger l WHERE NOT EXISTS(SELECT 1 FROM cfig_allocations a WHERE a.event_id=l.event_id)),0))::text AS units`,
+          sql`SELECT (coalesce((SELECT sum(allocated) FROM cfig_allocations WHERE day<${day}::date),0)+coalesce((SELECT sum(l.pending_delta+l.available_delta) FROM cfig_ledger l WHERE l.kind IN ('invalidate','convert') AND (l.created_at AT TIME ZONE 'UTC')::date<=${day}::date AND EXISTS(SELECT 1 FROM cfig_allocations a WHERE a.event_id=l.event_id)),0)+coalesce((SELECT sum(l.pending_delta+l.available_delta) FROM cfig_ledger l WHERE NOT EXISTS(SELECT 1 FROM cfig_allocations a WHERE a.event_id=l.event_id)),0))::text AS units`,
         ),
       );
       // Frozen day snapshot: original receipt and signed eligibility must precede cutoff.
@@ -1023,15 +1028,36 @@ export class CfigService {
     );
     return {
       conversionEnabled: false,
-      programAllocation: null,
+      programAllocationStatus: "requires_billing_authority",
       existingRewardsFund: data[0] ?? null,
       status:
-        "No cfig conversion allocation or funding authority has been established. Existing fund totals are not available cfig backing.",
+        "Existing fund totals alone do not establish program backing. Consult independently approved Billing allocations and issue receipts.",
     };
   }
-  conversion(): never {
-    throw new ConflictException(
-      "Cfig conversion is disabled: approved conversion/recovery policy, reconciled program allocation and separate launch authorization are required",
-    );
+  conversion(userId?: string, input?: any): any {
+    if (!userId || !input || !this.funded)
+      throw new ConflictException(
+        "Cfig conversion is disabled: approved conversion/recovery policy, reconciled program allocation and separate launch authorization are required",
+      );
+    return this.funded.command(userId, "convert", input);
+  }
+  fundedCommand(
+    actor: string,
+    action:
+      | "list"
+      | "propose"
+      | "approve"
+      | "receipt"
+      | "recovery"
+      | "options"
+      | "prepareReconciliation"
+      | "approveReconciliation",
+    input: Record<string, unknown> = {},
+  ) {
+    if (!this.funded)
+      throw new ServiceUnavailableException(
+        "Billing rewards authority unavailable",
+      );
+    return this.funded.command(actor, action, input);
   }
 }

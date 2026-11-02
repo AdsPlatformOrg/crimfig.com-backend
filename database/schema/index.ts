@@ -75,3 +75,5 @@ export * from './ad_delivery_authority';
 export * from './financial_authorization';
 
 export * from './cfig';
+
+export * from './reward_programs';

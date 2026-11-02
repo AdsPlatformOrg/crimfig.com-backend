@@ -1,3 +1,4 @@
+import {FundedRewardsClient} from './funded-rewards.client';
 import { Module } from '@nestjs/common';
 import { DatabaseModule } from '../database/database.module';
 import { BillingEcosystemClient } from './billing-ecosystem.client';
@@ -10,7 +11,7 @@ import {OpportunityClient} from './opportunity-client';
 @Module({
   imports: [DatabaseModule],
   controllers: [AdsBillingController],
-  providers: [BillingEcosystemClient, AdsEscrowService, AdsSettlementService, DeferredAuditService,OpportunityClient],
-  exports: [BillingEcosystemClient, AdsEscrowService, AdsSettlementService, DeferredAuditService,OpportunityClient],
+  providers: [FundedRewardsClient,BillingEcosystemClient, AdsEscrowService, AdsSettlementService, DeferredAuditService,OpportunityClient],
+  exports: [FundedRewardsClient,BillingEcosystemClient, AdsEscrowService, AdsSettlementService, DeferredAuditService,OpportunityClient],
 })
 export class BillingModule {}
