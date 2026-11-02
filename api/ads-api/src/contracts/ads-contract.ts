@@ -33,7 +33,7 @@ const imageSpecs = optionalObject({ width: nullable(num()), height: nullable(num
 const creative = object({ id: str(), campaignId: str(), adStackId: nullable(str()), adType: enumeration('text', 'image', 'video'),
   headline: nullable(str()), bodyText: nullable(str()), ctaText: nullable(str()), destinationUrl: str(),
   adFormat: format, mediaFormat: nullable(enumeration('image', 'gif', 'video')), imageUrl: nullable(str()), videoUrl: nullable(str()),
-  posterUrl: nullable(str()), mediaAssetId: nullable(str()), reviewStatus: enumeration('pending', 'approved', 'rejected'),
+  posterUrl: nullable(str()), mediaAssetId: nullable(str()), reviewStatus: enumeration('pending', 'pending_manager_approval', 'approved', 'rejected'),
   rejectionReason: nullable(str()), imageSpecs: nullable(imageSpecs), status: str() }, ['id', 'campaignId', 'destinationUrl']);
 const stackSettings = optionalObject({ geoMode: enumeration('inherit', 'global', 'targeted'), locations: array(json()),
   targetDevices: array(str()), targetHours: array(num()), schedule: scheduleSchema });
@@ -110,7 +110,7 @@ const responses: Record<string, Record<string, Schema>> = {
       pricingModel: str(), budgetUsdCents: num(), createdAt: str(),submissionId:str(),contentRevision:{type:'integer'},
       reviewClock:nullable(object({submittedAt:nullable(str()),stageStartedAt:nullable(str())})),totalCreativesCount: {type:'integer'}, approvedCreativesCount: {type:'integer'} })),
       stacks: array(object({ id: str(), campaignId: str(), name: str(), campaignTitle: str(),reviewClock:nullable(object({submittedAt:nullable(str()),stageStartedAt:nullable(str())})), reviewStatus: str(), submissionId: str(), contentRevision: {type:'integer'} })),
-      creatives: array(object({...creative.properties,reviewClock:nullable(object({submittedAt:nullable(str()),stageStartedAt:nullable(str())})),submissionId:str(),contentRevision:{type:'integer'}},[...creative.required,'submissionId','contentRevision'])), totalPending: num(),asOf:str(), countScope:enumeration('loaded_page'), page:num(),pageSize:num(),hasMore:object({campaigns:bool(),stacks:bool(),creatives:bool()}) }, ['campaigns', 'creatives', 'totalPending']),
+      creatives: array(object({...creative.properties,reviewClock:nullable(object({submittedAt:nullable(str()),stageStartedAt:nullable(str())})),submissionId:str(),contentRevision:{type:'integer'}},[...creative.required,'submissionId','contentRevision'])), totalPending: num(),asOf:str(), countScope:enumeration('loaded_page'), page:num(),pageSize:num(),hasMore:object({campaigns:bool(),stacks:bool(),creatives:bool()}) }, ['campaigns', 'stacks', 'creatives', 'totalPending']),
     itemDetail:object({targetType:enumeration('creative','stack','campaign'),targetId:str(),campaign,
       item:json(),content:nullable(json()),submissionId:nullable(str()),contentRevision:nullable(num()),
       capabilities:object({reviewer:object({allowed:bool(),reason:nullable(str())}),manager:object({allowed:bool(),reason:nullable(str())})}),

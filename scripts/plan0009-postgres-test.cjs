@@ -122,7 +122,7 @@ try {
   const providerEnv = providerIndex < 0 ? undefined : path.resolve(root, process.argv[providerIndex + 1] || 'api/billing-api/.env');
   if (providerEnv && !providerEnv.startsWith(root + path.sep)) throw new Error('Provider configuration must be inside this backend workspace');
   const result = spawnSync(process.execPath, ['node_modules/jest/bin/jest.js', '--config', 'auth/jest.config.js',
-    '--runInBand', '--runTestsByPath', 'auth/test/security/funding-postgres.spec.ts',
+    '--runInBand', '--runTestsByPath', ...(process.argv.includes('--moderation') ? ['auth/test/security/plan0077-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0077/backend-integration-results.json'] : ['auth/test/security/funding-postgres.spec.ts']),
     ...(process.argv.includes('--provider-only') ? ['--testNamePattern', 'real Paystack TEST'] : []),
     ...(process.argv.includes('--transfer-only') ? ['--testNamePattern', 'real Paystack TEST transfer'] : []),
     ...(process.argv.includes('--oauth') ? ['--testNamePattern', 'real Redis OAuth'] : [])], {

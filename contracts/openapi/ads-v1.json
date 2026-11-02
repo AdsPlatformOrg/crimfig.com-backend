@@ -268,6 +268,7 @@
                   "reviewStatus": {
                     "enum": [
                       "pending",
+                      "pending_manager_approval",
                       "approved",
                       "rejected"
                     ],
@@ -429,6 +430,7 @@
                               "reviewStatus": {
                                 "enum": [
                                   "pending",
+                                  "pending_manager_approval",
                                   "approved",
                                   "rejected"
                                 ],
@@ -979,6 +981,7 @@
                         "reviewStatus": {
                           "enum": [
                             "pending",
+                            "pending_manager_approval",
                             "approved",
                             "rejected"
                           ],
@@ -1420,6 +1423,7 @@
                                     "reviewStatus": {
                                       "enum": [
                                         "pending",
+                                        "pending_manager_approval",
                                         "approved",
                                         "rejected"
                                       ],
@@ -1970,6 +1974,7 @@
                               "reviewStatus": {
                                 "enum": [
                                   "pending",
+                                  "pending_manager_approval",
                                   "approved",
                                   "rejected"
                                 ],
@@ -2426,6 +2431,7 @@
                               "reviewStatus": {
                                 "enum": [
                                   "pending",
+                                  "pending_manager_approval",
                                   "approved",
                                   "rejected"
                                 ],
@@ -2976,6 +2982,7 @@
                         "reviewStatus": {
                           "enum": [
                             "pending",
+                            "pending_manager_approval",
                             "approved",
                             "rejected"
                           ],
@@ -3407,6 +3414,7 @@
                         "reviewStatus": {
                           "enum": [
                             "pending",
+                            "pending_manager_approval",
                             "approved",
                             "rejected"
                           ],
@@ -3979,6 +3987,7 @@
                               "reviewStatus": {
                                 "enum": [
                                   "pending",
+                                  "pending_manager_approval",
                                   "approved",
                                   "rejected"
                                 ],
@@ -4529,6 +4538,7 @@
                         "reviewStatus": {
                           "enum": [
                             "pending",
+                            "pending_manager_approval",
                             "approved",
                             "rejected"
                           ],
@@ -4964,6 +4974,7 @@
                             "reviewStatus": {
                               "enum": [
                                 "pending",
+                                "pending_manager_approval",
                                 "approved",
                                 "rejected"
                               ],
@@ -5514,6 +5525,7 @@
                       "reviewStatus": {
                         "enum": [
                           "pending",
+                          "pending_manager_approval",
                           "approved",
                           "rejected"
                         ],
@@ -5949,6 +5961,7 @@
                               "reviewStatus": {
                                 "enum": [
                                   "pending",
+                                  "pending_manager_approval",
                                   "approved",
                                   "rejected"
                                 ],
@@ -6499,6 +6512,7 @@
                         "reviewStatus": {
                           "enum": [
                             "pending",
+                            "pending_manager_approval",
                             "approved",
                             "rejected"
                           ],
@@ -7106,6 +7120,7 @@
                               "reviewStatus": {
                                 "enum": [
                                   "pending",
+                                  "pending_manager_approval",
                                   "approved",
                                   "rejected"
                                 ],
@@ -7656,6 +7671,7 @@
                         "reviewStatus": {
                           "enum": [
                             "pending",
+                            "pending_manager_approval",
                             "approved",
                             "rejected"
                           ],
@@ -8880,6 +8896,7 @@
                         "reviewStatus": {
                           "enum": [
                             "pending",
+                            "pending_manager_approval",
                             "approved",
                             "rejected"
                           ],
@@ -8998,6 +9015,7 @@
                 },
                 "required": [
                   "campaigns",
+                  "stacks",
                   "creatives",
                   "totalPending"
                 ],
@@ -9147,6 +9165,7 @@
                                   "reviewStatus": {
                                     "enum": [
                                       "pending",
+                                      "pending_manager_approval",
                                       "approved",
                                       "rejected"
                                     ],
@@ -9697,6 +9716,7 @@
                             "reviewStatus": {
                               "enum": [
                                 "pending",
+                                "pending_manager_approval",
                                 "approved",
                                 "rejected"
                               ],
@@ -10391,6 +10411,7 @@
                                   "reviewStatus": {
                                     "enum": [
                                       "pending",
+                                      "pending_manager_approval",
                                       "approved",
                                       "rejected"
                                     ],
@@ -10941,6 +10962,7 @@
                             "reviewStatus": {
                               "enum": [
                                 "pending",
+                                "pending_manager_approval",
                                 "approved",
                                 "rejected"
                               ],
@@ -11431,6 +11453,7 @@
                                   "reviewStatus": {
                                     "enum": [
                                       "pending",
+                                      "pending_manager_approval",
                                       "approved",
                                       "rejected"
                                     ],
@@ -11981,6 +12004,7 @@
                             "reviewStatus": {
                               "enum": [
                                 "pending",
+                                "pending_manager_approval",
                                 "approved",
                                 "rejected"
                               ],
@@ -12386,6 +12410,7 @@
                       "reviewStatus": {
                         "enum": [
                           "pending",
+                          "pending_manager_approval",
                           "approved",
                           "rejected"
                         ],
@@ -12605,6 +12630,7 @@
                                   "reviewStatus": {
                                     "enum": [
                                       "pending",
+                                      "pending_manager_approval",
                                       "approved",
                                       "rejected"
                                     ],
@@ -13155,6 +13181,7 @@
                             "reviewStatus": {
                               "enum": [
                                 "pending",
+                                "pending_manager_approval",
                                 "approved",
                                 "rejected"
                               ],
@@ -13603,6 +13630,7 @@
                             "reviewStatus": {
                               "enum": [
                                 "pending",
+                                "pending_manager_approval",
                                 "approved",
                                 "rejected"
                               ],
@@ -14114,6 +14142,7 @@
                       "reviewStatus": {
                         "enum": [
                           "pending",
+                          "pending_manager_approval",
                           "approved",
                           "rejected"
                         ],
@@ -14324,6 +14353,7 @@
                                       "reviewStatus": {
                                         "enum": [
                                           "pending",
+                                          "pending_manager_approval",
                                           "approved",
                                           "rejected"
                                         ],
@@ -14874,6 +14904,7 @@
                                 "reviewStatus": {
                                   "enum": [
                                     "pending",
+                                    "pending_manager_approval",
                                     "approved",
                                     "rejected"
                                   ],
@@ -15379,6 +15410,7 @@
                                   "reviewStatus": {
                                     "enum": [
                                       "pending",
+                                      "pending_manager_approval",
                                       "approved",
                                       "rejected"
                                     ],
@@ -15929,6 +15961,7 @@
                             "reviewStatus": {
                               "enum": [
                                 "pending",
+                                "pending_manager_approval",
                                 "approved",
                                 "rejected"
                               ],
@@ -16351,6 +16384,7 @@
                                       "reviewStatus": {
                                         "enum": [
                                           "pending",
+                                          "pending_manager_approval",
                                           "approved",
                                           "rejected"
                                         ],
@@ -16901,6 +16935,7 @@
                                 "reviewStatus": {
                                   "enum": [
                                     "pending",
+                                    "pending_manager_approval",
                                     "approved",
                                     "rejected"
                                   ],
@@ -17307,6 +17342,7 @@
                             "reviewStatus": {
                               "enum": [
                                 "pending",
+                                "pending_manager_approval",
                                 "approved",
                                 "rejected"
                               ],
@@ -17448,6 +17484,7 @@
                                   "reviewStatus": {
                                     "enum": [
                                       "pending",
+                                      "pending_manager_approval",
                                       "approved",
                                       "rejected"
                                     ],
