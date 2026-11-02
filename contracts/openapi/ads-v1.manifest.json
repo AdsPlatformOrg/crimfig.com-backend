@@ -2,13 +2,17 @@
   "service": "ads",
   "contractVersion": 1,
   "dialect": "3.0",
-  "sha256": "171d41e552f95b5276349996516c9c593b132cc64fb4605cd2f687462db5ad8e",
+  "sha256": "7242e1c7f2016f13cea7b0b8b40e51adc3a811e23e0584d349ca5311367aa07b",
   "operations": [
     "DELETE /api/v1/campaigns/{id}/ad-stacks/{stackId}",
     "DELETE /api/v1/campaigns/{id}/creatives/{creativeId}",
     "DELETE /api/v1/uploads/{assetId}",
     "GET /api/v1/admin/ads/moderation/campaigns/{id}/change-audit",
+    "GET /api/v1/admin/ads/moderation/campaigns/{id}/review-requests/{requestId}",
     "GET /api/v1/admin/ads/moderation/campaigns/{id}/submission",
+    "GET /api/v1/admin/ads/moderation/items/{targetType}/{id}",
+    "GET /api/v1/admin/ads/moderation/items/{targetType}/{id}/claim",
+    "GET /api/v1/admin/ads/moderation/operations-summary",
     "GET /api/v1/admin/ads/moderation/queue",
     "GET /api/v1/campaigns",
     "GET /api/v1/campaigns/catalog",
@@ -31,6 +35,10 @@
     "POST /api/v1/admin/ads/moderation/creatives/{id}/decision",
     "POST /api/v1/admin/ads/moderation/creatives/{id}/manager-approval",
     "POST /api/v1/admin/ads/moderation/creatives/{id}/primary-review",
+    "POST /api/v1/admin/ads/moderation/items/{targetType}/{id}/claim",
+    "POST /api/v1/admin/ads/moderation/items/{targetType}/{id}/claim/release",
+    "POST /api/v1/admin/ads/moderation/items/{targetType}/{id}/claim/renew",
+    "POST /api/v1/admin/ads/moderation/items/{targetType}/{id}/claim/takeover",
     "POST /api/v1/admin/ads/moderation/promoters/{id}/suspend",
     "POST /api/v1/admin/ads/moderation/stacks/{id}/manager-approval",
     "POST /api/v1/admin/ads/moderation/stacks/{id}/primary-review",
@@ -46,6 +54,6 @@
     "PUT /api/v1/campaigns/creatives/{id}/replace",
     "PUT /api/v1/campaigns/{id}/status"
   ],
-  "sourceSha256": "2e7af048650970f17dbdf9475aac12182f650b305a396c027917a28df2af514d",
+  "sourceSha256": "7513fd8cb8d658cac1344bbea27987345398840d871e12ac009f3ee4820bbec4",
   "generator": "openapi-typescript@7.13.0"
 }

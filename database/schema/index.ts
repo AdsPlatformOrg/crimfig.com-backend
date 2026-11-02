@@ -77,3 +77,5 @@ export * from './financial_authorization';
 export * from './cfig';
 
 export * from './reward_programs';
+
+export * from './moderation_claims';

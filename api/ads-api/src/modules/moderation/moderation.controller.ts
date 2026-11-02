@@ -4,7 +4,7 @@ import { AdsRoles } from '../security/ads-staff-grants';
 import { Controller, Get, Post, Body, Param, Req, UseGuards, ParseUUIDPipe, Query } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { ModerationService } from './moderation.service';
-import { IsIn, IsOptional, IsString, IsBoolean } from 'class-validator';
+import { IsIn, IsOptional, IsString, IsBoolean, MaxLength } from 'class-validator';
 import { documentAdsController } from '../../contracts/ads-contract';
 
 export class ReviewDecisionDto extends MutationDto {
@@ -27,6 +27,13 @@ export class ReviewDecisionDto extends MutationDto {
   @IsOptional()
   @IsString()
   internalNote?: string;
+}
+
+export class ModerationClaimDto extends MutationDto {
+  @IsUUID() submissionId:string;
+  @IsIn(['reviewer','manager']) stage:'reviewer'|'manager';
+  @IsOptional() @IsUUID() claimId?:string;
+  @IsOptional() @IsString() @MaxLength(2000) reason?:string;
 }
 
 export class EmergencyOverrideDto extends MutationDto {
@@ -53,12 +60,44 @@ export class SuspendPromoterDto {
 export class ModerationController {
   constructor(private readonly moderationService: ModerationService) {}
 
+  @Get('items/:targetType/:id/claim')
+  async getClaim(@Param('targetType') type:string,@Param('id',new ParseUUIDPipe()) id:string,@Query('stage') stage?:string){return {status:'success',data:await this.moderationService.getClaim(type,id,stage)};}
+
+  @AdsRoles('ads_reviewer','ads_manager','ads_admin','super_admin')
+  @Post('items/:targetType/:id/claim')
+  async acquireClaim(@Param('targetType') type:string,@Param('id',new ParseUUIDPipe()) id:string,@Body() dto:ModerationClaimDto,@Req() req:any){return {status:'success',data:await this.moderationService.mutateClaim(type,id,'acquire',req.user.sub,dto)};}
+
+  @AdsRoles('ads_reviewer','ads_manager','ads_admin','super_admin')
+  @Post('items/:targetType/:id/claim/renew')
+  async renewClaim(@Param('targetType') type:string,@Param('id',new ParseUUIDPipe()) id:string,@Body() dto:ModerationClaimDto,@Req() req:any){return {status:'success',data:await this.moderationService.mutateClaim(type,id,'renew',req.user.sub,dto)};}
+
+  @AdsRoles('ads_reviewer','ads_manager','ads_admin','super_admin')
+  @Post('items/:targetType/:id/claim/release')
+  async releaseClaim(@Param('targetType') type:string,@Param('id',new ParseUUIDPipe()) id:string,@Body() dto:ModerationClaimDto,@Req() req:any){return {status:'success',data:await this.moderationService.mutateClaim(type,id,'release',req.user.sub,dto)};}
+
+  @AdsRoles('ads_admin','super_admin')
+  @Post('items/:targetType/:id/claim/takeover')
+  async takeoverClaim(@Param('targetType') type:string,@Param('id',new ParseUUIDPipe()) id:string,@Body() dto:ModerationClaimDto,@Req() req:any){return {status:'success',data:await this.moderationService.mutateClaim(type,id,'takeover',req.user.sub,dto)};}
+
+  @Get('operations-summary')
+  async operationsSummary(@Query('targetType') targetType?:string) {return {status:'success',data:await this.moderationService.operationsSummary(targetType)};}
+
   @Get('queue')
   @ApiOperation({ summary: 'Get queue of pending campaigns and creatives' })
   async getQueue(@Req() req: any) {
     const stage = req.query?.stage as 'reviewer' | 'manager' | undefined;
-    const queue = await this.moderationService.getQueue(stage);
+    const queue = await this.moderationService.getQueue(stage, req.query?.page === undefined ? 1 : Number(req.query.page));
     return { status: 'success', data: queue };
+  }
+
+  @Get('items/:targetType/:id')
+  async itemDetail(@Param('targetType') type:string, @Param('id',new ParseUUIDPipe()) id:string, @Req() req:any, @Query('page') page?:string) {
+    return {status:'success',data:await this.moderationService.itemDetail(type,id,req.user.sub,page === undefined ? 1 : Number(page))};
+  }
+
+  @Get('campaigns/:id/review-requests/:requestId')
+  async reviewReceipt(@Param('id',new ParseUUIDPipe()) id:string, @Param('requestId',new ParseUUIDPipe()) requestId:string, @Req() req:any) {
+    return {status:'success',data:await this.moderationService.reviewReceipt(id,requestId,req.user.sub)};
   }
 
   @Get('campaigns/:id/submission')
@@ -164,7 +203,7 @@ export class ModerationController {
     return { status: 'success', data: result };
   }
 
-  @AdsRoles('ads_manager')
+  @AdsRoles('ads_manager', 'ads_admin', 'super_admin')
   @Post('campaigns/:id/manager-approval')
   @ApiOperation({ summary: 'Tier-2 manager approval by ADS ADMIN Reviewer Manager (pending_manager_approval -> active | rejected)' })
   async managerApprovalCampaign(

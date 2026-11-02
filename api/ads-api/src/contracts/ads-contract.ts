@@ -59,8 +59,11 @@ const asset = object({ assetId: str(), cdnUrl: nullable(str()), storageKey: str(
 const storedAsset = object({ id: str(), ownerId: str(), storageKey: str(), cdnUrl: nullable(str()), status: str(), bytes: num(), mimeType: str() }, ['id', 'status']);
 const decision = object({ id: str(), targetType: enumeration('campaign', 'creative', 'stack'), targetId: str(), reviewerId: str(), decision: str() });
 const reviewResult = object({ campaign, decision, stage: str(), nextStage: str(), live: bool(), isEmergencyOverride: bool() }, ['campaign', 'decision']);
-const stackReviewResult = object({ stack, decision, stage: str(), nextStage: str() }, ['stack', 'decision']);
-const creativeReviewResult = object({ creative, decision, stage: str(), nextStage: str() }, ['creative', 'decision']);
+const stackReviewResult = object({ campaign, targetId:str(),targetType:enumeration('stack'),stack, decision, stage: str(), nextStage: str() }, ['stack', 'decision']);
+const creativeReviewResult = object({ campaign,targetId:str(),targetType:enumeration('creative'),creative, decision, stage: str(), nextStage: str() }, ['creative', 'decision']);
+const claimRecord=object({id:str(),campaignId:str(),targetType:enumeration('creative','stack','campaign'),targetId:str(),submissionId:str(),contentRevision:num(),stage:enumeration('reviewer','manager'),claimantId:str(),claimedAt:str(),expiresAt:str(),releasedAt:nullable(str())});
+const claimRead=object({enabled:bool(),serverTime:str(),policy:object({ttlSeconds:num(),maxLifetimeSeconds:num(),renewal:str()}),claim:nullable(claimRecord)});
+const claimWrite=object({...claimRead.properties,outcome:enumeration('acquired','renewed','released','taken_over','held_by_you','held_by_other')});
 export const apiErrorSchema = object({ status: enumeration('error'), statusCode: { type: 'integer' },
   code: str(), message: str(), requestId: str(), path: str(), timestamp: str(), fieldErrors: { type: 'object', additionalProperties: array(str()) } }, ['status', 'statusCode', 'code', 'message', 'requestId']);
 const success = (data: Schema): Schema => object({ status: enumeration('success'), data });
@@ -103,11 +106,16 @@ const responses: Record<string, Record<string, Schema>> = {
     presign: object({ assetId: str(), storageKey: str(), cdnUrl: str(), uploadUrl: str(), expiresAt: str() }),
     complete: storedAsset, deleteAsset: storedAsset,
   },
-  ModerationController: { getQueue: object({ campaigns: array(object({ id: str(), advertiserId: str(), title: str(), status, moderationStatus,
+  ModerationController: { getClaim:claimRead,acquireClaim:claimWrite,renewClaim:claimWrite,releaseClaim:claimWrite,takeoverClaim:claimWrite,operationsSummary:object({scope:enumeration('all','creative','stack','campaign'),asOf:str(),reviewerCount:num(),managerCount:num(),submissionCount:num(),oldestSubmittedAt:nullable(str()),oldestAgeSeconds:nullable(num()),unknownAgeCount:num(),overdueCount:nullable(num()),targetStatus:enumeration('not_configured')}), getQueue: object({ campaigns: array(object({ id: str(), advertiserId: str(), title: str(), status, moderationStatus,
       pricingModel: str(), budgetUsdCents: num(), createdAt: str(),submissionId:str(),contentRevision:{type:'integer'},
-      totalCreativesCount: {type:'integer'}, approvedCreativesCount: {type:'integer'} })),
-      stacks: array(object({ id: str(), campaignId: str(), name: str(), campaignTitle: str(), reviewStatus: str(), submissionId: str(), contentRevision: {type:'integer'} })),
-      creatives: array(object({...creative.properties,submissionId:str(),contentRevision:{type:'integer'}},[...creative.required,'submissionId','contentRevision'])), totalPending: num() }, ['campaigns', 'creatives', 'totalPending']),
+      reviewClock:nullable(object({submittedAt:nullable(str()),stageStartedAt:nullable(str())})),totalCreativesCount: {type:'integer'}, approvedCreativesCount: {type:'integer'} })),
+      stacks: array(object({ id: str(), campaignId: str(), name: str(), campaignTitle: str(),reviewClock:nullable(object({submittedAt:nullable(str()),stageStartedAt:nullable(str())})), reviewStatus: str(), submissionId: str(), contentRevision: {type:'integer'} })),
+      creatives: array(object({...creative.properties,reviewClock:nullable(object({submittedAt:nullable(str()),stageStartedAt:nullable(str())})),submissionId:str(),contentRevision:{type:'integer'}},[...creative.required,'submissionId','contentRevision'])), totalPending: num(),asOf:str(), countScope:enumeration('loaded_page'), page:num(),pageSize:num(),hasMore:object({campaigns:bool(),stacks:bool(),creatives:bool()}) }, ['campaigns', 'creatives', 'totalPending']),
+    itemDetail:object({targetType:enumeration('creative','stack','campaign'),targetId:str(),campaign,
+      item:json(),content:nullable(json()),submissionId:nullable(str()),contentRevision:nullable(num()),
+      capabilities:object({reviewer:object({allowed:bool(),reason:nullable(str())}),manager:object({allowed:bool(),reason:nullable(str())})}),
+      reviewOptions:object({reasons:array(object({code:str(),label:str()})),noteMaxLength:num(),customExplanationAllowed:bool()}),creativeProgress:object({total:nullable(num()),approved:nullable(num())}),children:array(json()),targets:array(json()),history:array(json()),page:num(),hasMoreChildren:bool(),hasMoreHistory:bool()}),
+    reviewReceipt:object({requestId:str(),result:object({targetType:str(),targetId:str(),campaign,decision,stage:str(),nextStage:str(),live:bool()})}),
     submissionDetail:object({campaign:object(campaignProperties,campaign.required),submissionId:str(),contentRevision:{type:'integer'},snapshot:object({campaign:object(campaignProperties,campaign.required),stacks:array(stack),creatives:array(creative),targets:array(json())})}),
     changeAudit:array(object({id:str(),actorId:str(),action:str(),requestId:str(),priorRevision:{type:'integer'},contentRevision:{type:'integer'},previousSubmissionId:nullable(str()),submissionId:nullable(str()),beforeHash:str(),afterHash:str(),changedFields:array(str()),entityIds:array(str()),createdAt:str()})),
     reviewCreative: object({ creative, decision }),
@@ -175,7 +183,9 @@ export function documentAdsController(controller: AnyConstructor) {
       if (key.startsWith('3:') && !arg.data && types[arg.index] && types[arg.index] !== Object) documentValidatedDto(types[arg.index]);
     }
     if (name === 'updateStatus') apply(ApiBody({ schema: object({ status: enumeration('active', 'paused', 'trash') }) }));
-    if (name === 'getQueue') apply(ApiQuery({ name: 'stage', required: false, enum: ['reviewer', 'manager'] }));
+    if (['getQueue','getClaim'].includes(name)) apply(ApiQuery({ name: 'stage', required: false, enum: ['reviewer', 'manager'] }));
+    if (name === 'operationsSummary') apply(ApiQuery({name:'targetType',required:false,enum:['all','creative','stack','campaign']}));
+    if (['getQueue','itemDetail'].includes(name)) apply(ApiQuery({ name:'page',required:false,type:Number }));
     if (name === 'changeAudit') apply(ApiQuery({ name: 'offset', required: false, type: Number }));
     if (name === 'uploadDirect' || name === 'uploadPrepared') {
       const prepared = name === 'uploadPrepared';

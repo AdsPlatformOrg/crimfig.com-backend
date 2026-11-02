@@ -1,0 +1,13 @@
+{
+  "version": "moderation-claims-v1",
+  "claims": {
+    "ttlSeconds": 600,
+    "maxLifetimeSeconds": 3600,
+    "renewal": "manual",
+    "takeoverRoles": [
+      "ads_admin",
+      "super_admin"
+    ],
+    "takeoverReasonRequired": true
+  }
+}

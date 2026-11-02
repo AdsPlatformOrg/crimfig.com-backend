@@ -267,6 +267,13 @@
       "when": 1793538000002,
       "tag": "0038_funded_rewards_authority",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1793538000003,
+      "tag": "0039_moderation_advisory_claims",
+      "breakpoints": true
     }
   ]
 }

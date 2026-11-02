@@ -87,6 +87,7 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
     });
 
     it('rejects standard Review 2 if performed by the same reviewer as Review 1', async () => {
+      jest.spyOn(staffGrants,'rolesFor').mockImplementation(id => id === reviewer1Id ? ['ads_reviewer','ads_manager'] : []);
       const c = {
         id: campaignId,
         advertiserId,

@@ -936,7 +936,8 @@ export class CampaignsService {
       if (c.currentSubmissionId) await tx.update(adsCampaignSubmissions).set({ state:'superseded', updatedAt:new Date() }).where(eq(adsCampaignSubmissions.id,c.currentSubmissionId));
       const [updated] = await tx.update(adsCampaigns).set({ status:'draft', moderationStatus:'draft', currentSubmissionId:null,
         approvedSubmissionId:null, approvedRevision:null, primaryReviewerId:null, managerReviewerId:null, primaryReviewedAt:null, managerReviewedAt:null, updatedAt:new Date() }).where(eq(adsCampaigns.id,id)).returning();
-      await tx.update(adsCreatives).set({ reviewStatus:'pending', rejectionReason:null, reviewedAt:null }).where(eq(adsCreatives.campaignId,id));
+      await tx.update(adsCreatives).set({ reviewStatus:'pending', rejectionReason:null, reviewedAt:null, primaryReviewerId:null, managerReviewerId:null, primaryReviewedAt:null, managerReviewedAt:null }).where(eq(adsCreatives.campaignId,id));
+      await tx.update(adsCreativeStacks).set({reviewStatus:'pending',rejectionReason:null,primaryReviewerId:null,managerReviewerId:null,primaryReviewedAt:null,managerReviewedAt:null,updatedAt:new Date()}).where(eq(adsCreativeStacks.campaignId,id));
       return updated;
     }, true);
   }
@@ -1183,7 +1184,8 @@ export class CampaignsService {
       if(c.contentRevision!==intent.contentRevision || c.submissionIntentId!==intent.id || ['suspended','trash','completed','cancelled'].includes(c.status)) throw new ConflictException('Funding is retained for reconciliation; this revision cannot enter review.');
       const before=await this.workflow.snapshot(tx,c), now=new Date();
       const [updated]=await tx.update(adsCampaigns).set({status:'paused',moderationStatus:'pending_primary_review',currentSubmissionId:intent.id,submissionIntentId:null,submittedAt:now,approvedSubmissionId:null,approvedRevision:null,primaryReviewerId:null,managerReviewerId:null,primaryReviewedAt:null,managerReviewedAt:null,updatedAt:now}).where(eq(adsCampaigns.id,campaignId)).returning();
-      await tx.update(adsCreatives).set({reviewStatus:'pending',rejectionReason:null,reviewedAt:null}).where(and(eq(adsCreatives.campaignId,campaignId),sql`${adsCreatives.status} <> 'archived'`));
+      await tx.update(adsCreatives).set({reviewStatus:'pending',rejectionReason:null,reviewedAt:null,primaryReviewerId:null,managerReviewerId:null,primaryReviewedAt:null,managerReviewedAt:null}).where(and(eq(adsCreatives.campaignId,campaignId),sql`${adsCreatives.status} <> 'archived'`));
+      await tx.update(adsCreativeStacks).set({reviewStatus:'pending',rejectionReason:null,primaryReviewerId:null,managerReviewerId:null,primaryReviewedAt:null,managerReviewedAt:null,updatedAt:new Date()}).where(eq(adsCreativeStacks.campaignId,campaignId));
       await tx.update(adsCampaignSubmissions).set({state:'submitted',submittedAt:now,updatedAt:now,fundingReference:{transactionId:receipt.transactionId,operationId:receipt.operationId,escrowId:receipt.escrow.id}}).where(eq(adsCampaignSubmissions.id,intent.id));
       await this.workflow.audit(tx,before,await this.workflow.snapshot(tx,updated),advertiserId,'submit_review',control.requestId,['currentSubmissionId','moderationStatus']);
       return updated;
