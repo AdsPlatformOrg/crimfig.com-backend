@@ -11,7 +11,7 @@ const intent = { id: 'intent', userId: owner, reference: 'crimfig-fund-fixture',
   metadata: JSON.stringify({ fundingVersion: 2, expectedEmail: 'owner@example.test', saveCard: false }) };
 const proof = () => ({ reference: intent.reference, status: 'success', currency: 'NGN', domain: 'test', amount: 50000,
   metadata: { transactionId: intent.id, userId: owner }, customer: { email: 'owner@example.test' } });
-const provider = () => ({ paymentDomain: () => 'test', verifyWebhookSignature: () => true,
+const provider = () => ({ paymentDomain: () => 'test', assertFundingConfiguration:jest.fn(), verifyWebhookSignature: () => true,
   verifyTransaction: jest.fn(async () => proof()), initializeTransaction: jest.fn(), chargeAuthorization: jest.fn() });
 const fx = { getUsdToNgnRate: async () => ({ rateId: 'persisted-quote', rate: 100 }),
   convertUsdCentsToNgn: async (cents: number) => ({ ngnKobo: cents * 100 }) };
@@ -185,21 +185,16 @@ test.each([NaN, Infinity, -1, 0.99, 1.001, 21474836.48])('invalid USD amount %s 
   await expect(new WalletService(store.db, fx as any, paystack as any).initializeFunding({ requestId, userId: owner, userEmail: 'owner@example.test', amountUsd })).rejects.toThrow();
   expect(paystack.initializeTransaction).not.toHaveBeenCalled(); expect(store.state().intents).toHaveLength(1);
 });
-test('provider transport sends stored reference and NGN currency once, rejecting missing keys/test keys in production', async () => {
-  const previousKey = process.env.PAYSTACK_SECRET_KEY, previousMode = process.env.NODE_ENV, originalFetch = global.fetch;
+test('provider transport sends stored reference/NGN through the isolated broker and enforces explicit mode', async () => {
+  const previous={...process.env};
   try {
-    delete process.env.PAYSTACK_SECRET_KEY; expect(() => new PaystackService().paymentDomain()).toThrow();
-    process.env.PAYSTACK_SECRET_KEY = 'sk_test_fixture'; process.env.NODE_ENV = 'production'; expect(() => new PaystackService().paymentDomain()).toThrow();
-    process.env.NODE_ENV = 'test';
-    const fetch = jest.fn(async () => ({ ok: true, json: async () => ({ status: true, data: { reference: intent.reference } }) })); global.fetch = fetch as any;
-    await new PaystackService().initializeTransaction({ email: 'owner@example.test', amountKobo: 50000, reference: intent.reference });
-    expect(fetch).toHaveBeenCalledTimes(1); const options = (fetch.mock.calls as any)[0][1];
-    expect(options).toMatchObject({ redirect: 'error', signal: expect.any(AbortSignal) }); expect(JSON.parse(options.body)).toMatchObject({ currency: 'NGN', reference: intent.reference, amount: 50000 });
-  } finally {
-    global.fetch = originalFetch;
-    if (previousKey === undefined) delete process.env.PAYSTACK_SECRET_KEY; else process.env.PAYSTACK_SECRET_KEY = previousKey;
-    if (previousMode === undefined) delete process.env.NODE_ENV; else process.env.NODE_ENV = previousMode;
-  }
+    delete process.env.PAYSTACK_SECRET_KEY;delete process.env.PAYSTACK_MODE;expect(()=>new PaystackService().paymentDomain()).toThrow();
+    process.env.NODE_ENV='production';process.env.RAILWAY_ENVIRONMENT_NAME='production';process.env.PAYSTACK_MODE='test';expect(()=>new PaystackService().paymentDomain()).toThrow();
+    process.env.RAILWAY_ENVIRONMENT_NAME='staging';
+    const service=new PaystackService();const request=jest.spyOn((service as any).broker,'request').mockResolvedValue(new Response(JSON.stringify({status:true,data:{reference:intent.reference}}),{status:200}));
+    await service.initializeTransaction({email:'owner@example.test',amountKobo:50000,reference:intent.reference});
+    expect(request).toHaveBeenCalledTimes(1);const options=(request.mock.calls as any)[0][1];expect(options).toMatchObject({redirect:'error',signal:expect.any(AbortSignal)});expect(JSON.parse(options.body)).toMatchObject({currency:'NGN',reference:intent.reference,amount:50000});expect(process.env.PAYSTACK_SECRET_KEY).toBeUndefined();
+  } finally {for(const key of Object.keys(process.env))if(!(key in previous))delete process.env[key];Object.assign(process.env,previous);jest.restoreAllMocks();}
 });
 
 const initializeInput = { requestId, userId: owner, userEmail: 'owner@example.test', amountUsd: 5, saveCard: false };
@@ -249,4 +244,12 @@ test('invalid request identity is rejected before provider or quote work', async
   const store = database(), paystack = provider(); const wallet = new WalletService(store.db, fx as any, paystack as any);
   for (const request of ['', 'not-a-uuid', undefined]) await expect(wallet.initializeFunding({...initializeInput,requestId:request as any})).rejects.toThrow('UUID');
   expect(paystack.initializeTransaction).not.toHaveBeenCalled(); expect(store.state().intents).toHaveLength(1);
+});
+
+
+test('PLAN0076 independent new deposit does not replay an earlier uncertain request',async()=>{
+ const store=database(),paystack=provider();paystack.initializeTransaction.mockRejectedValueOnce(Error('lost response')).mockImplementation(async(input:any)=>checkoutSession(input.reference));const service=new WalletService(store.db,fx as any,paystack as any);
+ await expect(service.initializeFunding(initializeInput)).rejects.toBeInstanceOf(ServiceUnavailableException);
+ const next=await service.initializeFunding({...initializeInput,requestId:'12345678-1234-4234-8234-123456789098'});const previous=await service.recoverFundingRequest(owner,requestId);
+ expect(next.reference).not.toBe(previous.reference);expect(paystack.initializeTransaction).toHaveBeenCalledTimes(2);expect(store.state().wallets[0].balanceUsdCents).toBe(0);
 });

@@ -107,7 +107,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     expect((await pool.query('select count(*)::int count from ads_reels_consents')).rows[0].count).toBe(1);
   });
   const fx = () => ({getUsdToNgnRate:async()=>({rateId,rate:100}),convertUsdCentsToNgn:async(cents:number)=>({ngnKobo:cents*100})});
-  const provider = () => ({paymentDomain:()=> 'test',initializeTransaction:jest.fn(async (input:any)=>({reference:input.reference,authorization_url:'https://checkout.paystack.com/fixture',access_code:'fixture'}))});
+  const provider = () => ({paymentDomain:()=> 'test',assertFundingConfiguration:jest.fn(),initializeTransaction:jest.fn(async (input:any)=>({reference:input.reference,authorization_url:'https://checkout.paystack.com/fixture',access_code:'fixture'}))});
   const service = (psp:any=provider()) => new WalletService(db,fx() as any,psp);
   async function intent(cents=500) {
     const [row]=await db.insert(schema.billingTransactions).values({userId:owner,type:'wallet_fund',status:'pending',provider:'paystack',reference:'fixture-'+randomUUID(),amountUsdCents:cents,amountNgnKobo:cents*100,exchangeRateId:rateId,metadata:JSON.stringify({fundingVersion:2,expectedEmail:'owner@example.test',saveCard:false})}).returning();return row;

@@ -6,6 +6,7 @@ import { billingWallets, billingTransactions, billingSavedCards } from '@crimfig
 import { eq, sql, and } from 'drizzle-orm';
 import { ExchangeRateService } from '../exchange-rate/exchange-rate.service';
 import { createHash } from 'crypto';
+import {fundingCallback} from './funding-callback';
 import { PaystackService } from '../providers/paystack.service';
 
 @Injectable()
@@ -105,20 +106,23 @@ export class WalletService {
     const reference = this.fundingRequestReference(params.userId, params.requestId);
     if (params.savedCardId) throw new ServiceUnavailableException('Saved-card charging is unavailable pending its durable operation contract');
     this.paystackService.paymentDomain(); // Fail before storing intent when key/mode is invalid.
-    const callback = new URL(process.env.BILLING_WEB_URL || (process.env.NODE_ENV === 'production' ? 'https://billing.crimfig.com/' : 'http://localhost:3007/'));
-    if (callback.username || callback.password || callback.search || callback.hash || callback.pathname !== '/' ||
-        !(callback.protocol === 'https:' || (process.env.NODE_ENV !== 'production' && callback.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(callback.hostname)))) {
-      throw new ServiceUnavailableException('Billing funding return URL is not configured safely');
-    }
-    if (params.callbackUrl && params.callbackUrl !== callback.href) throw new BadRequestException('Funding must return to the configured Billing page');
+    const callback = new URL(fundingCallback(params.callbackUrl));
     const expectedEmail = params.userEmail.toLowerCase().trim();
     const binding = { amountUsdCents: usdCents, saveCard: params.saveCard === true, callbackUrl: callback.href, expectedEmail, domain: this.paystackService.paymentDomain() };
     const existing = await this.readFundingRequest(params.userId, params.requestId);
     if (existing) return this.fundingRequestView(existing, binding);
-    const fx = await this.fxService.getUsdToNgnRate();
-    const conversion = await this.fxService.convertUsdCentsToNgn(usdCents, fx);
-    if (!fx.rateId || !Number.isFinite(fx.rate) || fx.rate <= 0 || !Number.isSafeInteger(conversion.ngnKobo) ||
-        conversion.ngnKobo <= 0 || conversion.ngnKobo > 2147483647) throw new ServiceUnavailableException('A valid persisted funding quote is required');
+    try{this.paystackService.assertFundingConfiguration();}catch(error){
+      const data=error instanceof ServiceUnavailableException?error.getResponse():null;
+      const code=data&&typeof data==='object'&&'code' in data?String(data.code):'FUNDING_GATEWAY_NOT_READY';
+      throw new ServiceUnavailableException({code:['PROVIDER_GATEWAY_NOT_CONFIGURED','PROVIDER_WORKLOAD_NOT_CONFIGURED','PROVIDER_RECEIPT_KEYS_NOT_CONFIGURED'].includes(code)?code:'FUNDING_GATEWAY_NOT_READY',message:'Checkout setup is unavailable. Contact support.',fundingOutcome:'not_started'});
+    }
+    const {fx,conversion}=await (async()=>{
+      try{
+        const fx=await this.fxService.getUsdToNgnRate(),conversion=await this.fxService.convertUsdCentsToNgn(usdCents,fx);
+        if(!fx.rateId||!Number.isFinite(fx.rate)||fx.rate<=0||!Number.isSafeInteger(conversion.ngnKobo)||conversion.ngnKobo<=0||conversion.ngnKobo>2147483647)throw new Error('Invalid quote');
+        return {fx,conversion};
+      }catch{throw new ServiceUnavailableException({code:'FUNDING_QUOTE_UNAVAILABLE',message:'A fresh persisted funding quote is unavailable.',fundingOutcome:'not_started'});}
+    })();
     const claim = await this.db.transaction(async tx => {
       await tx.execute(sql`set local lock_timeout = '5s'`);
       await tx.execute(sql`set local statement_timeout = '8s'`);
@@ -160,7 +164,7 @@ export class WalletService {
       }, { isolationLevel: 'read committed' });
       return this.fundingRequestView(recorded, binding);
     } catch {
-      throw new ServiceUnavailableException({ message: 'Funding initialization could not be confirmed; recover this request before starting another payment',
+      throw new ServiceUnavailableException({ message: 'Checkout could not be confirmed. Check this payment or retry the same request.',code:'FUNDING_INITIALIZATION_UNCONFIRMED',fundingOutcome:'unknown',
         requestId: params.requestId.toLowerCase(), reference, transactionId: claim.intent.id });
     }
   }

@@ -69,6 +69,8 @@ export class PaystackService {
   private readonly request = (url: string, init?: RequestInit) => this.broker.request(url, init);
   private readonly baseUrl = 'https://api.paystack.co';
 
+  assertFundingConfiguration(){this.paymentDomain();this.broker.assertConfigured();}
+
   paymentDomain(): 'test' | 'live' {
     const mode = process.env.PAYSTACK_MODE === 'live' ? 'live' : process.env.PAYSTACK_MODE === 'test' ? 'test' : null;
     const staging = process.env.RAILWAY_ENVIRONMENT_NAME === 'staging';
@@ -125,7 +127,7 @@ export class PaystackService {
       }
       return json.data;
     } catch (err: any) {
-      this.logger.error(`initializeTransaction error: ${err.message}`);
+      this.logger.error('Provider checkout initialization could not be confirmed');
       throw err;
     }
   }
@@ -149,7 +151,7 @@ export class PaystackService {
       }
       return json.data;
     } catch (err: any) {
-      this.logger.error(`verifyTransaction error: ${err.message}`);
+      this.logger.error('Provider payment verification could not be confirmed');
       throw err;
     }
   }

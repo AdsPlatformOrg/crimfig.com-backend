@@ -17,8 +17,8 @@ describe('Paystack deployment environment isolation', () => {
     process.env.PAYSTACK_MODE = 'live'; process.env.PAYSTACK_SECRET_KEY = 'sk_live_fixture';
     expect(() => new PaystackService().paymentDomain()).toThrow();
   });
-  test('a configured mode must match the key in development too', () => {
+  test('Billing uses explicit mode without consuming a legacy local provider secret', () => {
     process.env.NODE_ENV = 'development'; process.env.PAYSTACK_MODE = 'live'; process.env.PAYSTACK_SECRET_KEY = 'sk_test_fixture';
-    expect(() => new PaystackService().paymentDomain()).toThrow();
+    expect(new PaystackService().paymentDomain()).toBe('live');
   });
 });
