@@ -1077,7 +1077,7 @@ export class AdstationService {
       conditions.push(
         or(
           ilike(adsAuctionDecisions.slotTagId, q),
-          ilike(adsAuctionDecisions.requestId, q),
+          sql`${adsAuctionDecisions.requestId}::text ILIKE ${q}`,
           ilike(adsAuctionDecisions.inventoryClass, q),
         ),
       );
