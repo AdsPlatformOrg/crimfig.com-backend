@@ -500,4 +500,24 @@ export class AdstationController {
     const result = await this.adstationService.adminCheckSlotInstallation(id);
     return { status: 'success', data: result };
   }
+
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
+  @Post('admin/slots/:id/lifecycle')
+  @ApiOperation({
+    summary: 'Admin: Transition slot lifecycle status with validation and audit trail',
+  })
+  async adminUpdateSlotLifecycle(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('targetLifecycle') targetLifecycle: 'active' | 'testing' | 'paused' | 'suspended',
+    @Body('reason') reason: string,
+    @Req() req: any,
+  ) {
+    const result = await this.adstationService.adminUpdateSlotLifecycle(
+      id,
+      targetLifecycle,
+      reason,
+      req.user?.sub,
+    );
+    return { status: 'success', data: result };
+  }
 }

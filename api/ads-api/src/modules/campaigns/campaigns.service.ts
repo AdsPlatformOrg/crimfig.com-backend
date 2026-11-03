@@ -1274,6 +1274,8 @@ export class CampaignsService {
           title: adsCampaigns.title,
           advertiserId: adsCampaigns.advertiserId,
           advertiserEmail: schema.users.email,
+          advertiserAccountStatus: schema.users.status,
+          advertiserEmailVerified: schema.users.isEmailVerified,
           status: adsCampaigns.status,
           moderationStatus: adsCampaigns.moderationStatus,
           budgetUsdCents: adsCampaigns.budgetUsdCents,
@@ -1385,6 +1387,22 @@ export class CampaignsService {
       report.add('CAMPAIGN_ESCROW', funded ? 'eligible' : 'blocked',
         funded ? 'Active escrow and campaign budget are recorded. Billing checks capacity at delivery.'
           : 'An active funded escrow and remaining budget are required.', 'Advertiser', 'Campaign escrow');
+
+      // PLAN-0089: Explicit Billing Opportunity Reservation Eligibility Check
+      const billingAccountEligible = account?.status === 'ACTIVE';
+      report.add(
+        'BILLING_RESERVATION_ELIGIBILITY',
+        billingAccountEligible && funded ? 'eligible' : 'blocked',
+        !billingAccountEligible
+          ? 'Billing reservation authority requires the advertiser account to be ACTIVE. Current status: ' + (account?.status || 'UNKNOWN') + '.'
+          : !funded
+            ? 'Billing reservation requires active campaign escrow with unconsumed budget.'
+            : 'Advertiser account is ACTIVE and campaign escrow is funded. Billing can reserve delivery opportunities.',
+        !billingAccountEligible ? 'Advertiser' : 'Billing Operations',
+        'Billing Opportunity Reservation Authority',
+        !billingAccountEligible && !account?.verified ? 'verify_email' : undefined
+      );
+
       const releaseReady = paidDeliveryReadiness().ready;
       report.add('ADS_RELEASE', releaseReady ? 'eligible' : 'blocked',
         releaseReady ? 'Ads release checks pass. Billing checks its own release at reservation.'

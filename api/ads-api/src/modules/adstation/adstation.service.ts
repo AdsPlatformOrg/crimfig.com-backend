@@ -1476,4 +1476,99 @@ export class AdstationService {
       };
     });
   }
+
+
+  /**
+   * Admin: Transition slot lifecycle (e.g. testing -> active) with prerequisite validation and audit trail.
+   */
+  async adminUpdateSlotLifecycle(
+    slotId: string,
+    targetLifecycle: 'active' | 'testing' | 'paused' | 'suspended',
+    reason: string,
+    reviewerId?: string,
+  ) {
+    if (!['active', 'testing', 'paused', 'suspended'].includes(targetLifecycle)) {
+      throw new BadRequestException('Invalid target lifecycle status');
+    }
+    if (!reason || reason.trim().length < 5) {
+      throw new BadRequestException('A reason of at least 5 characters is required for lifecycle transitions.');
+    }
+
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout='5s'`);
+      await tx.execute(sql`set local statement_timeout='8s'`);
+
+      const [slot] = await tx
+        .select()
+        .from(adstationSlots)
+        .where(eq(adstationSlots.id, slotId))
+        .for('update')
+        .limit(1);
+
+      if (!slot) {
+        throw new NotFoundException('AdStation slot not found');
+      }
+
+      if (slot.lifecycleStatus === targetLifecycle) {
+        return { message: `Slot is already in ${targetLifecycle} lifecycle`, slot };
+      }
+
+      const [website] = await tx
+        .select()
+        .from(adsPromoterWebsites)
+        .where(eq(adsPromoterWebsites.id, slot.websiteId))
+        .for('share')
+        .limit(1);
+
+      if (!website) {
+        throw new NotFoundException('Parent website not found');
+      }
+
+      // If activating, validate all supply prerequisites
+      if (targetLifecycle === 'active') {
+        if (website.verificationStatus !== 'verified' || !website.verificationExpiresAt || website.verificationExpiresAt <= new Date()) {
+          throw new BadRequestException('Cannot activate slot: Parent website domain ownership verification is absent or expired.');
+        }
+        if (website.policyStatus !== 'approved') {
+          throw new BadRequestException(`Cannot activate slot: Parent website suitability policy is "${website.policyStatus}". Must be "approved".`);
+        }
+        if (website.isSuspended) {
+          throw new ForbiddenException('Cannot activate slot: Parent website is suspended.');
+        }
+        if (slot.installationStatus !== 'verified') {
+          throw new BadRequestException(`Cannot activate slot: Slot installation status is "${slot.installationStatus}". Verified embed telemetry is required.`);
+        }
+      }
+
+      const previousLifecycle = slot.lifecycleStatus;
+      const [updatedSlot] = await tx
+        .update(adstationSlots)
+        .set({
+          lifecycleStatus: targetLifecycle,
+          isActive: targetLifecycle === 'active' || targetLifecycle === 'testing',
+          updatedAt: new Date(),
+        })
+        .where(eq(adstationSlots.id, slotId))
+        .returning();
+
+      // Record immutable audit history
+      await tx.insert(adsSupplyStateHistory).values({
+        entityType: 'slot',
+        entityId: slotId,
+        dimension: 'lifecycle_status',
+        fromState: previousLifecycle,
+        toState: targetLifecycle,
+        actorId: reviewerId || null,
+        actorRole: 'ads_admin',
+        reason: reason.trim(),
+      });
+
+      return {
+        message: `Slot lifecycle transitioned from ${previousLifecycle} to ${targetLifecycle}.`,
+        previousLifecycle,
+        currentLifecycle: targetLifecycle,
+        slot: updatedSlot,
+      };
+    });
+  }
 }
