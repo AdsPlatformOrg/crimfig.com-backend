@@ -1240,7 +1240,7 @@ export class DeliveryService {
         earlyFallbackReason = 'TRAFFIC_CONTROL_RESTRICTION';
       } else if (riskAssessment.trafficRiskStatus !== 'normal') {
         earlyFallbackReason = 'TRAFFIC_RISK_' + String(riskAssessment.trafficRiskStatus).toUpperCase();
-      } else if (requestHeaders?.consentState === 'denied' || (requestHeaders?.measurementConsent === false)) {
+      } else if (requestHeaders?.consentState === 'denied') {
         earlyFallbackStage = 'consent_validation';
         earlyFallbackReason = 'MEASUREMENT_CONSENT_DENIED';
       }
