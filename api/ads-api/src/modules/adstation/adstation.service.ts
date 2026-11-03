@@ -1,5 +1,5 @@
 import { readinessReport, websiteReadiness, installationReadiness } from '../delivery/readiness-report';
-import { slotDeliveryDiagnostics } from '../delivery/paid-delivery-policy';
+import { slotDeliveryDiagnostics, paidDeliveryDiagnostics } from '../delivery/paid-delivery-policy';
 import {
   Injectable,
   Inject,
@@ -1146,10 +1146,13 @@ export class AdstationService {
       slot = s || null;
     }
 
+    const platformDiagnostics = paidDeliveryDiagnostics();
+
     return {
       ...row,
       website,
       slot,
+      platformDiagnostics,
       billingPriceNanos:
         typeof row.billingPriceNanos === 'bigint'
           ? row.billingPriceNanos.toString()
