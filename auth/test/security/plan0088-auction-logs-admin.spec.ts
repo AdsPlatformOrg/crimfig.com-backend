@@ -1,4 +1,4 @@
-import { AdstationService } from '../../../api/ads-api/src/modules/adstation/adstation.service';
+import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
 
 describe('PLAN-0088: Admin Console Auction Logs & Trace Inspector', () => {
   let mockDb: any;
@@ -34,7 +34,7 @@ describe('PLAN-0088: Admin Console Auction Logs & Trace Inspector', () => {
       mockQuery.where.mockResolvedValueOnce([{ count: 250 }]);
       mockQuery.offset.mockResolvedValueOnce(records);
 
-      const service = new (AdstationService as any)(mockDb);
+      const service = new (AdsOperationsService as any)(mockDb);
       const result = await service.listAuctionDecisions({});
 
       expect(result.pageSize).toBe(100);
@@ -48,7 +48,7 @@ describe('PLAN-0088: Admin Console Auction Logs & Trace Inspector', () => {
       mockQuery.where.mockResolvedValueOnce([{ count: 12 }]);
       mockQuery.offset.mockResolvedValueOnce([{ requestId: 'req-house-1', inventoryClass: 'house' }]);
 
-      const service = new (AdstationService as any)(mockDb);
+      const service = new (AdsOperationsService as any)(mockDb);
       const result = await service.listAuctionDecisions({ inventoryClass: 'house', pageSize: 10 });
 
       expect(result.pageSize).toBe(10);
@@ -61,7 +61,7 @@ describe('PLAN-0088: Admin Console Auction Logs & Trace Inspector', () => {
       mockQuery.where.mockResolvedValueOnce([{ count: 1 }]);
       mockQuery.offset.mockResolvedValueOnce([{ requestId: 'req-specific-123', slotTagId: 'cf-slot-network-1dce0fa5ce5342cd' }]);
 
-      const service = new (AdstationService as any)(mockDb);
+      const service = new (AdsOperationsService as any)(mockDb);
       const result = await service.listAuctionDecisions({ search: '1dce0fa5ce5342cd' });
 
       expect(result.total).toBe(1);
@@ -73,7 +73,7 @@ describe('PLAN-0088: Admin Console Auction Logs & Trace Inspector', () => {
     it('returns null when auction decision does not exist', async () => {
       mockQuery.limit.mockResolvedValueOnce([]); // no decision found
 
-      const service = new (AdstationService as any)(mockDb);
+      const service = new (AdsOperationsService as any)(mockDb);
       const result = await service.getAuctionDecision('non-existent-uuid');
       expect(result).toBeNull();
     });
@@ -115,7 +115,7 @@ describe('PLAN-0088: Admin Console Auction Logs & Trace Inspector', () => {
         .mockResolvedValueOnce([websiteRow]) // website query
         .mockResolvedValueOnce([slotRow]); // slot query
 
-      const service = new (AdstationService as any)(mockDb);
+      const service = new (AdsOperationsService as any)(mockDb);
       const result = await service.getAuctionDecision('req-valid-1');
 
       expect(result.requestId).toBe('req-valid-1');

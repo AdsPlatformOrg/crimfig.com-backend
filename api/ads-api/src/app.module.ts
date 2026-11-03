@@ -1,3 +1,4 @@
+import { AdsOperationsModule } from './modules/ads-operations/ads-operations.module';
 import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
 import { DashboardAuthModule, ErrorMonitorCaptureInterceptor, DurableErrorMonitorSink, ErrorMonitorMetadataGuard } from '@crimfig/shared';
 import { AdsAccessGuard } from './modules/security/ads-access.guard';
@@ -44,6 +45,7 @@ import { AdvertiserMilestonesModule } from './modules/advertiser-milestones/adve
     DisputesModule,
     EcosystemModule,
     AdstationModule,
+    AdsOperationsModule,
     AdvertiserMilestonesModule,
   ],
   providers: [

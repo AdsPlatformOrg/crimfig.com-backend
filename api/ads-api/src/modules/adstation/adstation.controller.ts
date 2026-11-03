@@ -1,67 +1,24 @@
-import { AdsRoles } from '../security/ads-staff-grants';
 import {
   Controller,
-  ParseUUIDPipe,
   Get,
   Post,
   Put,
-  Patch,
   Body,
   Param,
-  Query,
   Req,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
-import { AdstationService, UpdateAdstationSlotDto } from './adstation.service';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { AdstationService } from './adstation.service';
+import { PublisherInventoryController } from '../publisher-inventory/publisher-inventory.controller';
+export { CreateSlotDto } from '../publisher-inventory/publisher-inventory.controller';
 import { PromotersService } from '../promoters/promoters.service';
-import { CreateSetupCheckDto, SetupChecksService } from './setup-checks.service';
+import { SetupChecksService } from './setup-checks.service';
 import {
   IsString,
   IsIn,
   IsOptional,
   IsNumber,
-  IsBoolean,
-  IsArray,
 } from 'class-validator';
-
-export class CreateSlotDto {
-  @IsString()
-  websiteId: string;
-
-  @IsString()
-  name: string;
-
-  @IsIn(['consideration', 'direct', 'network', 'hybrid'])
-  slotType: 'consideration' | 'direct' | 'network' | 'hybrid';
-
-  @IsOptional()
-  @IsString()
-  format?: string;
-
-  @IsOptional()
-  @IsString()
-  slotDeliveryPreference?: string;
-
-  @IsOptional()
-  @IsNumber()
-  width?: number;
-
-  @IsOptional()
-  @IsNumber()
-  height?: number;
-
-  @IsOptional()
-  @IsBoolean()
-  responsive?: boolean;
-
-  @IsOptional()
-  @IsArray()
-  allowedAdTypes?: string[];
-
-  @IsOptional()
-  @IsArray()
-  allowedPresetIds?: string[];
-}
 
 export class UpdateDeliveryPreferenceDto {
   @IsIn(['high', 'medium', 'low'])
@@ -100,122 +57,12 @@ export class CreateDirectDealDto {
 
 @ApiTags('AdStation')
 @Controller('adstation')
-export class AdstationController {
+export class AdstationController extends PublisherInventoryController {
   constructor(
     private readonly adstationService: AdstationService,
-    private readonly promotersService: PromotersService,
-    private readonly setupChecks: SetupChecksService,
-  ) {}
-
-  @Post('websites/:websiteId/setup-checks')
-  @ApiOperation({ summary: 'Create an owner-scoped, challenge-bound SDK setup check (idempotent by requestId)' })
-  async createSetupCheck(@Req() req: any, @Param('websiteId') websiteId: string, @Body() dto: CreateSetupCheckDto) {
-    const promoter = await this.promotersService.getOrCreatePromoter(req.user.sub, 'WEBSITE');
-    return { status: 'success', data: await this.setupChecks.create(promoter.id, websiteId, dto) };
-  }
-
-  @Get('setup-checks/:checkId')
-  @ApiOperation({ summary: 'Read explicit SDK/placement/telemetry setup evidence for an owned check' })
-  async getSetupCheck(@Req() req: any, @Param('checkId') checkId: string) {
-    const promoter = await this.promotersService.getOrCreatePromoter(req.user.sub, 'WEBSITE');
-    return { status: 'success', data: await this.setupChecks.get(promoter.id, checkId) };
-  }
-  @Get('websites/:websiteId/slots')
-  @ApiOperation({ summary: 'List AdStation slots for website' })
-  async getSlots(@Req() req: any, @Param('websiteId') websiteId: string) {
-    const userId = req.user.sub;
-    const promoter = await this.promotersService.getOrCreatePromoter(
-      userId,
-      'WEBSITE',
-    );
-    const slots = await this.adstationService.getSlots(promoter.id, websiteId);
-    return { status: 'success', data: slots };
-  }
-
-  @Post('slots')
-  @ApiOperation({
-    summary: 'Create a canonical AdStation slot (consideration, network, hybrid, or direct)',
-  })
-  async createSlot(@Req() req: any, @Body() dto: CreateSlotDto) {
-    const userId = req.user.sub;
-    const promoter = await this.promotersService.getOrCreatePromoter(
-      userId,
-      'WEBSITE',
-    );
-    const slot = await this.adstationService.createSlot(promoter.id, dto);
-    return { status: 'success', data: slot };
-  }
-
-  @Patch('slots/:slotId')
-  @ApiOperation({ summary: 'Update AdStation slot lifecycle or configuration' })
-  async updateSlot(
-    @Req() req: any,
-    @Param('slotId') slotId: string,
-    @Body() dto: UpdateAdstationSlotDto,
-  ) {
-    const userId = req.user.sub;
-    const promoter = await this.promotersService.getOrCreatePromoter(
-      userId,
-      'WEBSITE',
-    );
-    const slot = await this.adstationService.updateSlot(
-      promoter.id,
-      slotId,
-      dto,
-    );
-    return { status: 'success', data: slot };
-  }
-
-  @Get('slots/:slotId/embed')
-  @ApiOperation({
-    summary: 'Get environment-safe HTML and Next.js embed snippet for a slot',
-  })
-  async getSlotEmbed(@Req() req: any, @Param('slotId',new ParseUUIDPipe()) slotId: string) {
-    const userId = req.user.sub;
-    const promoter = await this.promotersService.getExistingPromoter(userId);
-    const embed = await this.adstationService.getSlotEmbedInstructions(
-      promoter.id,
-      slotId,
-    );
-    return { status: 'success', data: embed };
-  }
-
-  @Post('slots/:slotId/check-installation')
-  @ApiOperation({
-    summary: 'Run evidence-driven installation check for a canonical slot',
-  })
-  async checkSlotInstallation(
-    @Req() req: any,
-    @Param('slotId') slotId: string,
-  ) {
-    const userId = req.user.sub;
-    const promoter = await this.promotersService.getOrCreatePromoter(
-      userId,
-      'WEBSITE',
-    );
-    const result = await this.adstationService.checkSlotInstallation(
-      promoter.id,
-      slotId,
-    );
-    return { status: 'success', data: result };
-  }
-
-  @Get('slots/:slotId/diagnostics')
-  @ApiOperation({
-    summary: 'Get safe promoter-facing telemetry and diagnostics for a slot',
-  })
-  async getSlotDiagnostics(@Req() req: any, @Param('slotId') slotId: string) {
-    const userId = req.user.sub;
-    const promoter = await this.promotersService.getOrCreatePromoter(
-      userId,
-      'WEBSITE',
-    );
-    const diagnostics = await this.adstationService.getSlotDiagnostics(
-      promoter.id,
-      slotId,
-    );
-    return { status: 'success', data: diagnostics };
-  }
+    promotersService: PromotersService,
+    setupChecks: SetupChecksService,
+  ) { super(adstationService, promotersService, setupChecks); }
 
   @Post('websites/:websiteId/slots/:slotId/verify-consideration')
   @ApiOperation({ summary: 'Verify consideration slot status' })
@@ -358,166 +205,4 @@ export class AdstationController {
     return { status: 'success', data: result };
   }
 
-  @AdsRoles('ads_admin', 'super_admin')
-  @Post('admin/websites/:websiteId/suspend')
-  @ApiOperation({ summary: 'Super Admin: Suspend website direct deal serving' })
-  async suspendWebsite(
-    @Req() req: any,
-    @Param('websiteId') websiteId: string,
-    @Body() dto: { reason: string },
-  ) {
-    const result = await this.adstationService.updateWebsiteAdstationStatus(
-      websiteId,
-      true,
-      dto.reason,
-      req.user?.sub,
-    );
-    return { status: 'success', data: result };
-  }
-
-  @AdsRoles('ads_admin', 'super_admin')
-  @Post('admin/websites/:websiteId/reinstate')
-  @ApiOperation({
-    summary: 'Super Admin: Reinstate website direct deal serving',
-  })
-  async reinstateWebsite(
-    @Req() req: any,
-    @Param('websiteId') websiteId: string,
-  ) {
-    const result = await this.adstationService.updateWebsiteAdstationStatus(
-      websiteId,
-      false,
-      undefined,
-      req.user?.sub,
-    );
-    return { status: 'success', data: result };
-  }
-
-  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
-  @Get('admin/websites')
-  @ApiOperation({ summary: 'Admin: List all registered promoter websites with pagination, search and filters' })
-  @ApiQuery({ name: 'page', required: false, type: Number })
-  @ApiQuery({ name: 'pageSize', required: false, type: Number })
-  @ApiQuery({ name: 'search', required: false, type: String })
-  @ApiQuery({ name: 'policyStatus', required: false, type: String })
-  @ApiQuery({ name: 'verificationStatus', required: false, type: String })
-  async adminListWebsites(
-    @Query('page') page?: string,
-    @Query('pageSize') pageSize?: string,
-    @Query('search') search?: string,
-    @Query('policyStatus') policyStatus?: string,
-    @Query('verificationStatus') verificationStatus?: string,
-  ) {
-    return {
-      status: 'success',
-      data: await this.adstationService.adminListWebsites(
-        Number(page ?? 1),
-        Number(pageSize ?? 25),
-        search,
-        policyStatus,
-        verificationStatus,
-      ),
-    };
-  }
-
-  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
-  @Get('admin/websites/:websiteId')
-  @ApiOperation({ summary: 'Admin: Get full inspection details for a promoter website' })
-  async adminGetWebsite(
-    @Param('websiteId', new ParseUUIDPipe()) websiteId: string,
-  ) {
-    return {
-      status: 'success',
-      data: await this.adstationService.adminGetWebsite(websiteId),
-    };
-  }
-
-  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
-  @Post('admin/websites/:websiteId/policy')
-  @ApiOperation({
-    summary: 'Admin: Approve, reject, or set testing policy status on a promoter website',
-  })
-  async reviewWebsitePolicy(
-    @Req() req: any,
-    @Param('websiteId', new ParseUUIDPipe()) websiteId: string,
-    @Body()
-    dto: {
-      decision: 'approved' | 'rejected' | 'testing' | 'suspended';
-      reason?: string;
-    },
-  ) {
-    const result = await this.adstationService.reviewWebsitePolicy(
-      websiteId,
-      dto.decision,
-      dto.reason,
-      req.user?.sub,
-    );
-    return { status: 'success', data: result };
-  }
-
-  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
-  @Get('admin/auction-decisions')
-  @ApiOperation({
-    summary: 'Admin: List recent tamper-evident auction decision snapshots with pagination and search',
-  })
-  async listAuctionDecisions(
-    @Query('limit') limit?: number,
-    @Query('page') page?: number,
-    @Query('pageSize') pageSize?: number,
-    @Query('slotTagId') slotTagId?: string,
-    @Query('requestId') requestId?: string,
-    @Query('search') search?: string,
-    @Query('inventoryClass') inventoryClass?: string,
-  ) {
-    const decisions = await this.adstationService.listAuctionDecisions({
-      limit,
-      page,
-      pageSize,
-      slotTagId,
-      requestId,
-      search,
-      inventoryClass,
-    });
-    return { status: 'success', data: decisions };
-  }
-
-  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
-  @Get('admin/auction-decisions/:requestId')
-  @ApiOperation({
-    summary: 'Admin: Get single tamper-evident auction decision snapshot by requestId',
-  })
-  async getAuctionDecision(@Param('requestId') requestId: string) {
-    const decision = await this.adstationService.getAuctionDecision(requestId);
-    return { status: 'success', data: decision };
-  }
-
-  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
-  @Post('admin/slots/:id/check-installation')
-  @ApiOperation({
-    summary: 'Admin: Verify slot installation evidence on promoter website',
-  })
-  async adminCheckSlotInstallation(@Param('id', ParseUUIDPipe) id: string) {
-    const result = await this.adstationService.adminCheckSlotInstallation(id);
-    return { status: 'success', data: result };
-  }
-
-  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
-  @Post('admin/slots/:id/lifecycle')
-  @ApiOperation({
-    summary: 'Admin: Transition slot lifecycle status with validation and audit trail',
-  })
-  async adminUpdateSlotLifecycle(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body('targetLifecycle') targetLifecycle: 'active' | 'testing' | 'paused' | 'suspended',
-    @Body('reason') reason: string,
-    @Req() req: any,
-  ) {
-    const result = await this.adstationService.adminUpdateSlotLifecycle(
-      id,
-      targetLifecycle,
-      reason,
-      req.user?.sub,
-    );
-    return { status: 'success', data: result };
-  }
 }

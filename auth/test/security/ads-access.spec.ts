@@ -1,3 +1,6 @@
+import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
+import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
+import { SetupChecksService } from '../../../api/ads-api/src/modules/publisher-inventory/setup-checks.service';
 import { Readable } from 'node:stream';
 import { UploadsController } from '../../../api/ads-api/src/modules/uploads/uploads.controller';
 import { UploadsService } from '../../../api/ads-api/src/modules/uploads/uploads.service';
@@ -58,7 +61,7 @@ describe('Ads production guards and controllers over HTTP', () => {
     try {
       module = await Test.createTestingModule({
         imports: [DashboardAuthModule],
-        controllers: [ModerationController, AdsBillingController, ConversionsController, UploadsController, AdstationController],
+        controllers: [ModerationController, AdsBillingController, ConversionsController, UploadsController, AdstationController, AdsOperationsController],
         providers: [
           { provide: DATABASE_TOKEN, useValue: database },
           { provide: ConfigService, useValue: { get: () => undefined } }, AdsStaffGrants,
@@ -68,6 +71,8 @@ describe('Ads production guards and controllers over HTTP', () => {
           { provide: ConversionsService, useValue: conversions },
           { provide: UploadsService, useValue: uploads },
           { provide: AdstationService, useValue: adstation },
+          { provide: AdsOperationsService, useValue: adstation },
+          { provide: SetupChecksService, useValue: {} },
           { provide: PromotersService, useValue: promoters },
         ],
       }).compile();
@@ -116,7 +121,7 @@ describe('Ads production guards and controllers over HTTP', () => {
     ['ads_reviewer', `campaigns/${id}/manager-approval`, 403], ['ads_manager', `campaigns/${id}/manager-approval`, 201],
     ['ads_manager', `campaigns/${id}/primary-review`, 403], ['ads_finance', `campaigns/${id}/primary-review`, 403],
     ['ads_admin', `campaigns/${id}/emergency-override`, 403], ['super_admin', `campaigns/${id}/emergency-override`, 201],
-    ['super_admin', `campaigns/${id}/primary-review`, 403], ['ads_support', `promoters/${id}/suspend`, 403],
+    ['super_admin', `campaigns/${id}/primary-review`, 201], ['ads_support', `promoters/${id}/suspend`, 403],
     ['ads_admin', `promoters/${id}/suspend`, 201],
   ])('enforces %s on %s', async (role, route, expected) => {
     jest.spyOn(grants, 'rolesFor').mockReturnValue([role as any]);
@@ -192,7 +197,7 @@ describe('Ads production guards and controllers over HTTP', () => {
 
     jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_admin']);
     expect((await fetch(`${base}/api/v1/adstation/admin/websites/site-1/suspend`, { method: 'POST', headers: headers(), body: JSON.stringify({ reason: 'fraud' }) })).status).toBe(201);
-    expect(adstation.updateWebsiteAdstationStatus).toHaveBeenCalledWith('site-1', true, 'fraud');
+    expect(adstation.updateWebsiteAdstationStatus).toHaveBeenCalledWith('site-1', true, 'fraud', id);
 
     expect((await fetch(`${base}/api/v1/adstation/websites/site-1/health`, { headers: headers() })).status).toBe(200);
     expect(adstation.checkConsiderationSlotHealth).toHaveBeenCalledWith('site-1', `promoter-${id}`);

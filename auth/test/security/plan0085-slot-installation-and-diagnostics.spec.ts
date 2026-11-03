@@ -1,4 +1,4 @@
-import { AdstationService } from '../../../api/ads-api/src/modules/adstation/adstation.service';
+import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
 import { NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { paidDeliveryReadiness, slotDeliveryDiagnostics } from '../../../api/ads-api/src/modules/delivery/paid-delivery-policy';
 
@@ -132,7 +132,7 @@ describe('PLAN-0085: Slot Installation Verification, Auction Decisions Serializa
         transaction: jest.fn().mockImplementation(async (cb) => cb(mockTx)),
       };
 
-      const service = new (AdstationService as any)(mockDb);
+      const service = new (AdsOperationsService as any)(mockDb);
       await expect(
         service.adminCheckSlotInstallation('3e45bf37-4fc8-4913-8158-190780b03ed6'),
       ).rejects.toThrow(BadRequestException);

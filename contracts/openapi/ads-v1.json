@@ -131,6 +131,177 @@
         ],
         "type": "object"
       },
+      "AdsOperations_adminCheckSlotInstallationResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "AdsOperations_adminGetWebsiteResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "AdsOperations_adminListWebsitesResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "AdsOperations_adminUpdateSlotLifecycleResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "AdsOperations_getAuctionDecisionResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "AdsOperations_listAuctionDecisionsResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "AdsOperations_reinstateWebsiteResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "AdsOperations_reviewWebsitePolicyResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "AdsOperations_suspendWebsiteResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
       "BeginEditDto": {
         "properties": {
           "expectedRevision": {
@@ -8424,6 +8595,82 @@
         "required": [
           "title",
           "budgetUsd"
+        ],
+        "type": "object"
+      },
+      "CreateSetupCheckDto": {
+        "properties": {
+          "pagePath": {
+            "maxLength": 256,
+            "nullable": true,
+            "type": "string"
+          },
+          "requestId": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "CreateSlotDto": {
+        "properties": {
+          "allowedAdTypes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "allowedPresetIds": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "format": {
+            "nullable": true,
+            "type": "string"
+          },
+          "height": {
+            "nullable": true,
+            "type": "number"
+          },
+          "name": {
+            "type": "string"
+          },
+          "responsive": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "slotDeliveryPreference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slotType": {
+            "enum": [
+              "consideration",
+              "direct",
+              "network",
+              "hybrid"
+            ],
+            "type": "string"
+          },
+          "websiteId": {
+            "type": "string"
+          },
+          "width": {
+            "nullable": true,
+            "type": "number"
+          }
+        },
+        "required": [
+          "websiteId",
+          "name",
+          "slotType"
         ],
         "type": "object"
       },
@@ -18178,6 +18425,230 @@
         ],
         "type": "object"
       },
+      "PublisherInventory_checkSlotInstallationResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PublisherInventory_createSetupCheckResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PublisherInventory_createSlotResponse": {
+        "properties": {
+          "data": {
+            "allOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "slotTagId": {
+                    "type": "string"
+                  },
+                  "slotType": {
+                    "enum": [
+                      "network",
+                      "consideration",
+                      "direct",
+                      "hybrid"
+                    ],
+                    "type": "string"
+                  },
+                  "websiteId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "websiteId",
+                  "slotTagId",
+                  "name",
+                  "slotType"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PublisherInventory_getSetupCheckResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PublisherInventory_getSlotDiagnosticsResponse": {
+        "properties": {
+          "data": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PublisherInventory_getSlotEmbedResponse": {
+        "properties": {
+          "data": {
+            "allOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "htmlSnippet": {
+                    "type": "string"
+                  },
+                  "nextJsSnippet": {
+                    "type": "string"
+                  },
+                  "sdkSnippet": {
+                    "type": "string"
+                  },
+                  "slotSnippet": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sdkSnippet",
+                  "slotSnippet",
+                  "htmlSnippet",
+                  "nextJsSnippet"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
+      "PublisherInventory_getSlotsResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "additionalProperties": true,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "slotTagId": {
+                  "type": "string"
+                },
+                "slotType": {
+                  "enum": [
+                    "network",
+                    "consideration",
+                    "direct",
+                    "hybrid"
+                  ],
+                  "type": "string"
+                },
+                "websiteId": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "websiteId",
+                "slotTagId",
+                "name",
+                "slotType"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
       "ReplaceCreativeDto": {
         "properties": {
           "adFormat": {
@@ -19089,6 +19560,336 @@
   },
   "openapi": "3.0.0",
   "paths": {
+    "/api/v1/admin/ads/auction-decisions": {
+      "get": {
+        "operationId": "AdsOperations_listAuctionDecisions",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "slotTagId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inventoryClass",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_listAuctionDecisionsResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/auction-decisions/{requestId}": {
+      "get": {
+        "operationId": "AdsOperations_getAuctionDecision",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_getAuctionDecisionResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
     "/api/v1/admin/ads/moderation/campaigns/{id}/change-audit": {
       "get": {
         "operationId": "Moderation_changeAudit",
@@ -22297,6 +23098,2370 @@
         ]
       }
     },
+    "/api/v1/admin/ads/slots/{id}/check-installation": {
+      "post": {
+        "operationId": "AdsOperations_adminCheckSlotInstallation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_adminCheckSlotInstallationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/slots/{id}/lifecycle": {
+      "post": {
+        "operationId": "AdsOperations_adminUpdateSlotLifecycle",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_adminUpdateSlotLifecycleResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/websites": {
+      "get": {
+        "operationId": "AdsOperations_adminListWebsites",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "policyStatus",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "verificationStatus",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_adminListWebsitesResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/websites/{websiteId}": {
+      "get": {
+        "operationId": "AdsOperations_adminGetWebsite",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_adminGetWebsiteResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/websites/{websiteId}/policy": {
+      "post": {
+        "operationId": "AdsOperations_reviewWebsitePolicy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_reviewWebsitePolicyResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/websites/{websiteId}/reinstate": {
+      "post": {
+        "operationId": "AdsOperations_reinstateWebsite",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_reinstateWebsiteResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/admin/ads/websites/{websiteId}/suspend": {
+      "post": {
+        "operationId": "AdsOperations_suspendWebsite",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_suspendWebsiteResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/adstation/admin/auction-decisions": {
+      "get": {
+        "operationId": "AdsOperations_listAuctionDecisions_legacy",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": true,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "slotTagId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "inventoryClass",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_listAuctionDecisionsResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/adstation/admin/auction-decisions/{requestId}": {
+      "get": {
+        "operationId": "AdsOperations_getAuctionDecision_legacy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "requestId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_getAuctionDecisionResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/adstation/admin/slots/{id}/check-installation": {
+      "post": {
+        "operationId": "AdsOperations_adminCheckSlotInstallation_legacy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_adminCheckSlotInstallationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/adstation/admin/slots/{id}/lifecycle": {
+      "post": {
+        "operationId": "AdsOperations_adminUpdateSlotLifecycle_legacy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_adminUpdateSlotLifecycleResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/adstation/admin/websites": {
+      "get": {
+        "operationId": "AdsOperations_adminListWebsites_legacy",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "policyStatus",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "verificationStatus",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_adminListWebsitesResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/adstation/admin/websites/{websiteId}": {
+      "get": {
+        "operationId": "AdsOperations_adminGetWebsite_legacy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_adminGetWebsiteResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/adstation/admin/websites/{websiteId}/policy": {
+      "post": {
+        "operationId": "AdsOperations_reviewWebsitePolicy_legacy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_reviewWebsitePolicyResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer"
+        ]
+      }
+    },
+    "/api/v1/adstation/admin/websites/{websiteId}/reinstate": {
+      "post": {
+        "operationId": "AdsOperations_reinstateWebsite_legacy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_reinstateWebsiteResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin"
+        ]
+      }
+    },
+    "/api/v1/adstation/admin/websites/{websiteId}/suspend": {
+      "post": {
+        "operationId": "AdsOperations_suspendWebsite_legacy",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsOperations_suspendWebsiteResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Ads Operations"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin"
+        ]
+      }
+    },
     "/api/v1/campaigns": {
       "get": {
         "operationId": "Campaigns_getAdvertiserCampaigns",
@@ -25342,6 +28507,1113 @@
         "summary": "",
         "tags": [
           "Campaigns"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/publisher/setup-checks/{checkId}": {
+      "get": {
+        "operationId": "PublisherInventory_getSetupCheck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "checkId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_getSetupCheckResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/publisher/slots": {
+      "post": {
+        "operationId": "PublisherInventory_createSlot",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSlotDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_createSlotResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/publisher/slots/{slotId}": {
+      "patch": {
+        "operationId": "PublisherInventory_updateSlot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slotId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_createSlotResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/publisher/slots/{slotId}/check-installation": {
+      "post": {
+        "operationId": "PublisherInventory_checkSlotInstallation",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slotId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_checkSlotInstallationResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/publisher/slots/{slotId}/diagnostics": {
+      "get": {
+        "operationId": "PublisherInventory_getSlotDiagnostics",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slotId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_getSlotDiagnosticsResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/publisher/slots/{slotId}/embed": {
+      "get": {
+        "operationId": "PublisherInventory_getSlotEmbed",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slotId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_getSlotEmbedResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/publisher/websites/{websiteId}/setup-checks": {
+      "post": {
+        "operationId": "PublisherInventory_createSetupCheck",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSetupCheckDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_createSetupCheckResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/publisher/websites/{websiteId}/slots": {
+      "get": {
+        "operationId": "PublisherInventory_getSlots",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "websiteId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_getSlotsResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
         ],
         "x-ads-roles": []
       }

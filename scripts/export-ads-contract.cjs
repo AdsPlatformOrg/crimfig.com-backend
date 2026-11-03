@@ -27,6 +27,11 @@ function loadControllers() {
       if (!services.has(exportName)) services.set(exportName, { [exportName]: class {} });
       return services.get(exportName);
     }
+    if (['./setup-checks.service','./publisher-slots.service','./ads-operations.service','../promoters/promoters.service'].includes(id)) {
+      const name = {'./setup-checks.service':'SetupChecksService','./publisher-slots.service':'PublisherSlotsService','./ads-operations.service':'AdsOperationsService','../promoters/promoters.service':'PromotersService'}[id];
+      if (!services.has(name)) services.set(name, { [name]: class {} });
+      return services.get(name);
+    }
     if (id === '@crimfig/shared') return original.call(this, path.join(backend, 'shared/src/decorators/index.ts'), parent, ...rest);
     return original.call(this, id, parent, ...rest);
   };
@@ -36,6 +41,10 @@ function loadControllers() {
       const exported = require(filename);
       return exported[name[0].toUpperCase() + name.slice(1) + 'Controller'];
     });
+    controllers.push(
+      require('../api/ads-api/src/modules/publisher-inventory/publisher-inventory.controller.ts').PublisherInventoryController,
+      require('../api/ads-api/src/modules/ads-operations/ads-operations.controller.ts').AdsOperationsController,
+    );
     const configuration = require('../api/ads-api/src/contracts/api-configuration.ts');
     return { controllers, configure: configuration.configureAdsApi, prefix: configuration.ADS_API_PREFIX, version: configuration.ADS_API_VERSION };
   } finally {
@@ -68,14 +77,18 @@ async function exportContract() {
       if (typeof handler !== 'function') continue;
       const method = Reflect.getMetadata(METHOD_METADATA, handler);
       if (method === undefined) continue;
-      const route = [Reflect.getMetadata(PATH_METADATA, controller), Reflect.getMetadata(PATH_METADATA, handler)].filter(v => v && v !== '/').join('/').replace(/:([\w]+)/g, '{$1}');
+      const paths = [].concat(Reflect.getMetadata(PATH_METADATA, handler));
+      for (const handlerPath of paths) {
+      const route = [Reflect.getMetadata(PATH_METADATA, controller), handlerPath].filter(v => v && v !== '/').join('/').replace(/:([\w]+)/g, '{$1}');
       const url = `/${prefix}/v${version}/${route}`;
       const verb = RequestMethod[method].toLowerCase();
       const operation = document.paths[url]?.[verb];
       if (!operation?.operationId || !Object.keys(operation.responses || {}).some(code => /^2\d\d$/.test(code))) throw new Error(`Missing contract: ${verb.toUpperCase()} ${url}`);
       operation['x-ads-roles'] = Reflect.getMetadata('ads:contract:roles', handler) || [];
       operation.security = Reflect.getMetadata('crimfig_is_public', handler) ? [] : [{ bearer: [] }];
+      if (handlerPath.startsWith('adstation/admin/')) operation.operationId += '_legacy';
       expected.push(`${verb.toUpperCase()} ${url}`);
+      }
     }
     const exported = Object.values(document.paths).flatMap(item => Object.keys(item).filter(k => ['get', 'post', 'put', 'patch', 'delete'].includes(k)));
     if (exported.length !== expected.length || !expected.length) throw new Error('Controller/contract operation count mismatch');

@@ -91,7 +91,19 @@ function responseModel(data: Schema, name: string, envelope = true): AnyConstruc
   return ContractResponse;
 }
 
+const publisherSlot = object({ id: str(), websiteId: str(), slotTagId: str(), name: str(), slotType: enumeration('network','consideration','direct','hybrid') });
 const responses: Record<string, Record<string, Schema>> = {
+  PublisherInventoryController: {
+    createSetupCheck: json(), getSetupCheck: json(), getSlots: array(publisherSlot),
+    createSlot: publisherSlot, updateSlot: publisherSlot,
+    getSlotEmbed: object({ sdkSnippet: str(), slotSnippet: str(), htmlSnippet: str(), nextJsSnippet: str() }),
+    checkSlotInstallation: json(), getSlotDiagnostics: json(),
+  },
+  AdsOperationsController: {
+    suspendWebsite: json(), reinstateWebsite: json(), adminListWebsites: json(),
+    adminGetWebsite: json(), reviewWebsitePolicy: json(), listAuctionDecisions: json(),
+    getAuctionDecision: json(), adminCheckSlotInstallation: json(), adminUpdateSlotLifecycle: json(),
+  },
   CampaignsController: {
     campaignPage:object({items:array(campaign),page:{type:'integer'},pageSize:{type:'integer'},total:{type:'integer'},counts:{type:'object',additionalProperties:{type:'integer'}}}),
     staffCampaignPage:object({items:array(object({

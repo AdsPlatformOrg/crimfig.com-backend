@@ -4,7 +4,7 @@ import { AuctionEngineService } from '../../../api/ads-api/src/modules/delivery/
 import { ImpressionTokenService } from '../../../api/ads-api/src/modules/delivery/impression-token.service';
 import { FraudRulesService } from '../../../api/ads-api/src/modules/verification/fraud-rules.service';
 import { ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common';
-import { AdstationService } from '../../../api/ads-api/src/modules/adstation/adstation.service';
+import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
 
 /**
  * PLAN-0085 Root-Cause Proof & Gate Matrix Integration Suite
@@ -432,7 +432,7 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
         transaction: jest.fn().mockImplementation(async (cb) => cb(mockTx)),
       };
 
-      const adstationService = new (AdstationService as any)(mockDb);
+      const adstationService = new (AdsOperationsService as any)(mockDb);
       const result = await adstationService.adminCheckSlotInstallation(STAGING_SLOT_ID);
 
       expect(result.isInstalled).toBe(true);
