@@ -843,6 +843,9 @@ export class DeliveryService {
     const ipHash = this.tokenService.hashIp(params.clientIp);
     const tieSeed = crypto.createHash('sha256').update(`${params.requestId}:${params.slotTagId}`).digest('hex');
 
+    const exclusions = params.excludedCandidates ?? (params.fallbackReasonCode
+      ? [{ reasonCode: params.fallbackReasonCode, stage: params.terminationStage || 'pre_auction' }]
+      : []);
     const decisionDraft = {
       consentState: params.consentState ?? "unknown",
       requestId: params.requestId,
@@ -850,10 +853,10 @@ export class DeliveryService {
       policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
       bidderGroupingMode: 'advertiser' as const,
       tieSeed,
-      candidateCount: 0,
+      candidateCount: params.candidateCount ?? 0,
       eligibleGroupCount: 0,
-      evaluatedCandidates: [],
-      excludedCandidates: [],
+      evaluatedCandidates: params.evaluatedCandidates ?? [],
+      excludedCandidates: exclusions,
       winnerCampaignId: null,
       winnerCreativeId: null,
       runnerUpCampaignId: null,
@@ -982,7 +985,7 @@ export class DeliveryService {
           candidateCount: params.candidateCount ?? 0,
           eligibleGroupCount: 0,
           evaluatedCandidates: params.evaluatedCandidates ?? [],
-          excludedCandidates: params.excludedCandidates ?? (params.fallbackReasonCode ? [{ reasonCode: params.fallbackReasonCode, stage: params.terminationStage || 'pre_auction' }] : []),
+          excludedCandidates: exclusions,
           winnerCampaignId: null,
           winnerCreativeId: null,
           runnerUpCampaignId: null,
@@ -1226,7 +1229,7 @@ export class DeliveryService {
       // Evaluate pre-auction gates explicitly (PLAN-0087)
       const paidReadiness = paidDeliveryReadiness();
       let earlyFallbackReason: string | null = null;
-      let earlyFallbackStage: string = 'supply_admission';
+      const earlyFallbackStage = 'supply_admission';
 
       if (canonicalSlot.lifecycleStatus === 'testing') {
         earlyFallbackReason = 'SLOT_TESTING_MODE';
@@ -1240,9 +1243,6 @@ export class DeliveryService {
         earlyFallbackReason = 'TRAFFIC_CONTROL_RESTRICTION';
       } else if (riskAssessment.trafficRiskStatus !== 'normal') {
         earlyFallbackReason = 'TRAFFIC_RISK_' + String(riskAssessment.trafficRiskStatus).toUpperCase();
-      } else if (requestHeaders?.consentState === 'denied') {
-        earlyFallbackStage = 'consent_validation';
-        earlyFallbackReason = 'MEASUREMENT_CONSENT_DENIED';
       }
 
       if (earlyFallbackReason) {
@@ -1263,6 +1263,20 @@ export class DeliveryService {
           fallbackReasonCode: earlyFallbackReason,
           terminationStage: earlyFallbackStage,
           candidateEvaluationStatus: 'not_evaluated',
+          excludedCandidates: [{
+            reasonCode: earlyFallbackReason,
+            stage: earlyFallbackStage,
+            admission: {
+              slotLifecycle: canonicalSlot.lifecycleStatus,
+              websitePolicy: canonicalWebsite.policyStatus,
+              paidReady: paidReadiness.ready,
+              paidReadinessReason: paidReadiness.reason ?? null,
+              trafficRestricted: restricted,
+              trafficRisk: riskAssessment.trafficRiskStatus,
+              consentState: requestHeaders?.consentState ?? 'unknown',
+              measurementConsent: requestHeaders?.measurementConsent ?? null,
+            },
+          }],
           clientIp,
           userAgent,
           referrerDomain: headerHost,
@@ -1767,7 +1781,7 @@ export class DeliveryService {
       if(this.evidence)await this.evidence.append(requestId,{version:1,stage:'no_fill',reasonCode:'REQUEST_NOT_SERVED',errorCategory:error instanceof Error?error.name:'UNKNOWN',runtimeVersion:DELIVERY_RUNTIME.version,elapsedMs:DELIVERY_RUNTIME.serverMs-(serverDeadline-Date.now()),slotHandleHash:adDigest(token),consentState:requestHeaders?.consentState??'unknown',serverReceivedAt:new Date()});
       if(error instanceof DeliveryDeadlineError&&['candidate_fetch','candidate_targeting','auction'].includes(error.stage)&&canonicalSlot&&Date.now()<serverDeadline){
         return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
-          promoterId:canonicalPromoter.id,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',clientIp,userAgent,referrerDomain,clientGeo});
+          promoterId:canonicalPromoter.id,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',fallbackReasonCode:'DELIVERY_DEADLINE_EXCEEDED',terminationStage:error.stage,candidateEvaluationStatus:'failed',clientIp,userAgent,referrerDomain,clientGeo});
       }
       throw error;
     }

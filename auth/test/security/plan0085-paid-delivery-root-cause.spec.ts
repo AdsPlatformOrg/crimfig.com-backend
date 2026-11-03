@@ -295,7 +295,7 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
       process.env = { ...ORIGINAL_ENV };
     });
 
-    it('SUCCESS: eligible paid candidate is selected and served when slot is active, site is approved, and flags are enabled', async () => {
+    it.each([undefined, 'unknown', 'denied', 'granted'] as const)('serves the eligible paid candidate with consent state %s', async (consentState) => {
       const eligibleCandidate = {
         campaignId: '99999999-9999-4999-8999-999999999999',
         creativeId: '88888888-8888-4888-8888-888888888888',
@@ -349,7 +349,7 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
         undefined,
         false,
         { country: 'NG' },
-        { origin: `https://${STAGING_DOMAIN}` },
+        { origin: `https://${STAGING_DOMAIN}`, consentState, measurementConsent: consentState === 'granted' },
       );
 
       // PROOF: An eligible paid candidate is delivered as a PAID ad, NOT a house ad!
