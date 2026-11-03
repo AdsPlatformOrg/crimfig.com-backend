@@ -1576,7 +1576,23 @@ export class DeliveryService {
     requireDeliveryTime(auctionDeadline,'auction');
     // If canonical slot has no eligible paid campaign winner, fall back cleanly to zero-charge CrimFig House Ad (`G04`)
     if (!auctionResult && canonicalSlot) {
-      return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,
+      let fallbackReasonCode = 'AUCTION_NO_WINNER';
+      let terminationStage = 'auction';
+
+      if (formattedCandidates.length === 0) {
+        fallbackReasonCode = 'NO_PAID_CANDIDATES';
+        terminationStage = 'candidate_discovery';
+      } else if (eligibleCandidates.length === 0) {
+        fallbackReasonCode = 'TARGETING_CRITERIA_MISMATCH';
+        terminationStage = 'targeting_schedule';
+      } else if (compatibleCandidates.length === 0) {
+        fallbackReasonCode = 'CREATIVE_RENDITION_INCOMPATIBLE';
+        terminationStage = 'creative_compatibility';
+      }
+
+      return this.serveHouseOrShadowAd({
+        consentState: requestHeaders?.consentState,
+        serveBefore: serverDeadline,
         requestId,
         slotTagId: canonicalSlot.slotTagId,
         slotId: canonicalSlot.id,
@@ -1587,6 +1603,11 @@ export class DeliveryService {
         inventoryClass: 'house',
         deliveryMode: 'normal',
         trafficRiskStatus: 'normal',
+        fallbackReasonCode,
+        terminationStage,
+        candidateEvaluationStatus: 'evaluated',
+        candidateCount: formattedCandidates.length,
+        excludedCandidates: [{ reasonCode: fallbackReasonCode, stage: terminationStage, count: formattedCandidates.length }],
         clientIp,
         userAgent,
         referrerDomain,
