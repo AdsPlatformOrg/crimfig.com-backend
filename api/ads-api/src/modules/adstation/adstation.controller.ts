@@ -11,7 +11,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { AdstationService, UpdateAdstationSlotDto } from './adstation.service';
 import { PromotersService } from '../promoters/promoters.service';
 import { CreateSetupCheckDto, SetupChecksService } from './setup-checks.service';
@@ -391,6 +391,45 @@ export class AdstationController {
       req.user?.sub,
     );
     return { status: 'success', data: result };
+  }
+
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
+  @Get('admin/websites')
+  @ApiOperation({ summary: 'Admin: List all registered promoter websites with pagination, search and filters' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  @ApiQuery({ name: 'policyStatus', required: false, type: String })
+  @ApiQuery({ name: 'verificationStatus', required: false, type: String })
+  async adminListWebsites(
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('search') search?: string,
+    @Query('policyStatus') policyStatus?: string,
+    @Query('verificationStatus') verificationStatus?: string,
+  ) {
+    return {
+      status: 'success',
+      data: await this.adstationService.adminListWebsites(
+        Number(page ?? 1),
+        Number(pageSize ?? 25),
+        search,
+        policyStatus,
+        verificationStatus,
+      ),
+    };
+  }
+
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
+  @Get('admin/websites/:websiteId')
+  @ApiOperation({ summary: 'Admin: Get full inspection details for a promoter website' })
+  async adminGetWebsite(
+    @Param('websiteId', new ParseUUIDPipe()) websiteId: string,
+  ) {
+    return {
+      status: 'success',
+      data: await this.adstationService.adminGetWebsite(websiteId),
+    };
   }
 
   @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')

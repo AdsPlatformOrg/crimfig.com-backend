@@ -1069,4 +1069,197 @@ export class AdstationService {
       .orderBy(desc(adsAuctionDecisions.createdAt))
       .limit(safeLimit);
   }
+
+  /**
+   * Admin / Compliance: List promoter websites with search, status filters, and pagination
+   */
+  async adminListWebsites(
+    page = 1,
+    pageSize = 25,
+    search?: string,
+    policyStatus?: string,
+    verificationStatus?: string,
+  ) {
+    if (!Number.isSafeInteger(page) || page < 1 || page > 100000 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+      throw new BadRequestException('Invalid pagination parameters.');
+    }
+    const cleanSearch = search?.trim();
+    return this.db.transaction(async (tx: any) => {
+      await tx.execute(sql`SET LOCAL statement_timeout='8s'`);
+
+      const conditions: any[] = [];
+      if (cleanSearch) {
+        conditions.push(
+          sql`(${adsPromoterWebsites.domain} ILIKE ${'%' + cleanSearch + '%'} OR ${adsPromoterWebsites.url} ILIKE ${'%' + cleanSearch + '%'} OR ${schema.users.email} ILIKE ${'%' + cleanSearch + '%'} OR ${adsPromoterWebsites.id}::text ILIKE ${'%' + cleanSearch + '%'})`
+        );
+      }
+      if (policyStatus && policyStatus !== 'all') {
+        conditions.push(eq(adsPromoterWebsites.policyStatus, policyStatus as any));
+      }
+      if (verificationStatus && verificationStatus !== 'all') {
+        conditions.push(eq(adsPromoterWebsites.verificationStatus, verificationStatus as any));
+      }
+
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const rows = await tx
+        .select({
+          id: adsPromoterWebsites.id,
+          domain: adsPromoterWebsites.domain,
+          url: adsPromoterWebsites.url,
+          promoterId: adsPromoterWebsites.promoterId,
+          promoterEmail: schema.users.email,
+          verificationStatus: adsPromoterWebsites.verificationStatus,
+          verificationMethod: adsPromoterWebsites.verificationMethod,
+          verifiedAt: adsPromoterWebsites.verifiedAt,
+          verificationExpiresAt: adsPromoterWebsites.verificationExpiresAt,
+          policyStatus: adsPromoterWebsites.policyStatus,
+          policyRevision: adsPromoterWebsites.policyRevision,
+          reviewNote: adsPromoterWebsites.reviewNote,
+          reviewedAt: adsPromoterWebsites.reviewedAt,
+          isActive: adsPromoterWebsites.isActive,
+          isSuspended: adsPromoterWebsites.isSuspended,
+          createdAt: adsPromoterWebsites.createdAt,
+          updatedAt: adsPromoterWebsites.updatedAt,
+        })
+        .from(adsPromoterWebsites)
+        .leftJoin(schema.adsPromoters, eq(adsPromoterWebsites.promoterId, schema.adsPromoters.id))
+        .leftJoin(schema.users, eq(schema.adsPromoters.userId, schema.users.id))
+        .where(whereClause)
+        .orderBy(desc(adsPromoterWebsites.createdAt), desc(adsPromoterWebsites.id))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize);
+
+      const [totalRow] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(adsPromoterWebsites)
+        .leftJoin(schema.adsPromoters, eq(adsPromoterWebsites.promoterId, schema.adsPromoters.id))
+        .leftJoin(schema.users, eq(schema.adsPromoters.userId, schema.users.id))
+        .where(whereClause);
+
+      // Get slot counts for returned websites
+      const siteIds = rows.map((r: any) => r.id);
+      const slotCounts = siteIds.length > 0
+        ? await tx
+            .select({
+              websiteId: adstationSlots.websiteId,
+              totalSlots: sql<number>`count(*)::int`,
+              activeSlots: sql<number>`count(*) filter (where ${adstationSlots.isActive} = true)::int`,
+            })
+            .from(adstationSlots)
+            .where(sql`${adstationSlots.websiteId} IN ${siteIds}`)
+            .groupBy(adstationSlots.websiteId)
+        : [];
+
+      const slotMap = new Map<string, { total: number; active: number }>();
+      for (const sc of slotCounts) {
+        slotMap.set(sc.websiteId, { total: sc.totalSlots || 0, active: sc.activeSlots || 0 });
+      }
+
+      const now = Date.now();
+      const items = rows.map((site: any) => {
+        const sc = slotMap.get(site.id) || { total: 0, active: 0 };
+        const expiry = site.verificationExpiresAt ? new Date(site.verificationExpiresAt).getTime() : 0;
+        const ownershipVerified = site.verificationStatus === 'verified' && expiry > now;
+
+        let paidEligibility: 'eligible' | 'pending_approval' | 'unverified' | 'blocked' = 'eligible';
+        if (site.isSuspended || !site.isActive) {
+          paidEligibility = 'blocked';
+        } else if (!ownershipVerified) {
+          paidEligibility = 'unverified';
+        } else if (site.policyStatus === 'pending_approval' || site.policyStatus === 'testing') {
+          paidEligibility = 'pending_approval';
+        } else if (site.policyStatus !== 'approved') {
+          paidEligibility = 'blocked';
+        }
+
+        return {
+          ...site,
+          slotCount: sc.total,
+          activeSlotCount: sc.active,
+          paidEligibility,
+        };
+      });
+
+      return {
+        items,
+        page,
+        pageSize,
+        total: totalRow?.count ?? 0,
+      };
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+  }
+
+  /**
+   * Admin / Compliance: Get full inspection details for a single promoter website
+   */
+  async adminGetWebsite(websiteId: string) {
+    return this.db.transaction(async (tx: any) => {
+      await tx.execute(sql`SET LOCAL statement_timeout='8s'`);
+
+      const [site] = await tx
+        .select({
+          id: adsPromoterWebsites.id,
+          domain: adsPromoterWebsites.domain,
+          url: adsPromoterWebsites.url,
+          promoterId: adsPromoterWebsites.promoterId,
+          promoterEmail: schema.users.email,
+          verificationToken: adsPromoterWebsites.verificationToken,
+          verificationStatus: adsPromoterWebsites.verificationStatus,
+          verificationMethod: adsPromoterWebsites.verificationMethod,
+          verifiedAt: adsPromoterWebsites.verifiedAt,
+          verificationExpiresAt: adsPromoterWebsites.verificationExpiresAt,
+          lastVerificationAttemptAt: adsPromoterWebsites.lastVerificationAttemptAt,
+          verificationErrorMessage: adsPromoterWebsites.verificationErrorMessage,
+          deliveryPreference: adsPromoterWebsites.deliveryPreference,
+          considerationSlotActive: adsPromoterWebsites.considerationSlotActive,
+          considerationSlotVerifiedAt: adsPromoterWebsites.considerationSlotVerifiedAt,
+          policyStatus: adsPromoterWebsites.policyStatus,
+          policyRevision: adsPromoterWebsites.policyRevision,
+          reviewNote: adsPromoterWebsites.reviewNote,
+          reviewedBy: adsPromoterWebsites.reviewedBy,
+          reviewedAt: adsPromoterWebsites.reviewedAt,
+          trustScore: adsPromoterWebsites.trustScore,
+          isActive: adsPromoterWebsites.isActive,
+          isSuspended: adsPromoterWebsites.isSuspended,
+          suspensionReason: adsPromoterWebsites.suspensionReason,
+          createdAt: adsPromoterWebsites.createdAt,
+          updatedAt: adsPromoterWebsites.updatedAt,
+        })
+        .from(adsPromoterWebsites)
+        .leftJoin(schema.adsPromoters, eq(adsPromoterWebsites.promoterId, schema.adsPromoters.id))
+        .leftJoin(schema.users, eq(schema.adsPromoters.userId, schema.users.id))
+        .where(eq(adsPromoterWebsites.id, websiteId))
+        .limit(1);
+
+      if (!site) throw new NotFoundException('Website not found.');
+
+      // Fetch associated slots
+      const slots = await tx
+        .select()
+        .from(adstationSlots)
+        .where(eq(adstationSlots.websiteId, websiteId))
+        .orderBy(desc(adstationSlots.createdAt));
+
+      // Fetch audit history
+      const history = await tx
+        .select()
+        .from(adsSupplyStateHistory)
+        .where(and(eq(adsSupplyStateHistory.entityType, 'website'), eq(adsSupplyStateHistory.entityId, websiteId)))
+        .orderBy(desc(adsSupplyStateHistory.createdAt))
+        .limit(50);
+
+      // Evaluate delivery readiness report
+      const now = new Date();
+      const report = readinessReport('website', websiteId, now);
+      websiteReadiness(report, site, now, true);
+
+      return {
+        website: site,
+        slots,
+        history,
+        readiness: report.result(),
+      };
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+  }
 }
