@@ -458,18 +458,26 @@ export class AdstationController {
   @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
   @Get('admin/auction-decisions')
   @ApiOperation({
-    summary: 'Admin: List recent tamper-evident auction decision snapshots',
+    summary: 'Admin: List recent tamper-evident auction decision snapshots with pagination and search',
   })
   async listAuctionDecisions(
     @Query('limit') limit?: number,
+    @Query('page') page?: number,
+    @Query('pageSize') pageSize?: number,
     @Query('slotTagId') slotTagId?: string,
     @Query('requestId') requestId?: string,
+    @Query('search') search?: string,
+    @Query('inventoryClass') inventoryClass?: string,
   ) {
-    const decisions = await this.adstationService.listAuctionDecisions(
+    const decisions = await this.adstationService.listAuctionDecisions({
       limit,
+      page,
+      pageSize,
       slotTagId,
       requestId,
-    );
+      search,
+      inventoryClass,
+    });
     return { status: 'success', data: decisions };
   }
 

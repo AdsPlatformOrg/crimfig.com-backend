@@ -20,7 +20,7 @@ import {
   adsAuctionDecisions,
   adsSupplyStateHistory,
 } from '@crimfig/database/schema';
-import { and, eq, desc, gte, sql } from 'drizzle-orm';
+import { and, eq, desc, gte, sql, or, ilike } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import {
   normalizeSlotPresetPolicy,
@@ -1053,27 +1053,69 @@ export class AdstationService {
   /**
    * Admin / Compliance: Inspect recent auction decisions (`GET /api/v1/adstation/admin/auction-decisions`)
    */
-  async listAuctionDecisions(limit = 50, slotTagId?: string, requestId?: string) {
-    const safeLimit = Math.min(Math.max(1, Number(limit) || 50), 200);
+  async listAuctionDecisions(options: {
+    limit?: number;
+    page?: number;
+    pageSize?: number;
+    slotTagId?: string;
+    requestId?: string;
+    search?: string;
+    inventoryClass?: string;
+  } = {}) {
+    const page = Math.max(1, Number(options.page) || 1);
+    const pageSize = Math.min(Math.max(1, Number(options.pageSize || options.limit) || 100), 200);
+    const offset = (page - 1) * pageSize;
+
     const conditions: any[] = [];
-    if (slotTagId) conditions.push(eq(adsAuctionDecisions.slotTagId, slotTagId));
-    if (requestId) conditions.push(eq(adsAuctionDecisions.requestId, requestId));
+    if (options.slotTagId) conditions.push(eq(adsAuctionDecisions.slotTagId, options.slotTagId));
+    if (options.requestId) conditions.push(eq(adsAuctionDecisions.requestId, options.requestId));
+    if (options.inventoryClass && options.inventoryClass !== 'all') {
+      conditions.push(eq(adsAuctionDecisions.inventoryClass, options.inventoryClass as any));
+    }
+    if (options.search && options.search.trim()) {
+      const q = `%${options.search.trim()}%`;
+      conditions.push(
+        or(
+          ilike(adsAuctionDecisions.slotTagId, q),
+          ilike(adsAuctionDecisions.requestId, q),
+          ilike(adsAuctionDecisions.inventoryClass, q),
+        ),
+      );
+    }
+
+    const whereClause = conditions.length === 1 ? conditions[0] : conditions.length > 1 ? and(...conditions) : undefined;
+
+    const [countResult] = await this.db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(adsAuctionDecisions)
+      .where(whereClause);
+
+    const total = countResult?.count || 0;
 
     const rows = await this.db
       .select()
       .from(adsAuctionDecisions)
-      .where(conditions.length === 1 ? conditions[0] : conditions.length > 1 ? and(...conditions) : undefined)
-      .orderBy(desc(adsAuctionDecisions.createdAt))
-      .limit(safeLimit);
+      .where(whereClause)
+      .orderBy(desc(adsAuctionDecisions.createdAt), desc(adsAuctionDecisions.id))
+      .limit(pageSize)
+      .offset(offset);
 
     // Drizzle schema uses BigInt for billingPriceNanos which crashes JSON.stringify if returned raw
-    return rows.map((row) => ({
+    const items = rows.map((row) => ({
       ...row,
       billingPriceNanos:
         typeof row.billingPriceNanos === 'bigint'
           ? row.billingPriceNanos.toString()
           : row.billingPriceNanos,
     }));
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
+    };
   }
 
   async getAuctionDecision(requestId: string) {
@@ -1083,8 +1125,31 @@ export class AdstationService {
       .where(eq(adsAuctionDecisions.requestId, requestId))
       .limit(1);
     if (!row) return null;
+
+    // Fetch correlated site and slot if available
+    let website: any = null;
+    let slot: any = null;
+    if (row.websiteId) {
+      const [w] = await this.db
+        .select({ id: adsPromoterWebsites.id, domain: adsPromoterWebsites.domain, policyStatus: adsPromoterWebsites.policyStatus, verificationStatus: adsPromoterWebsites.verificationStatus })
+        .from(adsPromoterWebsites)
+        .where(eq(adsPromoterWebsites.id, row.websiteId))
+        .limit(1);
+      website = w || null;
+    }
+    if (row.slotId) {
+      const [s] = await this.db
+        .select({ id: adstationSlots.id, name: adstationSlots.name, format: adstationSlots.format, lifecycleStatus: adstationSlots.lifecycleStatus, installationStatus: adstationSlots.installationStatus })
+        .from(adstationSlots)
+        .where(eq(adstationSlots.id, row.slotId))
+        .limit(1);
+      slot = s || null;
+    }
+
     return {
       ...row,
+      website,
+      slot,
       billingPriceNanos:
         typeof row.billingPriceNanos === 'bigint'
           ? row.billingPriceNanos.toString()
