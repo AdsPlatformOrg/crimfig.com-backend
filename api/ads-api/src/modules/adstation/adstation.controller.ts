@@ -470,4 +470,14 @@ export class AdstationController {
     );
     return { status: 'success', data: decisions };
   }
+
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
+  @Post('admin/slots/:id/check-installation')
+  @ApiOperation({
+    summary: 'Admin: Verify slot installation evidence on promoter website',
+  })
+  async adminCheckSlotInstallation(@Param('id', ParseUUIDPipe) id: string) {
+    const result = await this.adstationService.adminCheckSlotInstallation(id);
+    return { status: 'success', data: result };
+  }
 }

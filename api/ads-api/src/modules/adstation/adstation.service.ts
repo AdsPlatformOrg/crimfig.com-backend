@@ -1055,19 +1055,27 @@ export class AdstationService {
    */
   async listAuctionDecisions(limit = 50, slotTagId?: string) {
     const safeLimit = Math.min(Math.max(1, Number(limit) || 50), 200);
-    if (slotTagId) {
-      return this.db
-        .select()
-        .from(adsAuctionDecisions)
-        .where(eq(adsAuctionDecisions.slotTagId, slotTagId))
-        .orderBy(desc(adsAuctionDecisions.createdAt))
-        .limit(safeLimit);
-    }
-    return this.db
-      .select()
-      .from(adsAuctionDecisions)
-      .orderBy(desc(adsAuctionDecisions.createdAt))
-      .limit(safeLimit);
+    const rows = slotTagId
+      ? await this.db
+          .select()
+          .from(adsAuctionDecisions)
+          .where(eq(adsAuctionDecisions.slotTagId, slotTagId))
+          .orderBy(desc(adsAuctionDecisions.createdAt))
+          .limit(safeLimit)
+      : await this.db
+          .select()
+          .from(adsAuctionDecisions)
+          .orderBy(desc(adsAuctionDecisions.createdAt))
+          .limit(safeLimit);
+
+    // Drizzle schema uses BigInt for billingPriceNanos which crashes JSON.stringify if returned raw
+    return rows.map((row) => ({
+      ...row,
+      billingPriceNanos:
+        typeof row.billingPriceNanos === 'bigint'
+          ? row.billingPriceNanos.toString()
+          : row.billingPriceNanos,
+    }));
   }
 
   /**
@@ -1261,5 +1269,132 @@ export class AdstationService {
         readiness: report.result(),
       };
     }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+  }
+
+  /**
+   * Admin / Staff: Trigger slot installation evidence check on behalf of promoter (`POST /api/v1/adstation/admin/slots/:id/check-installation`)
+   */
+  async adminCheckSlotInstallation(slotId: string) {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout='5s'`);
+      await tx.execute(sql`set local statement_timeout='8s'`);
+
+      const [slot] = await tx
+        .select()
+        .from(adstationSlots)
+        .where(eq(adstationSlots.id, slotId))
+        .for('update')
+        .limit(1);
+
+      if (!slot) {
+        throw new NotFoundException('AdStation slot not found');
+      }
+
+      const [website] = await tx
+        .select()
+        .from(adsPromoterWebsites)
+        .where(eq(adsPromoterWebsites.id, slot.websiteId))
+        .for('share')
+        .limit(1);
+
+      if (!website) {
+        throw new NotFoundException('Parent website not found');
+      }
+
+      if (website.verificationStatus !== 'verified' || !website.verificationExpiresAt || website.verificationExpiresAt <= new Date()) {
+        throw new BadRequestException('Parent website domain ownership is not verified or has expired.');
+      }
+      if (website.isSuspended || website.policyStatus === 'suspended') {
+        throw new ForbiddenException('Parent website is suspended');
+      }
+
+      const [serveStats] = await tx
+        .select({
+          serveCount: sql<number>`count(*)::int`,
+          lastServedAt: sql<Date | null>`max(${adsServes.servedAt})`,
+        })
+        .from(adsServes)
+        .where(
+          and(
+            eq(adsServes.slotHandle, slot.slotTagId),
+            gte(adsServes.servedAt, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+          ),
+        );
+
+      const [interactionStats] = await tx
+        .select({
+          renderCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'render')::int`,
+          impressionCount: sql<number>`count(*) filter (where ${adsInteractions.type} in ('impression', 'viewable_impression'))::int`,
+        })
+        .from(adsInteractions)
+        .where(
+          and(
+            eq(adsInteractions.slotId, slot.id),
+            gte(adsInteractions.createdAt, new Date(Date.now() - 24 * 60 * 60 * 1000)),
+          ),
+        );
+
+      const totalServes = serveStats?.serveCount || 0;
+      const totalRenders =
+        (interactionStats?.renderCount || 0) +
+        (interactionStats?.impressionCount || 0);
+      const isInstalled = totalServes > 0 && totalRenders > 0;
+
+      const nextInstallationStatus = isInstalled ? 'verified' : 'missing';
+      const nextLifecycleStatus =
+        slot.lifecycleStatus === 'suspended' ||
+        slot.lifecycleStatus === 'paused' ||
+        slot.lifecycleStatus === 'disabled'
+          ? slot.lifecycleStatus
+          : isInstalled
+            ? website.policyStatus === 'approved'
+              ? 'active'
+              : 'testing'
+            : 'testing';
+
+      const diagnostic = isInstalled
+        ? `Verified embed activity on ${website.domain}: ${totalServes} ad serve(s), ${totalRenders} render/impression beacon(s).`
+        : totalServes > 0
+          ? `Ad requests detected on ${website.domain}, but no render receipt has been received. Check delivery errors and load the publisher page again.`
+          : `No ad requests received yet for slot tag "${slot.slotTagId}" on https://${website.domain}. Ensure the slot snippet is embedded and traffic is loading the page.`;
+
+      const [updatedSlot] = await tx
+        .update(adstationSlots)
+        .set({
+          installationStatus: nextInstallationStatus,
+          installationCheckedAt: new Date(),
+          installationDiagnostic: diagnostic,
+          lifecycleStatus: nextLifecycleStatus,
+          isConsiderationVerified: slot.isConsiderationSlot ? isInstalled : slot.isConsiderationVerified,
+          considerationLastCheckedAt: slot.isConsiderationSlot
+            ? new Date()
+            : slot.considerationLastCheckedAt,
+          updatedAt: new Date(),
+        })
+        .where(eq(adstationSlots.id, slot.id))
+        .returning();
+
+      if (slot.isConsiderationSlot && isInstalled) {
+        await tx
+          .update(adsPromoterWebsites)
+          .set({
+            considerationSlotActive: true,
+            considerationSlotVerifiedAt: new Date(),
+            updatedAt: new Date(),
+          })
+          .where(eq(adsPromoterWebsites.id, website.id));
+      }
+
+      return {
+        isInstalled,
+        installationStatus: updatedSlot.installationStatus,
+        lifecycleStatus: updatedSlot.lifecycleStatus,
+        serveCount: totalServes,
+        renderBeaconCount: totalRenders,
+        lastServedAt: serveStats?.lastServedAt || null,
+        diagnostic,
+        slot: updatedSlot,
+      };
+    });
   }
 }
