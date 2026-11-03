@@ -1,6 +1,7 @@
 import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
 import { AdOpportunityController } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.controller';
 import { AdOpportunityService } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.service';
+import { eventPriceNanos, reservePriceMicrosForModel } from '../../../api/ads-api/src/modules/delivery/pricing-contract';
 import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
 import { PublisherInventoryController } from '../../../api/ads-api/src/modules/publisher-inventory/publisher-inventory.controller';
 import { PublisherSlotsService } from '../../../api/ads-api/src/modules/publisher-inventory/publisher-slots.service';
@@ -74,7 +75,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query('create table apps(id uuid primary key)');
     // Actual Drizzle columns/defaults/enums/unique constraints/FKs, not the serialized mock adapter.
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
-    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
+    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsTrafficControls, schema.adsEvidenceRecords, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
     const enums = new Set<string>();
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
       if (col.enum && !enums.has(col.enum.enumName)) {
@@ -98,10 +99,15 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query("insert into billing_exchange_rates(id,usd_to_ngn,source) values($1,100,'exchangerate_api')",[rateId]);
   });
   afterAll(async () => { await pool?.end(); });
-  test('PLAN0092 Billing HTTP rejects unauthorized and disabled reserve attempts without database writes', async () => {
+  test('PLAN0092 Billing expiry compares interaction events using the PostgreSQL enum', async () => {
+    await expect(pool.query("select type = case when true then 'click' else 'viewable_impression' end from ads_interactions limit 1"))
+      .rejects.toMatchObject({ code: '42883' });
+    const service = new AdOpportunityService(db);
+    await expect(db.transaction((tx: typeof db) => (service as any).expire(tx, randomUUID()))).resolves.toBeUndefined();
+  });
+  test('PLAN0092 Billing HTTP validates, reserves, issues and replays with isolated PostgreSQL', async () => {
     const key = 'local-plan0092-authority-key';
-    const previousKey = process.env.INTERNAL_ECOSYSTEM_KEY;
-    const previousRelease = process.env.ADS_PAID_RELEASE_ENABLED;
+    const previousEnv = { ...process.env };
     process.env.INTERNAL_ECOSYSTEM_KEY = key;
     process.env.ADS_PAID_RELEASE_ENABLED = 'false';
     @Module({controllers:[AdOpportunityController],providers:[{provide:AdOpportunityService,useValue:new AdOpportunityService(db)}]})
@@ -122,10 +128,46 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect((await request(body,key)).status).toBe(503);
       expect((await pool.query('select count(*)::int n from ads_opportunity_reservations where opportunity_id=$1',[id])).rows[0].n).toBe(0);
       expect((await fetch(`${base}/${id}`,{headers:{'x-internal-key':key},signal:AbortSignal.timeout(5000)})).status).toBe(404);
+      const f = await settlementFixture();
+      const [reservation] = await db.insert(schema.adsOpportunityReservations).values({
+        opportunityId:id,campaignId:f.campaign.id,expiresAt:new Date(Date.now()+5000),
+      }).returning();
+      const read = await fetch(`${base}/${reservation.id}`,{headers:{'x-internal-key':key},signal:AbortSignal.timeout(5000)});
+      expect(read.status).toBe(200);
+      expect((await read.json() as any).data).toMatchObject({authorityVersion:'opportunity-v1',reservationId:reservation.id,opportunityId:id,state:'HELD'});
+
+      Object.assign(process.env, {
+        ADS_PAID_SERVING_ENABLED:'true',ADS_PAID_RELEASE_ENABLED:'true',ADS_EVIDENCE_HASH_SECRET:'plan0092-local-evidence-secret-32-bytes',
+        ADS_AUCTION_POLICY_APPROVAL:JSON.stringify({version:'plan0092-fixture',approvedBy:'JED',approvedAt:'2026-11-03T00:00:00Z',pricing:'second_price',bidderGrouping:'advertiser',floors:'bid_and_clearing',fractionalClosure:'write_off_subcent',pctrBasisPoints:150,eventWindowMs:900000,ingestionToleranceMs:60000}),
+      });
+      await pool.query('update ads_campaigns set cost_per_click_usd_cents=100 where id=$1',[f.campaign.id]);
+      await pool.query("update ads_creatives set ad_format='banner' where id=$1",[f.creative.id]);
+      const [site] = await db.insert(schema.adsPromoterWebsites).values({promoterId:f.promoter.id,url:'https://billing.example.test',domain:'billing.example.test',verificationToken:randomUUID(),verificationMethod:'dns_txt',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'approved'}).returning();
+      const [slot] = await db.insert(schema.adstationSlots).values({websiteId:site.id,promoterId:f.promoter.id,name:'Billing fixture',slotTagId:'cf-slot-plan0092-billing',slotType:'network',format:'banner',lifecycleStatus:'active',installationStatus:'verified',allowedAdTypes:'["text"]',isActive:true}).returning();
+      const opportunityId=randomUUID(), clearingPriceMicros=reservePriceMicrosForModel('cpc');
+      const priceNanos=eventPriceNanos('cpc',clearingPriceMicros).toString();
+      const decision={requestId:opportunityId,winnerCampaignId:f.campaign.id,winnerCreativeId:f.creative.id,clearingPriceMicros,billingPriceNanos:priceNanos,policyVersion:'plan0092-fixture',bidderGroupingMode:'advertiser',tieSeed:'fixture',candidateCount:1,eligibleGroupCount:1,evaluatedCandidates:[],excludedCandidates:[]};
+      const paid={...body,serveBefore:new Date(Date.now()+9000).toISOString(),opportunityId,campaignId:f.campaign.id,creativeId:f.creative.id,submissionId:f.campaign.currentSubmissionId,contentRevision:f.campaign.contentRevision,promoterId:f.promoter.id,websiteId:site.id,slotId:slot.id,policyVersion:decision.policyVersion,priceNanos,clearingPriceMicros,decision};
+      const first=await request(paid,key);
+      expect(first.status).toBe(201);
+      await first.arrayBuffer(); // Model a lost acknowledgement and replay the same binding.
+      const repeated=await request(paid,key);
+      expect(repeated.status).toBe(201);
+      const held=(await repeated.json() as any).data;
+      expect(held).toMatchObject({authorityVersion:'opportunity-v1',opportunityId,state:'HELD'});
+      const issue=()=>fetch(`${base}/${held.reservationId}/issue`,{method:'POST',headers:{'Content-Type':'application/json','x-internal-key':key},body:JSON.stringify({bindingFingerprint:held.bindingFingerprint}),signal:AbortSignal.timeout(5000)});
+      const issued=await issue();
+      expect(issued.status).toBe(201);
+      const result=(await issued.json() as any).data;
+      expect(result.receipt.state).toBe('ISSUED');
+      const replay=await issue();
+      expect(replay.status).toBe(201);
+      expect((await replay.json() as any).data.serveId).toBe(result.serveId);
+      expect((await pool.query('select count(*)::int n from ads_opportunity_reservations where opportunity_id=$1',[opportunityId])).rows[0].n).toBe(1);
+      expect((await pool.query('select count(*)::int n from ads_serves where request_id=$1',[opportunityId])).rows[0].n).toBe(1);
     } finally {
       await app.close();
-      if(previousKey===undefined)delete process.env.INTERNAL_ECOSYSTEM_KEY;else process.env.INTERNAL_ECOSYSTEM_KEY=previousKey;
-      if(previousRelease===undefined)delete process.env.ADS_PAID_RELEASE_ENABLED;else process.env.ADS_PAID_RELEASE_ENABLED=previousRelease;
+      process.env = previousEnv;
     }
   });
   test('PLAN0079 owner-scoped embed readiness HTTP is non-writing and refuses foreign or missing profiles',async()=>{

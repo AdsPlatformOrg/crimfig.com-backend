@@ -24,12 +24,12 @@ export class AdOpportunityService {
     const [c]=await tx.select().from(s.adsCampaigns).where(eq(s.adsCampaigns.id,campaignId)).for('update').limit(1);
     if(!c)throw new NotFoundException('Campaign not found');return c;
   }
-  private receipt(row:any){return stableAdValue({authorityVersion:appendAdEvidence,AD_AUTHORITY_VERSION,reservationId:row.id,opportunityId:row.opportunityId,
+  private receipt(row:any){return stableAdValue({authorityVersion:AD_AUTHORITY_VERSION,reservationId:row.id,opportunityId:row.opportunityId,
     campaignId:row.campaignId,escrowId:row.escrowId,escrowAllocatedUsdCents:row.escrowAllocatedUsdCents,
     submissionId:row.submissionId,contentRevision:row.contentRevision,creativeId:row.creativeId,serveId:row.serveId,promoterId:row.promoterId,websiteId:row.websiteId,slotId:row.slotId,policyVersion:row.policyVersion,
     state:row.state,priceNanos:row.reservedNanos,eventDeadline:row.eventDeadline,ingestDeadline:row.ingestDeadline,expiresAt:row.expiresAt,bindingFingerprint:row.bindingFingerprint});}
   private async expire(tx:any,id:string){await tx.execute(sql`UPDATE ads_opportunity_reservations SET state='EXPIRED',released_at=now(),release_reason='PAYABLE_WINDOW_CLOSED',updated_at=now()
-    WHERE campaign_id=${id} AND is_simulated=false AND settled_at IS NULL AND state IN('HELD','ISSUED') AND expires_at<=now() AND NOT EXISTS(SELECT 1 FROM ads_interactions e WHERE e.serve_id=ads_opportunity_reservations.serve_id AND e.created_at<=ads_opportunity_reservations.event_deadline AND e.financial_eligibility='pending' AND e.verification_version=2 AND e.type=CASE WHEN ads_opportunity_reservations.pricing_model='cpc' THEN 'click' ELSE 'viewable_impression' END)`);}
+    WHERE campaign_id=${id} AND is_simulated=false AND settled_at IS NULL AND state IN('HELD','ISSUED') AND expires_at<=now() AND NOT EXISTS(SELECT 1 FROM ads_interactions e WHERE e.serve_id=ads_opportunity_reservations.serve_id AND e.created_at<=ads_opportunity_reservations.event_deadline AND e.financial_eligibility='pending' AND e.verification_version=2 AND e.type=(CASE WHEN ads_opportunity_reservations.pricing_model='cpc' THEN 'click' ELSE 'viewable_impression' END)::ads_interaction_type)`);}
   private async supply(tx:any,row:any,c:any){
     const [supply]=await tx.select({slot:s.adstationSlots,site:s.adsPromoterWebsites,promoter:s.adsPromoters}).from(s.adstationSlots)
       .innerJoin(s.adsPromoterWebsites,eq(s.adsPromoterWebsites.id,s.adstationSlots.websiteId)).innerJoin(s.adsPromoters,eq(s.adsPromoters.id,s.adstationSlots.promoterId))
