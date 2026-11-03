@@ -413,7 +413,28 @@ export class CampaignsController {
     return {status:'success',data:await this.campaignsService.deleteCreative(id,creativeId,req.user.sub,dto)};
   }
 
-  @AdsRoles('ads_admin', 'super_admin')
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer', 'ads_manager', 'ads_support')
+  @Get('admin/list')
+  @ApiOperation({ summary: 'List all campaigns for staff inspection with pagination' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'pageSize', required: false, type: Number })
+  @ApiQuery({ name: 'search', required: false, type: String })
+  async staffCampaignPage(
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+    @Query('search') search?: string,
+  ) {
+    return {
+      status: 'success',
+      data: await this.campaignsService.staffCampaignPage(
+        Number(page ?? 1),
+        Number(pageSize ?? 25),
+        search,
+      ),
+    };
+  }
+
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer', 'ads_manager', 'ads_support')
   @Get('admin/:id/delivery-readiness')
   async staffDeliveryReadiness(@Param('id', new ParseUUIDPipe()) id: string) {
     return { status: 'success', data: await this.campaignsService.getStaffDeliveryReadiness(id) };

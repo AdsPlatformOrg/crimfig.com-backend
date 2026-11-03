@@ -1253,6 +1253,64 @@ export class CampaignsService {
     },{isolationLevel:'repeatable read',accessMode:'read only'});
   }
 
+  async staffCampaignPage(page = 1, pageSize = 25, search?: string) {
+    if (!Number.isSafeInteger(page) || page < 1 || page > 100000 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+      throw new BadRequestException('Invalid campaign page.');
+    }
+    const cleanSearch = search?.trim();
+    return this.db.transaction(async (tx: any) => {
+      await tx.execute(sql`SET LOCAL statement_timeout='8s'`);
+      const searchCondition = cleanSearch
+        ? or(
+            sql`${adsCampaigns.title} ILIKE ${'%' + cleanSearch + '%'}`,
+            sql`${schema.users.email} ILIKE ${'%' + cleanSearch + '%'}`,
+            sql`${adsCampaigns.id}::text ILIKE ${'%' + cleanSearch + '%'}`
+          )
+        : undefined;
+
+      const rows = await tx
+        .select({
+          id: adsCampaigns.id,
+          title: adsCampaigns.title,
+          advertiserId: adsCampaigns.advertiserId,
+          advertiserEmail: schema.users.email,
+          status: adsCampaigns.status,
+          moderationStatus: adsCampaigns.moderationStatus,
+          budgetUsdCents: adsCampaigns.budgetUsdCents,
+          dailyBudgetUsdCents: adsCampaigns.dailyBudgetUsdCents,
+          remainingBudgetUsdCents: adsCampaigns.remainingBudgetUsdCents,
+          pricingModel: adsCampaigns.pricingModel,
+          format: adsCampaigns.format,
+          createdAt: adsCampaigns.createdAt,
+          updatedAt: adsCampaigns.updatedAt,
+        })
+        .from(adsCampaigns)
+        .leftJoin(schema.users, eq(adsCampaigns.advertiserId, schema.users.id))
+        .where(searchCondition)
+        .orderBy(desc(adsCampaigns.createdAt), desc(adsCampaigns.id))
+        .limit(pageSize)
+        .offset((page - 1) * pageSize);
+
+      const [totalRow] = await tx
+        .select({ count: sql<number>`count(*)::int` })
+        .from(adsCampaigns)
+        .leftJoin(schema.users, eq(adsCampaigns.advertiserId, schema.users.id))
+        .where(searchCondition);
+
+      return {
+        items: rows.map((c: any) => ({
+          ...c,
+          budgetUsd: c.budgetUsdCents ? c.budgetUsdCents / 100 : 0,
+          dailyBudgetUsd: c.dailyBudgetUsdCents ? c.dailyBudgetUsdCents / 100 : null,
+          remainingBudgetUsd: c.remainingBudgetUsdCents ? c.remainingBudgetUsdCents / 100 : 0,
+        })),
+        page,
+        pageSize,
+        total: totalRow?.count ?? 0,
+      };
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+  }
+
   async getAdvertiserCampaigns(advertiserId: string, status?: string) {
     const conditions = [eq(adsCampaigns.advertiserId, advertiserId)];
     if (status && status !== "all")

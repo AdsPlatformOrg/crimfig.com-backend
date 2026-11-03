@@ -7977,6 +7977,117 @@
         ],
         "type": "object"
       },
+      "Campaigns_staffCampaignPageResponse": {
+        "properties": {
+          "data": {
+            "allOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "items": {
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "advertiserEmail": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "advertiserId": {
+                          "type": "string"
+                        },
+                        "budgetUsd": {
+                          "type": "number"
+                        },
+                        "budgetUsdCents": {
+                          "nullable": true,
+                          "type": "number"
+                        },
+                        "createdAt": {
+                          "type": "string"
+                        },
+                        "dailyBudgetUsd": {
+                          "nullable": true,
+                          "type": "number"
+                        },
+                        "dailyBudgetUsdCents": {
+                          "nullable": true,
+                          "type": "number"
+                        },
+                        "format": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "id": {
+                          "type": "string"
+                        },
+                        "moderationStatus": {
+                          "type": "string"
+                        },
+                        "pricingModel": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "remainingBudgetUsd": {
+                          "type": "number"
+                        },
+                        "remainingBudgetUsdCents": {
+                          "nullable": true,
+                          "type": "number"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "updatedAt": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "title",
+                        "advertiserId",
+                        "status",
+                        "moderationStatus"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "page": {
+                    "type": "integer"
+                  },
+                  "pageSize": {
+                    "type": "integer"
+                  },
+                  "total": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "items",
+                  "page",
+                  "pageSize",
+                  "total"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
       "Campaigns_staffDeliveryReadinessResponse": {
         "properties": {
           "data": {
@@ -22459,6 +22570,165 @@
         "x-ads-roles": []
       }
     },
+    "/api/v1/campaigns/admin/list": {
+      "get": {
+        "operationId": "Campaigns_staffCampaignPage",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pageSize",
+            "required": false,
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaigns_staffCampaignPageResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Campaigns"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin",
+          "ads_reviewer",
+          "ads_manager",
+          "ads_support"
+        ]
+      }
+    },
     "/api/v1/campaigns/admin/{id}/delivery-readiness": {
       "get": {
         "operationId": "Campaigns_staffDeliveryReadiness",
@@ -22595,7 +22865,10 @@
         ],
         "x-ads-roles": [
           "ads_admin",
-          "super_admin"
+          "super_admin",
+          "ads_reviewer",
+          "ads_manager",
+          "ads_support"
         ]
       }
     },

@@ -94,6 +94,12 @@ function responseModel(data: Schema, name: string, envelope = true): AnyConstruc
 const responses: Record<string, Record<string, Schema>> = {
   CampaignsController: {
     campaignPage:object({items:array(campaign),page:{type:'integer'},pageSize:{type:'integer'},total:{type:'integer'},counts:{type:'object',additionalProperties:{type:'integer'}}}),
+    staffCampaignPage:object({items:array(object({
+      id:str(),title:str(),advertiserId:str(),advertiserEmail:nullable(str()),status:str(),moderationStatus:str(),
+      budgetUsd:num(),dailyBudgetUsd:nullable(num()),remainingBudgetUsd:num(),budgetUsdCents:nullable(num()),
+      dailyBudgetUsdCents:nullable(num()),remainingBudgetUsdCents:nullable(num()),pricingModel:nullable(str()),
+      format:nullable(str()),createdAt:str(),updatedAt:str()
+    },['id','title','advertiserId','status','moderationStatus'])),page:{type:'integer'},pageSize:{type:'integer'},total:{type:'integer'}}),
     saveCampaign: object(campaignProperties,['id','title','contentRevision']),
     beginEdit: object(campaignProperties,['id','title','contentRevision']),
     deleteCreative:object({deleted:bool(),creativeId:str(),contentRevision:{type:'integer'}}),
