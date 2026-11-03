@@ -162,7 +162,7 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
       jest.spyOn(CampaignWorkflow.prototype, 'lock').mockResolvedValue(c as any);
 
       let selectCalls = 0;
-      let makeChain = () => {
+      const makeChain = () => {
         const ch: any = {
           from: () => ch,
           where: () => ch,
@@ -218,7 +218,7 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
       jest.spyOn(CampaignWorkflow.prototype, 'lock').mockResolvedValue(c as any);
 
       let selectCalls = 0;
-      let makeChain = () => {
+      const makeChain = () => {
         const ch: any = {
           from: () => ch,
           where: () => ch,
@@ -272,7 +272,7 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
       let updatedModeration: string | null = null;
 
       let selectCalls = 0;
-      let makeChain = () => {
+      const makeChain = () => {
         const ch: any = {
           from: () => ch,
           where: () => ch,
@@ -341,7 +341,7 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
       jest.spyOn(CampaignWorkflow.prototype, 'audit').mockResolvedValue(undefined as any);
 
       let selectCalls = 0;
-      let makeChain = () => {
+      const makeChain = () => {
         const ch: any = {
           from: () => ch,
           where: () => ch,

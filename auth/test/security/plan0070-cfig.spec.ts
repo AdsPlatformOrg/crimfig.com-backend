@@ -337,13 +337,9 @@ describe("PLAN-0070 finalizer transaction contract", () => {
     };
     const db = {
       transaction: async (fn: any) => {
-        try {
-          const result = await fn(tx);
-          committed.push(...commands.filter((c) => c.sql.startsWith("INSERT")));
-          return result;
-        } catch (e) {
-          throw e;
-        }
+        const result = await fn(tx);
+        committed.push(...commands.filter((c) => c.sql.startsWith("INSERT")));
+        return result;
       },
     };
     return { service: new CfigService(db), commands, committed, source };
