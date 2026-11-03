@@ -598,8 +598,11 @@ export class DeliveryService {
 })();`;
   }
 
-  private parseStringArray(value: string | null | undefined): string[] {
+  private parseStringArray(value: string | string[] | null | undefined): string[] {
     if (!value) return [];
+    if (Array.isArray(value)) {
+      return value.filter((item) => typeof item === 'string');
+    }
     try {
       const parsed = JSON.parse(value);
       return Array.isArray(parsed)
@@ -610,8 +613,11 @@ export class DeliveryService {
     }
   }
 
-  private parseNumberArray(value: string | null | undefined): number[] {
+  private parseNumberArray(value: string | number[] | null | undefined): number[] {
     if (!value) return [];
+    if (Array.isArray(value)) {
+      return value.filter((item) => typeof item === 'number');
+    }
     try {
       const parsed = JSON.parse(value);
       return Array.isArray(parsed)
@@ -823,6 +829,12 @@ export class DeliveryService {
     inventoryClass: 'house' | 'shadow';
     deliveryMode: 'normal' | 'shadow';
     trafficRiskStatus: 'normal' | 'suspicious' | 'high_risk' | 'confirmed_fraud';
+    fallbackReasonCode?: string;
+    terminationStage?: string;
+    candidateEvaluationStatus?: 'not_evaluated' | 'evaluated' | 'failed';
+    candidateCount?: number;
+    excludedCandidates?: any[];
+    evaluatedCandidates?: any[];
     clientIp?: string;
     userAgent?: string;
     referrerDomain?: string;
@@ -967,10 +979,10 @@ export class DeliveryService {
           policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
           bidderGroupingMode: 'advertiser',
           tieSeed,
-          candidateCount: 0,
+          candidateCount: params.candidateCount ?? 0,
           eligibleGroupCount: 0,
-          evaluatedCandidates: [],
-          excludedCandidates: [],
+          evaluatedCandidates: params.evaluatedCandidates ?? [],
+          excludedCandidates: params.excludedCandidates ?? (params.fallbackReasonCode ? [{ reasonCode: params.fallbackReasonCode, stage: params.terminationStage || 'pre_auction' }] : []),
           winnerCampaignId: null,
           winnerCreativeId: null,
           runnerUpCampaignId: null,
@@ -1211,19 +1223,33 @@ export class DeliveryService {
         ),
       });
 
-      // If website or slot is in TESTING policy state, or if paid serving is not yet enabled,
-      // or if traffic is flagged as suspicious/high_risk, serve a zero-charge CrimFig House/Shadow Ad.
-      const paidServingEnabled = paidDeliveryReadiness().ready;
-      const isTestingMode =
-        canonicalWebsite.policyStatus === 'testing' ||
-        canonicalWebsite.policyStatus === 'pending_approval' ||
-        canonicalSlot.lifecycleStatus === 'testing' ||
-        canonicalSlot.lifecycleStatus === 'installation_pending' ||
-        !paidServingEnabled || restricted;
-      const isShadowRisk = restricted || riskAssessment.trafficRiskStatus !== 'normal';
+      // Evaluate pre-auction gates explicitly (PLAN-0087)
+      const paidReadiness = paidDeliveryReadiness();
+      let earlyFallbackReason: string | null = null;
+      let earlyFallbackStage: string = 'supply_admission';
 
-      if (isTestingMode || isShadowRisk) {
-        return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,
+      if (canonicalSlot.lifecycleStatus === 'testing') {
+        earlyFallbackReason = 'SLOT_TESTING_MODE';
+      } else if (canonicalSlot.lifecycleStatus === 'installation_pending') {
+        earlyFallbackReason = 'SLOT_INSTALLATION_PENDING';
+      } else if (canonicalWebsite.policyStatus === 'testing' || canonicalWebsite.policyStatus === 'pending_approval') {
+        earlyFallbackReason = 'WEBSITE_POLICY_NOT_APPROVED';
+      } else if (!paidReadiness.ready) {
+        earlyFallbackReason = 'PLATFORM_PAID_DELIVERY_DISABLED:' + String(paidReadiness.reason);
+      } else if (restricted) {
+        earlyFallbackReason = 'TRAFFIC_CONTROL_RESTRICTION';
+      } else if (riskAssessment.trafficRiskStatus !== 'normal') {
+        earlyFallbackReason = 'TRAFFIC_RISK_' + String(riskAssessment.trafficRiskStatus).toUpperCase();
+      } else if (requestHeaders?.consentState === 'denied' || (requestHeaders?.measurementConsent === false)) {
+        earlyFallbackStage = 'consent_validation';
+        earlyFallbackReason = 'MEASUREMENT_CONSENT_DENIED';
+      }
+
+      if (earlyFallbackReason) {
+        const isShadowRisk = restricted || riskAssessment.trafficRiskStatus !== 'normal';
+        return this.serveHouseOrShadowAd({
+          consentState: requestHeaders?.consentState,
+          serveBefore: serverDeadline,
           requestId,
           slotTagId: canonicalSlot.slotTagId,
           slotId: canonicalSlot.id,
@@ -1234,6 +1260,9 @@ export class DeliveryService {
           inventoryClass: isShadowRisk ? 'shadow' : 'house',
           deliveryMode: isShadowRisk ? 'shadow' : 'normal',
           trafficRiskStatus: riskAssessment.trafficRiskStatus,
+          fallbackReasonCode: earlyFallbackReason,
+          terminationStage: earlyFallbackStage,
+          candidateEvaluationStatus: 'not_evaluated',
           clientIp,
           userAgent,
           referrerDomain: headerHost,
