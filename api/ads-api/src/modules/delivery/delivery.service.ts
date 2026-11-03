@@ -376,7 +376,7 @@ export class DeliveryService {
       element.setAttribute('data-cf-state','unavailable');
     }
     state.timer=setTimeout(function(){state.closed=true;state.controller.abort();collapseSlot();},15000);
-    var query='?domain='+encodeURIComponent(window.location.hostname)+'&consent='+(consent==='granted'?'granted':'unknown');
+    var query='?domain='+encodeURIComponent(window.location.hostname)+'&consent='+(consent==='granted'||consent==='denied'?consent:'unknown');
     fetch(base+'/api/v1/delivery/ad/'+encodeURIComponent(token)+query,{credentials:'omit',signal:state.controller.signal,headers:{Accept:'application/json'}})
       .then(function(res){if(!res.ok)throw new Error('Ad unavailable');return res.json();})
       .then(function(data){if(state.closed||instances.get(element)!==state||!element.isConnected)return;
@@ -815,6 +815,7 @@ export class DeliveryService {
     requestId: string;
     serveBefore?:number;
     parentOpportunityId?:string;
+    consentState?: 'granted' | 'denied' | 'unknown';
     slotTagId: string;
     slotId: string | null;
     websiteId: string | null;
@@ -833,6 +834,7 @@ export class DeliveryService {
     const tieSeed = crypto.createHash('sha256').update(`${params.requestId}:${params.slotTagId}`).digest('hex');
 
     const decisionDraft = {
+      consentState: params.consentState ?? "unknown",
       requestId: params.requestId,
       slotHandle: params.slotTagId,
       policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
@@ -1101,7 +1103,7 @@ export class DeliveryService {
       city?: string;
       device?: string;
     },
-    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean },
+    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean; consentState?: 'granted' | 'denied' | 'unknown' },
   ) {
     this.tokenService.assertConfigured();
     const requestId = crypto.randomUUID();
@@ -1219,11 +1221,11 @@ export class DeliveryService {
         canonicalWebsite.policyStatus === 'pending_approval' ||
         canonicalSlot.lifecycleStatus === 'testing' ||
         canonicalSlot.lifecycleStatus === 'installation_pending' ||
-        !paidServingEnabled || restricted || requestHeaders?.measurementConsent!==true;
+        !paidServingEnabled || restricted;
       const isShadowRisk = restricted || riskAssessment.trafficRiskStatus !== 'normal';
 
       if (isTestingMode || isShadowRisk) {
-        return this.serveHouseOrShadowAd({serveBefore:serverDeadline,
+        return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,
           requestId,
           slotTagId: canonicalSlot.slotTagId,
           slotId: canonicalSlot.id,
@@ -1547,7 +1549,7 @@ export class DeliveryService {
     requireDeliveryTime(auctionDeadline,'auction');
     // If canonical slot has no eligible paid campaign winner, fall back cleanly to zero-charge CrimFig House Ad (`G04`)
     if (!auctionResult && canonicalSlot) {
-      return this.serveHouseOrShadowAd({serveBefore:serverDeadline,
+      return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,
         requestId,
         slotTagId: canonicalSlot.slotTagId,
         slotId: canonicalSlot.id,
@@ -1640,11 +1642,11 @@ export class DeliveryService {
         submissionId:(winningCreative as any).currentSubmissionId,contentRevision:(winningCreative as any).contentRevision,
         promoterId,websiteId:canonicalWebsite.id,slotId:canonicalSlot.id,policyVersion:approvedAdPolicy()!.version,
         priceNanos:billingPriceNanos.toString(),clearingPriceMicros,visitorKey:viewer,ipHash,selectedImageUrl:winningCreative.imageUrl??undefined,
-        decision:stableAdValue(auctionResult.decisionSnapshot)});
+        decision:stableAdValue({...auctionResult.decisionSnapshot,consentState:requestHeaders?.consentState??"unknown"})});
       const issued=await this.opportunities.issue(receipt);serve={id:issued.serveId};
     } catch(error) {
       // Unknown remote outcomes retain their existing opportunity for reconciliation. Never locally release an issued token.
-      return this.serveHouseOrShadowAd({serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
+      return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
         promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',clientIp,userAgent,referrerDomain:canonicalWebsite.domain,clientGeo});
     }
 
@@ -1714,9 +1716,9 @@ export class DeliveryService {
       clickUrl,
     };
     } catch(error) {
-      if(this.evidence)await this.evidence.append(requestId,{version:1,stage:'no_fill',reasonCode:'REQUEST_NOT_SERVED',errorCategory:error instanceof Error?error.name:'UNKNOWN',runtimeVersion:DELIVERY_RUNTIME.version,elapsedMs:DELIVERY_RUNTIME.serverMs-(serverDeadline-Date.now()),slotHandleHash:adDigest(token),serverReceivedAt:new Date()});
+      if(this.evidence)await this.evidence.append(requestId,{version:1,stage:'no_fill',reasonCode:'REQUEST_NOT_SERVED',errorCategory:error instanceof Error?error.name:'UNKNOWN',runtimeVersion:DELIVERY_RUNTIME.version,elapsedMs:DELIVERY_RUNTIME.serverMs-(serverDeadline-Date.now()),slotHandleHash:adDigest(token),consentState:requestHeaders?.consentState??'unknown',serverReceivedAt:new Date()});
       if(error instanceof DeliveryDeadlineError&&['candidate_fetch','candidate_targeting','auction'].includes(error.stage)&&canonicalSlot&&Date.now()<serverDeadline){
-        return this.serveHouseOrShadowAd({serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
+        return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
           promoterId:canonicalPromoter.id,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',clientIp,userAgent,referrerDomain,clientGeo});
       }
       throw error;

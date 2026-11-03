@@ -322,24 +322,30 @@ export class AdstationService {
       'https://api.ads.crimfig.com'
     ).replace(/\/$/, '');
 
-    const htmlSnippet = [
+    const slotSnippet = [
       `<!-- CrimFig Ad Slot: ${slot.name} (${slot.slotTagId}) -->`,
+      `<!-- If you have a visitor consent choice, supply it before loading the SDK. The default is unknown. -->`,
       `<ins class="crimfig-pub-slot"`,
       `     style="display:block;min-height:0;"`,
       `     data-cf-height="${slot.height || 90}"`,
+      `     data-cf-consent="unknown"`,
       `     data-cf-api-base="${adsPublicUrl}"`,
       `     data-ad-slot="${slot.slotTagId}"`,
       `     data-ad-format="${slot.format || 'banner'}"`,
       `     data-full-width-responsive="${slot.responsive ? 'true' : 'false'}"></ins>`,
-      `<script async crossorigin="anonymous" src="${adsPublicUrl}/api/v1/delivery/embed.js?slot=${slot.slotTagId}"></script>`,
     ].join('\n');
+    const sdkSnippet = `<script async crossorigin="anonymous" src="${adsPublicUrl}/api/v1/delivery/embed.js"></script>`;
+    const htmlSnippet = [slotSnippet, "<!-- Load this SDK only once per page, not once per slot. -->", sdkSnippet].join("\n");
+    const consentInstructions = "If your site collects a measurement consent choice, pass it before the SDK requests an ad. Only after genuine visitor consent, set data-cf-consent to granted on each slot; unknown or denied does not disqualify paid delivery. Load one SDK for all slots. Changing consent after initialization does not retry that slot: save the decision and reload, or defer SDK initialization until consent is resolved. Consent does not replace website approval or guarantee paid fill.";
 
     const nextJsSnippet = [
       `// Next.js / React Component Usage (${website?.domain || 'your-domain.com'})`,
+      `// measurementConsent must come from your visitor consent manager before mounting.`,
       `<CrimFigAdSlot`,
       `  slotTagId="${slot.slotTagId}"`,
       `  publisherKey="${website?.id || slot.websiteId}"`,
       `  apiBaseUrl="${adsPublicUrl}"`,
+      `  measurementConsent="unknown"`,
       `/>`,
     ].join('\n');
 
@@ -353,6 +359,9 @@ export class AdstationService {
       deliveryReadiness:slotDeliveryDiagnostics(slot,website),
       adsPublicUrl,
       htmlSnippet,
+      sdkSnippet,
+      slotSnippet,
+      consentInstructions,
       nextJsSnippet,
     };
   }
@@ -983,50 +992,56 @@ export class AdstationService {
     reason?: string,
     reviewerId?: string,
   ) {
-    const [existing] = await this.db
-      .select()
-      .from(adsPromoterWebsites)
-      .where(eq(adsPromoterWebsites.id, websiteId))
-      .limit(1);
+    if (!['approved', 'rejected', 'testing', 'suspended'].includes(decision)) throw new BadRequestException('Unsupported website policy decision.');
+    if (reason !== undefined && (typeof reason !== 'string' || reason.length > 1000)) throw new BadRequestException('Review reason must be at most 1000 characters.');
+    return this.db.transaction(async tx => {
+      await tx.execute(sql`set local lock_timeout='5s'`);
+      await tx.execute(sql`set local statement_timeout='8s'`);
+      const [existing] = await tx
+        .select()
+        .from(adsPromoterWebsites)
+        .where(eq(adsPromoterWebsites.id, websiteId))
+        .for('update')
+        .limit(1);
 
-    if (!existing) {
-      throw new NotFoundException('Website not found');
-    }
+      if (!existing) {
+        throw new NotFoundException('Website not found');
+      }
 
-    if (decision === 'approved' && existing.verificationStatus !== 'verified') {
-      throw new BadRequestException(
-        'Cannot approve a website for paid ad serving before domain ownership is verified.',
-      );
-    }
+      if (decision === 'approved' && (existing.verificationStatus !== 'verified' || !existing.verificationExpiresAt || existing.verificationExpiresAt <= new Date())) {
+        throw new BadRequestException(
+          'Cannot approve a website for paid ad serving without current, unexpired domain ownership verification.',
+        );
+      }
 
-    const isSuspended = decision === 'suspended';
-    const [updated] = await this.db
-      .update(adsPromoterWebsites)
-      .set({
-        policyStatus: decision,
-        isSuspended,
-        policyRevision: (existing.policyRevision || 1) + 1,
-        reviewNote: reason || null,
-        suspensionReason: isSuspended ? reason || 'Policy suspension' : null,
-        reviewedBy: reviewerId || null,
-        reviewedAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .where(eq(adsPromoterWebsites.id, websiteId))
-      .returning();
+      const isSuspended = decision === 'suspended';
+      const [updated] = await tx
+        .update(adsPromoterWebsites)
+        .set({
+          policyStatus: decision,
+          isSuspended,
+          policyRevision: (existing.policyRevision || 1) + 1,
+          reviewNote: reason || null,
+          suspensionReason: isSuspended ? reason || 'Policy suspension' : null,
+          reviewedBy: reviewerId || null,
+          reviewedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(adsPromoterWebsites.id, websiteId))
+        .returning();
 
-    await this.db.insert(adsSupplyStateHistory).values({
-      entityType: 'website',
-      entityId: websiteId,
-      dimension: 'policy_status',
-      fromState: existing.policyStatus,
-      toState: decision,
-      actorId: reviewerId || null,
-      actorRole: 'ads_admin',
-      reason: reason || `Website policy set to ${decision}`,
+      await tx.insert(adsSupplyStateHistory).values({
+        entityType: 'website',
+        entityId: websiteId,
+        dimension: 'policy_status',
+        fromState: existing.policyStatus,
+        toState: decision,
+        actorId: reviewerId || null,
+        actorRole: 'ads_admin',
+        reason: reason || `Website policy set to ${decision}`,
+      });
+      return updated;
     });
-
-    return updated;
   }
 
   /**

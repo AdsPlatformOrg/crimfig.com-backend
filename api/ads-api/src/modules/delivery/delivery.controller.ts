@@ -202,6 +202,7 @@ export class DeliveryController {
       req
         ? {
             measurementConsent:consent==='granted',
+            consentState:consent==='granted'||consent==='denied'?consent:'unknown',
             origin: req.headers['origin'] as string | undefined,
             referer: req.headers['referer'] as string | undefined,
           }

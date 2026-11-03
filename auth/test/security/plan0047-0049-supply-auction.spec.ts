@@ -1,3 +1,4 @@
+import {paidDeliveryReadiness} from '../../../api/ads-api/src/modules/delivery/paid-delivery-policy';
 import * as vm from 'vm';
 import {
   BadRequestException,
@@ -187,7 +188,7 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
               innerJoin: jest.fn(() => ({
                 innerJoin: jest.fn(() => ({
                   leftJoin: jest.fn(() => ({
-                    where: jest.fn(async () => candidates),
+                    where: jest.fn(() => ({limit: jest.fn(async () => candidates)})),
                   })),
                 })),
               })),
@@ -360,6 +361,19 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
         expect(insertedServes.some(s=>s.inventoryClass==='paid')).toBe(false);
         expect(insertedServes).toHaveLength(1);expect(insertedServes[0]).toMatchObject({inventoryClass:'house',financialEligibility:'invalid',billingPriceNanos:0n});
       } finally {if(previous===undefined)delete process.env.ADS_PAID_SERVING_ENABLED;else process.env.ADS_PAID_SERVING_ENABLED=previous;}
+    });
+
+
+    it.each([undefined,false])('PLAN0080 missing measurement consent %s does not force House Ads on otherwise approved supply',async consent=>{
+      const original={...process.env};try{
+        Object.assign(process.env,{ADS_PAID_SERVING_ENABLED:'true',ADS_PAID_RELEASE_ENABLED:'true',INTERNAL_ECOSYSTEM_KEY:'local-only',BILLING_API_URL:'https://billing.example.test',ADS_EVIDENCE_HASH_SECRET:'local-fixture-'.repeat(4),ADS_AUCTION_POLICY_APPROVAL:JSON.stringify({version:'local-test',approvedBy:'test-fixture-only',approvedAt:'2026-01-01T00:00:00Z',fractionalClosure:'write_off_subcent',pctrBasisPoints:150,pricing:'second_price',bidderGrouping:'advertiser',floors:'bid_and_clearing',eventWindowMs:900000,ingestionToleranceMs:60000})});
+        expect(paidDeliveryReadiness().ready).toBe(true);
+        const row={slot:{id:'44444444-4444-4444-8444-444444444444',slotTagId:'cf-slot-consent-fixture',format:'banner',lifecycleStatus:'active',isActive:true},website:{id:'55555555-5555-4555-8555-555555555555',domain:'publisher.example.test',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'approved',isActive:true,isSuspended:false},promoter:{id:'66666666-6666-4666-8666-666666666666',isActive:true,isSuspended:false,trustScore:80}};
+        const {service,insertedServes}=buildDeliveryService(row);jest.spyOn((service as any).fraudRules,'assessSupplyRequestRisk').mockReturnValue({trafficRiskStatus:'normal'});
+        const auction = jest.spyOn((service as any).auctionEngine, 'resolveAuction');
+        await service.getAdForPlacement(row.slot.slotTagId,'203.0.113.20','Mozilla/5.0 Chrome/120.0','publisher.example.test',undefined,undefined,undefined,{origin:'https://publisher.example.test',measurementConsent:consent});
+        expect(auction).toHaveBeenCalledTimes(1);
+      }finally{process.env=original;}
     });
 
     it('serves a zero-charge CrimFig House Ad on verified testing slots and allows house click redirects without campaign budget', async () => {

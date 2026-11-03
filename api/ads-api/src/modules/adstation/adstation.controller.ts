@@ -400,7 +400,7 @@ export class AdstationController {
   })
   async reviewWebsitePolicy(
     @Req() req: any,
-    @Param('websiteId') websiteId: string,
+    @Param('websiteId', new ParseUUIDPipe()) websiteId: string,
     @Body()
     dto: {
       decision: 'approved' | 'rejected' | 'testing' | 'suspended';

@@ -124,6 +124,7 @@ try {
   const result = spawnSync(process.execPath, ['node_modules/jest/bin/jest.js', '--config', 'auth/jest.config.js',
     '--runInBand', '--runTestsByPath', ...(process.argv.includes('--moderation') ? ['auth/test/security/plan0077-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0077/backend-integration-results.json'] : ['auth/test/security/funding-postgres.spec.ts']),
     ...(process.argv.includes('--delivery-readiness') ? ['--testNamePattern','PLAN0079 owner-scoped','--json','--outputFile=../docs/reviews/plan-0079/backend-integration-results.json'] : []),
+    ...(process.argv.includes('--website-policy') ? ['--testNamePattern','PLAN0079 owner-scoped|PLAN0080 website policy','--json','--outputFile=../docs/reviews/plan-0080/backend-integration-results.json'] : []),
     ...(process.argv.includes('--provider-only') ? ['--testNamePattern', 'real Paystack TEST'] : []),
     ...(process.argv.includes('--transfer-only') ? ['--testNamePattern', 'real Paystack TEST transfer'] : []),
     ...(process.argv.includes('--oauth') ? ['--testNamePattern', 'real Redis OAuth'] : [])], {

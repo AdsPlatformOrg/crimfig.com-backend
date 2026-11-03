@@ -21,5 +21,5 @@ export function slotDeliveryDiagnostics(slot:{lifecycleStatus?:string;isActive?:
  if(website.policyStatus!=='approved')blockers.push('WEBSITE_APPROVAL_REQUIRED');
  if(slot.lifecycleStatus!=='active'||slot.isActive!==true)blockers.push('SLOT_NOT_ACTIVE');
  if(!paidDeliveryReadiness(env).ready)blockers.push('PLATFORM_PAID_DELIVERY_UNAVAILABLE');
- return {scope:'pre_auction',status:blockers.length?'blocked':'request_checks_pending',blockers,remainingChecks:['MEASUREMENT_CONSENT','TRAFFIC_RISK','CAMPAIGN_CURRENT_APPROVAL','ESCROW_BUDGET','TARGETING_SCHEDULE_DEVICE','FORMAT_PRESET_AND_AUCTION'],message:'These checks do not serve an ad or guarantee a paid fill. Ownership verification does not replace website suitability approval.'};
+ return {scope:'pre_auction',status:blockers.length?'blocked':'request_checks_pending',blockers,remainingChecks:['TRAFFIC_RISK','CAMPAIGN_CURRENT_APPROVAL','ESCROW_BUDGET','TARGETING_SCHEDULE_DEVICE','FORMAT_PRESET_AND_AUCTION'],message:'These checks do not serve an ad or guarantee a paid fill. Ownership verification does not replace website suitability approval.'};
 }
