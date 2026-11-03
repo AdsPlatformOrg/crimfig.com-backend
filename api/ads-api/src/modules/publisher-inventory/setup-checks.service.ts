@@ -36,7 +36,7 @@ export function hostMatchesDomain(domain: string, host: string): boolean {
 
 export function normalizePagePath(input?: string): string | null {
   if (input === undefined || input === null || input === '') return null;
-  if (typeof input !== 'string' || input.length > 256 || !input.startsWith('/') || /[\s\u0000-\u001f]/.test(input) || input.startsWith('//')) {
+  if (typeof input !== 'string' || input.length > 256 || !input.startsWith('/') || /\s/.test(input) || Array.from(input).some(character => character.charCodeAt(0) <= 31) || input.startsWith('//')) {
     throw new BadRequestException('pagePath must be a site-relative path such as /blog');
   }
   return input.split(/[?#]/)[0] || '/';

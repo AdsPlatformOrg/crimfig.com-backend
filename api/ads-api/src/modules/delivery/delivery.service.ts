@@ -874,7 +874,7 @@ export class DeliveryService {
     let chosenHouseCreativeId: string | null = null;
     let chosenHouseCreativeVersion = 1;
 
-    try {
+    {
       const dbHouseCreatives = await tx
         .select()
         .from(adsHouseCreatives)
@@ -889,7 +889,7 @@ export class DeliveryService {
 
       if (dbHouseCreatives && dbHouseCreatives.length > 0) {
         // PLAN-0067: Size-aware House creative matching considering slot allowed preset policy
-        let candidateCreatives = dbHouseCreatives.filter(c => 
+        const candidateCreatives = dbHouseCreatives.filter(c => 
           this.allowedAdTypes(params.format).includes(c.adType as any) &&
           (c.format === params.format || c.format === 'any') &&
           (c.adType === 'text' || (c.adType === 'image' && !!c.imageUrl) || (c.adType === 'video' && !!c.videoUrl))
@@ -943,7 +943,7 @@ export class DeliveryService {
         }
       }
       else return null;
-    } catch (error) { throw error; }
+    }
 
 
       let houseRewardContext:any=null;
