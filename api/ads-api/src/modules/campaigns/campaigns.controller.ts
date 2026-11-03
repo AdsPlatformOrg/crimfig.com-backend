@@ -1,3 +1,4 @@
+import { AdsRoles } from '../security/ads-staff-grants';
 import {
   Body,
   Controller,
@@ -410,6 +411,17 @@ export class CampaignsController {
   @Delete(':id/creatives/:creativeId')
   async deleteCreative(@Param('id',new ParseUUIDPipe()) id:string,@Param('creativeId',new ParseUUIDPipe()) creativeId:string,@Req() req:any,@Body() dto:MutationDto) {
     return {status:'success',data:await this.campaignsService.deleteCreative(id,creativeId,req.user.sub,dto)};
+  }
+
+  @AdsRoles('ads_admin', 'super_admin')
+  @Get('admin/:id/delivery-readiness')
+  async staffDeliveryReadiness(@Param('id', new ParseUUIDPipe()) id: string) {
+    return { status: 'success', data: await this.campaignsService.getStaffDeliveryReadiness(id) };
+  }
+
+  @Get(':id/delivery-readiness')
+  async deliveryReadiness(@Param('id', new ParseUUIDPipe()) id: string, @Req() req: any) {
+    return { status: 'success', data: await this.campaignsService.getDeliveryReadiness(id, req.user.sub) };
   }
 
   @Get(":id")

@@ -1,5 +1,6 @@
 import { responsiveImageBounds } from './image-sizing';
 import { APPROVED_IMAGE_AD_PRESETS } from '../uploads/image-ad-presets';
+import { adsPublicOrigin } from '@crimfig/shared';
 import {houseProgramRequested} from '../cfig/cfig-allocation';
 import { assertEventReplay, assertInstanceBinding } from './interaction-binding';
 import {DeliveryDeadlineError,DELIVERY_RUNTIME,requireDeliveryTime,withinDeliveryBudget} from './delivery-budgets';
@@ -162,10 +163,7 @@ export class DeliveryService {
   ) {}
 
   private publicBaseUrl(): string {
-    return (process.env.ADS_PUBLIC_URL || 'https://ads.crimfig.com').replace(
-      /\/+$/,
-      '',
-    );
+    return adsPublicOrigin();
   }
 
   /** Media is served by the Ads API itself; reject unrelated or relative external paths. */

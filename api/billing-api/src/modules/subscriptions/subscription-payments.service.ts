@@ -1,3 +1,4 @@
+import { fundingCallback } from '../wallet/funding-callback';
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { and, eq, sql } from 'drizzle-orm';
@@ -46,11 +47,7 @@ export class SubscriptionPaymentsService {
     try { price = subscriptionPrice(input.appSlug, input.planId, input.interval); }
     catch { throw new BadRequestException('Unknown subscription plan or interval'); }
     const domain = this.provider.paymentDomain();
-    const callback = new URL(process.env.BILLING_WEB_URL || (process.env.NODE_ENV === 'production' ? 'https://billing.crimfig.com/' : 'http://localhost:3007/'));
-    if (callback.username || callback.password || callback.search || callback.hash || callback.pathname !== '/' ||
-      !(callback.protocol === 'https:' || (process.env.NODE_ENV !== 'production' && callback.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(callback.hostname)))) {
-      throw new ServiceUnavailableException('Subscription callback is not configured safely');
-    }
+    const callback = new URL(fundingCallback());
     callback.searchParams.set('subscription_request', input.requestId.toLowerCase());
     const [prior] = await this.db.select().from(transactions).where(and(eq(transactions.reference, reference), eq(transactions.userId, input.userId)));
     const sameRequest = (row: any) => {

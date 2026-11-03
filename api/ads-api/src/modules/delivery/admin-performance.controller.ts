@@ -1,3 +1,4 @@
+import { readinessReport, websiteReadiness, installationReadiness } from './readiness-report';
 import {
   ApiBearerAuth,
   ApiTags,
@@ -96,6 +97,38 @@ export function performanceRates(row: any) {
 export class AdminPerformanceController {
   constructor(@Inject(DATABASE_TOKEN) private readonly db: any) {}
 
+  @Get("readiness/operations")
+  async readinessOperations() {
+    return this.db.transaction(async (tx: any) => {
+      await tx.execute(sql`SET LOCAL statement_timeout='8s'`);
+      const [campaigns] = (await tx.execute(sql`
+        WITH sample AS (
+          SELECT advertiser_id, moderation_status, submitted_at
+          FROM ads_campaigns
+          WHERE status IN ('active', 'under_review', 'pending_manager_approval')
+          ORDER BY created_at DESC, id DESC LIMIT 100
+        )
+        SELECT count(*)::int AS campaigns,
+          count(*) FILTER (WHERE u.status <> 'ACTIVE')::int AS "inactiveAccountCampaigns",
+          count(DISTINCT s.advertiser_id) FILTER (WHERE NOT u.is_email_verified)::int AS "unverifiedAdvertisers",
+          count(*) FILTER (WHERE s.moderation_status = 'pending_manager_approval')::int AS "managerReviewCampaigns",
+          min(s.submitted_at) FILTER (WHERE s.moderation_status IN ('pending_primary_review', 'pending_manager_approval')) AS "oldestPendingSubmissionAt"
+        FROM sample s JOIN users u ON u.id=s.advertiser_id
+      `)).rows;
+      const [slots] = (await tx.execute(sql`
+        WITH sample AS (
+          SELECT installation_checked_at FROM adstation_slots
+          WHERE is_active AND installation_status='verified'
+          ORDER BY updated_at DESC, id DESC LIMIT 100
+        )
+        SELECT count(*)::int AS slots, count(*) FILTER (
+          WHERE installation_checked_at IS NULL OR installation_checked_at <= now() - interval '24 hours'
+        )::int AS "staleInstallations" FROM sample
+      `)).rows;
+      return { status: 'success', data: { ...campaigns, ...slots, evaluatedAt: new Date().toISOString() } };
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
+  }
+
   /** Cohort report: select issued serves in [from,to), count their events before to. */
   async report(
     kind: "creatives" | "websites" | "slots" | "promoters",
@@ -168,9 +201,9 @@ export class AdminPerformanceController {
           if (q[key]) {
             const fields =
               key === "websiteId"
-                ? sql`id,domain AS label,verification_status AS "verificationStatus",policy_status AS "policyStatus",promoter_id AS "promoterId"`
+                ? sql`id,domain AS label,verification_status AS "verificationStatus",policy_status AS "policyStatus",verification_expires_at AS "verificationExpiresAt",is_active AS "isActive",is_suspended AS "isSuspended",promoter_id AS "promoterId"`
                 : key === "slotId"
-                  ? sql`id,name AS label,format,lifecycle_status AS "lifecycleStatus",installation_status AS "installationStatus",website_id AS "websiteId",promoter_id AS "promoterId"`
+                  ? sql`id,name AS label,slot_tag_id AS "slotTagId",format,lifecycle_status AS "lifecycleStatus",installation_status AS "installationStatus",installation_checked_at AS "installationCheckedAt",is_active AS "isActive",website_id AS "websiteId",promoter_id AS "promoterId"`
                   : key === "creativeId"
                     ? sql`id,title AS label,version,is_archived AS "isArchived"`
                     : sql`id,id::text AS label`;
@@ -215,10 +248,16 @@ export class AdminPerformanceController {
             sql`${base} SELECT s.inventory_class AS "inventoryClass", ${aggregate} FROM cohort s GROUP BY s.inventory_class ORDER BY s.inventory_class`,
           )
         ).rows;
+        const now = new Date();
+        const readiness = subject?.slotId ? readinessReport('slot', subject.slotId.id, now)
+          : subject?.websiteId ? readinessReport('website', subject.websiteId.id, now) : null;
+        if (readiness && subject?.websiteId) websiteReadiness(readiness, subject.websiteId, now, true);
+        if (readiness && subject?.slotId) installationReadiness(readiness, subject.slotId, now);
         return {
           status: "success",
           data: {
             subject,
+            readiness: readiness?.result() ?? null,
             summary: performanceRates(summary),
             items: rows.map(performanceRates),
             series: series.map(performanceRates),

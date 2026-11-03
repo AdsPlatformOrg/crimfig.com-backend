@@ -1,3 +1,4 @@
+import { adsPublicOrigin } from '@crimfig/shared';
 import {
   Injectable,
   Inject,
@@ -141,7 +142,7 @@ export class PlacementsService {
       .returning();
 
     // 5. Generate channel integration code
-    const baseUrl = process.env.ADS_PUBLIC_URL || "https://ads.crimfig.com";
+    const baseUrl = adsPublicOrigin();
     const embedSnippet = `<div id="cf-ad-${placementToken}" class="crimfig-ad-slot"></div>\n<script src="${baseUrl}/api/v1/delivery/embed.js" data-placement="${placementToken}" async></script>`;
     const shareLink = `${baseUrl}/api/v1/delivery/go/${placementToken}?pid=${params.promoterId}`;
 
@@ -186,7 +187,7 @@ export class PlacementsService {
       .where(eq(adsPlacements.promoterId, promoterId))
       .orderBy(desc(adsPlacements.createdAt));
 
-    const baseUrl = process.env.ADS_PUBLIC_URL || "https://ads.crimfig.com";
+    const baseUrl = adsPublicOrigin();
 
     return placements.map((p) => ({
       ...p,

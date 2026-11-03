@@ -17,6 +17,13 @@ const nullable = (schema: Schema): Schema => ({ ...schema, nullable: true });
 const object = (properties: Record<string, Schema>, required = Object.keys(properties)): Schema => ({
   type: 'object', properties, required, additionalProperties: true,
 });
+const readinessGate = object({
+  gateCode: str(), status: enumeration('eligible','blocked','action_required','pending','unknown','stale','unavailable','observed'),
+  explanation: str(), owner: str(), source: str(), action: str(), observedAt: nullable(str()), freshness: str(),
+}, ['gateCode','status','explanation','owner','source','observedAt','freshness']);
+const readinessReport = object({
+  version: num(), scope: enumeration('campaign','website','slot'), entityId: str(), evaluatedAt: str(), gates: array(readinessGate),
+});
 const optionalObject = (properties: Record<string, Schema>): Schema => object(properties, []);
 const json = (): Schema => ({ type: 'object', additionalProperties: true });
 export const scheduleSchema: Schema = { oneOf: [
@@ -95,6 +102,7 @@ const responses: Record<string, Record<string, Schema>> = {
     getCreationCapabilities: object({ geoTargetingEnabled: bool(), imagePreparationEnabled: bool(), videoAuthoringEnabled: bool(),
       supportedAdTypes: array(enumeration('text', 'image', 'video')), scheduleVersion: num(), allowedVideoPlacements: array(str()) }, ['geoTargetingEnabled', 'supportedAdTypes']),
     getAdvertiserCampaigns: array(campaign), createCampaign: campaign, findCreationRequest: nullable(campaign),
+    deliveryReadiness: readinessReport, staffDeliveryReadiness: readinessReport,
     getCampaignDetails: object(campaignProperties, [...campaign.required, 'adStacks', 'creatives']),
     createStack: stack, updateStack: stack, deleteStack: object({ deleted: bool(), stackId: str() }, []),
     addCreative: creative, replaceCreative: creative, submitForReview: campaign,

@@ -1,3 +1,4 @@
+import { firstPartyReturnAllowed } from '@crimfig/shared';
 import { Injectable, Inject, BadRequestException, UnauthorizedException, ServiceUnavailableException, OnModuleDestroy } from '@nestjs/common';
 import { eq, and } from 'drizzle-orm';
 import { createClient, type RedisClientType } from 'redis';
@@ -79,7 +80,7 @@ export class OAuthService implements OnModuleDestroy {
     let callback: URL;
     try { callback = new URL(redirectUri); } catch { throw new BadRequestException('Invalid redirect_uri'); }
     const local = ['localhost', '127.0.0.1', '[::1]'].includes(callback.hostname);
-    if (callback.username || callback.password || callback.hash || (callback.protocol !== 'https:' &&
+    if (!firstPartyReturnAllowed(callback) || callback.username || callback.password || callback.hash || (callback.protocol !== 'https:' &&
       !(config.IS_PRODUCTION === false && callback.protocol === 'http:' && local))) throw new BadRequestException('Invalid redirect_uri');
     return client;
   }

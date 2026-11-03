@@ -120,3 +120,5 @@ export * from './financial-security/provider-approval';
 export * from './financial-security/provider-broker';
 
 export * from './monitoring/request-diagnostics';
+
+export * from './config/public-origins';

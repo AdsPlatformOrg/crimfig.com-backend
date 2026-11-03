@@ -1,3 +1,4 @@
+import { publicAppOrigin } from '../config/public-origins';
 import {
   Injectable,
   CanActivate,
@@ -160,7 +161,7 @@ export class AppConsentGuard implements CanActivate {
       throw new ForbiddenException({
         error: 'CONSENT_REQUIRED',
         message: 'User has not accepted the current Terms of Service for this application.',
-        consentUrl: 'https://auth.crimfig.com/consent',
+        consentUrl: `${publicAppOrigin('auth',process.env.AUTH_WEB_URL)}/consent`,
       });
     }
 

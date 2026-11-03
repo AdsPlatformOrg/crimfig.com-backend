@@ -1,3 +1,7 @@
+import { AdminPerformanceController } from '../../../api/ads-api/src/modules/delivery/admin-performance.controller';
+import { DATABASE_TOKEN } from '../../../api/ads-api/src/modules/database/database.module';
+import { CampaignsController } from '../../../api/ads-api/src/modules/campaigns/campaigns.controller';
+import { CampaignsService } from '../../../api/ads-api/src/modules/campaigns/campaigns.service';
 import { Module, ValidationPipe } from '@nestjs/common';
 import { NestFactory, Reflector } from '@nestjs/core';
 import { AdstationController } from '../../../api/ads-api/src/modules/adstation/adstation.controller';
@@ -64,7 +68,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query('create table apps(id uuid primary key)');
     // Actual Drizzle columns/defaults/enums/unique constraints/FKs, not the serialized mock adapter.
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
-    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adsSupplyStateHistory, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
+    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adsSupplyStateHistory, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
     const enums = new Set<string>();
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
       if (col.enum && !enums.has(col.enum.enumName)) {
@@ -73,7 +77,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     }
     for (const table of tables) {
       const config = getTableConfig(table);
-      const columns = config.columns.map((col: any) => `${quote(col.name)} ${col.getSQLType()}${col.primary?' primary key':''}${col.notNull?' not null':''}${col.isUnique?' unique':''}${col.default!==undefined?' default '+defaultSql(col.default):''}`);
+      const columns = config.columns.map((col: any) => `${quote(col.name)} ${col.getSQLType()}${col.primary?' primary key':''}${col.notNull?' not null':''}${col.isUnique?' unique':''}${col.default!==undefined?' default '+(col.getSQLType()==='jsonb' && typeof col.default==='object' && !('queryChunks' in col.default) ? literal(JSON.stringify(col.default)) : defaultSql(col.default)):''}`);
       for (const unique of config.uniqueConstraints) columns.push(`constraint ${quote(unique.name!)} unique (${unique.columns.map(col=>quote(col.name)).join(',')})`);
       for (const fk of config.foreignKeys) { const ref = fk.reference(); columns.push(`foreign key (${ref.columns.map(col=>quote(col.name)).join(',')}) references ${quote(getTableName(ref.foreignTable))} (${ref.foreignColumns.map(col=>quote(col.name)).join(',')})`); }
       await pool.query(`create table ${quote(config.name)} (${columns.join(',')})`);
@@ -494,11 +498,11 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     expect((await svc.entitlement(owner,'chat')).entitled).toBe(true);
     await expect(svc.recoverReference(randomUUID(),row.reference)).rejects.toThrow('not found');
   });
-  async function settlementFixture(price = 100_000_000n, model = 'cpc') {
+  async function settlementFixture(price = 100_000_000n, model = 'cpc', reserve = true) {
     const [campaign] = await db.insert(schema.adsCampaigns).values({advertiserId:owner,title:'Versioned settlement fixture',budgetUsdCents:1000,
       remainingBudgetUsdCents:1000,status:'paused',moderationStatus:'approved',pricingVersion:2,pricingModel:model}).returning();
     await db.insert(schema.billingWallets).values({userId:owner,balanceUsdCents:2000});
-    await new CampaignEscrowService(db).change(owner,campaign.id,'reserve',undefined,'active');
+    if (reserve) await new CampaignEscrowService(db).change(owner,campaign.id,'reserve',undefined,'active');
     const publisher=randomUUID();await pool.query("insert into users(id,email,status) values($1,'publisher@example.test','ACTIVE')",[publisher]);
     const [promoter]=await db.insert(schema.adsPromoters).values({userId:publisher,type:'INDIVIDUAL'}).returning();
     const [stack]=await db.insert(schema.adsCreativeStacks).values({campaignId:campaign.id,name:'Ad Stack #1',position:1}).returning();
@@ -514,6 +518,77 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     };
     return {campaign,publisher,promoter,creative,placement,add,svc:new AdSettlementService(db)};
   }
+  test('PLAN0081 readiness HTTP scopes accounts and distinguishes House, paid serve and render', async () => {
+    const f = await settlementFixture(undefined, undefined, false);
+    await pool.query("update ads_campaigns set status='active' where id=$1", [f.campaign.id]);
+    const staff = randomUUID();
+    await pool.query("insert into users(id,email,status) values($1,'readiness-staff@example.test','ACTIVE')", [staff]);
+    const { serve, event } = await f.add();
+    await pool.query("update ads_serves set inventory_class='house' where id=$1", [serve.id]);
+    @Module({ controllers: [CampaignsController, AdminPerformanceController], providers: [{ provide: DATABASE_TOKEN, useValue: db }, {
+      provide: CampaignsService, useValue: new CampaignsService(db, {} as any, {} as any),
+    }] })
+    class ReadinessFixture {}
+    const jwt = new JwtService({ secret: 'local-readiness-test-key' });
+    const grants = { rolesFor: (id: string) => id === staff ? ['ads_admin'] : [] } as unknown as AdsStaffGrants;
+    const app = await NestFactory.create(ReadinessFixture, { logger: false });
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalGuards(new AdsAccessGuard(jwt, new Reflector(), db, grants));
+    await app.listen(0, '127.0.0.1');
+    async function request(actor: string, admin = false, path?: string) {
+      const prefix = admin ? 'admin/' : '';
+      const token = jwt.sign({ sub: actor, email: 'fixture@example.test', type: 'access' }, { expiresIn: '2m' });
+      const response = await fetch((await app.getUrl()) + (path ?? '/api/v1/campaigns/' + prefix + f.campaign.id + '/delivery-readiness'), {
+        headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(5000),
+      });
+      return { status: response.status, body: await response.json() as any };
+    }
+    try {
+      expect((await request(f.publisher)).status).toBe(404);
+      expect((await request(owner, true)).status).toBe(403);
+      const own = await request(owner);
+      const admin = await request(staff, true);
+      expect(own.status).toBe(200);
+      expect(admin.status).toBe(200);
+      const gate = (result: typeof own, code: string) => result.body.data.gates.find((g: any) => g.gateCode === code);
+      expect(gate(own, 'ADVERTISER_EMAIL').status).toBe('action_required');
+      expect(gate(own, 'ADVERTISER_EMAIL').action).toBe('verify_email');
+      expect(gate(admin, 'ADVERTISER_EMAIL').action).toBeUndefined();
+      expect(gate(own, 'PAID_SERVE').status).toBe('unknown');
+      expect(gate(admin, 'PAID_SERVE').status).toBe('unknown');
+      await pool.query("update ads_serves set inventory_class='paid' where id=$1", [serve.id]);
+      const issued = await request(owner);
+      expect(gate(issued, 'PAID_SERVE').status).toBe('observed');
+      expect(gate(issued, 'PAID_RENDER').status).toBe('unknown');
+      expect(gate(issued, 'BILLABLE_EVENT').status).toBe('unknown');
+      expect(gate(issued, 'RECONCILIATION').status).toBe('unknown');
+      await db.insert(schema.adsInteractions).values({ placementId: f.placement.id, promoterId: f.promoter.id,
+        serveId: serve.id, type: 'render', isValid: true });
+      const rendered = await request(owner);
+      expect(gate(rendered, 'PAID_RENDER').status).toBe('observed');
+      expect(gate(rendered, 'BILLABLE_EVENT').status).toBe('unknown');
+      expect(rendered.body.data).not.toHaveProperty('publisherId');
+      const [reservation] = await db.insert(schema.adsOpportunityReservations).values({
+        campaignId: f.campaign.id, serveId: serve.id, opportunityId: randomUUID(),
+        state: 'CLAIMED', claimedAt: new Date(), claimEventId: event.id, expiresAt: new Date(Date.now() + 60000),
+      }).returning();
+      await pool.query('update ads_serves set opportunity_reservation_id=$1 where id=$2', [reservation.id, serve.id]);
+      expect(gate(await request(owner), 'BILLABLE_EVENT').status).toBe('pending');
+      await db.insert(schema.adsEventAssessments).values({ eventId: event.id, campaignId: f.campaign.id,
+        requestId: randomUUID(), actorId: staff, policyVersion: 'local-fixture', outcome: 'eligible',
+        reasonCodes: [], features: {}, recordHash: 'fixture', keyId: 'fixture' });
+      const assessed = await request(owner);
+      expect(gate(assessed, 'BILLABLE_EVENT').status).toBe('observed');
+      expect(gate(assessed, 'RECONCILIATION').status).toBe('unknown');
+
+      const operations = '/api/v1/admin/ads/readiness/operations';
+      expect((await request(owner, false, operations)).status).toBe(403);
+      const sample = await request(staff, false, operations);
+      expect(sample.status).toBe(200);
+      expect(sample.body.data).toMatchObject({ campaigns: 1, unverifiedAdvertisers: 1, managerReviewCampaigns: 0 });
+    } finally { await app.close(); }
+  });
+
   test('independent rejection invalidates the fractional claim chain and rebates only its funded cents once', async () => {
     const f = await settlementFixture(6_000_000n, 'cpm');
     for (let n = 0; n < 3; n++) { await f.add(); await f.svc.settle(f.campaign.id, randomUUID(), new Date()); }

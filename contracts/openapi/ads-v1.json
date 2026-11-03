@@ -7977,6 +7977,108 @@
         ],
         "type": "object"
       },
+      "Campaigns_staffDeliveryReadinessResponse": {
+        "properties": {
+          "data": {
+            "allOf": [
+              {
+                "additionalProperties": true,
+                "properties": {
+                  "entityId": {
+                    "type": "string"
+                  },
+                  "evaluatedAt": {
+                    "type": "string"
+                  },
+                  "gates": {
+                    "items": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "action": {
+                          "type": "string"
+                        },
+                        "explanation": {
+                          "type": "string"
+                        },
+                        "freshness": {
+                          "type": "string"
+                        },
+                        "gateCode": {
+                          "type": "string"
+                        },
+                        "observedAt": {
+                          "nullable": true,
+                          "type": "string"
+                        },
+                        "owner": {
+                          "type": "string"
+                        },
+                        "source": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "eligible",
+                            "blocked",
+                            "action_required",
+                            "pending",
+                            "unknown",
+                            "stale",
+                            "unavailable",
+                            "observed"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "gateCode",
+                        "status",
+                        "explanation",
+                        "owner",
+                        "source",
+                        "observedAt",
+                        "freshness"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "scope": {
+                    "enum": [
+                      "campaign",
+                      "website",
+                      "slot"
+                    ],
+                    "type": "string"
+                  },
+                  "version": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "version",
+                  "scope",
+                  "entityId",
+                  "evaluatedAt",
+                  "gates"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "success"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "data"
+        ],
+        "type": "object"
+      },
       "CompleteUploadDto": {
         "properties": {
           "durationSeconds": {
@@ -22357,6 +22459,146 @@
         "x-ads-roles": []
       }
     },
+    "/api/v1/campaigns/admin/{id}/delivery-readiness": {
+      "get": {
+        "operationId": "Campaigns_staffDeliveryReadiness",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaigns_staffDeliveryReadinessResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Campaigns"
+        ],
+        "x-ads-roles": [
+          "ads_admin",
+          "super_admin"
+        ]
+      }
+    },
     "/api/v1/campaigns/catalog": {
       "get": {
         "operationId": "Campaigns_getCatalog",
@@ -24123,6 +24365,143 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/Campaigns_deleteCreativeResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Campaigns"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/campaigns/{id}/delivery-readiness": {
+      "get": {
+        "operationId": "Campaigns_deliveryReadiness",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Campaigns_staffDeliveryReadinessResponse"
                 }
               }
             },

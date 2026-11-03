@@ -1,3 +1,4 @@
+import { publicAppOrigin, authIssuer } from '@crimfig/shared';
 /**
  * Crimfig Auth API — Typed Configuration
  *
@@ -43,7 +44,7 @@ export const config = {
   },
 
   OAUTH: {
-    ISSUER: process.env.OAUTH_ISSUER ?? 'https://auth.crimfig.com',
+    ISSUER: authIssuer(),
     AUTH_CODE_EXPIRES_SECONDS: Number(process.env.OAUTH_AUTH_CODE_EXPIRES_SECONDS ?? 300),
   },
 
@@ -75,20 +76,8 @@ export const config = {
   },
 
   APP: {
-    AUTH_WEB_URL: (() => {
-      const url = process.env.AUTH_WEB_URL;
-      if (!url) {
-        return process.env.NODE_ENV === 'production' ? 'https://auth.crimfig.com' : 'http://localhost:3000';
-      }
-      return url.replace(/\/+$/, '');
-    })(),
-    ADS_WEB_URL: (() => {
-      const url = process.env.ADS_WEB_URL;
-      if (!url) {
-        return process.env.NODE_ENV === 'production' ? 'https://ads.crimfig.com' : 'http://localhost:3001';
-      }
-      return url.replace(/\/+$/, '');
-    })(),
+    AUTH_WEB_URL: publicAppOrigin('auth',process.env.AUTH_WEB_URL),
+    ADS_WEB_URL: publicAppOrigin('ads',process.env.ADS_WEB_URL),
 
   },
 

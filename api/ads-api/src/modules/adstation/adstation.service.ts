@@ -1,3 +1,4 @@
+import { readinessReport, websiteReadiness, installationReadiness } from '../delivery/readiness-report';
 import { slotDeliveryDiagnostics } from '../delivery/paid-delivery-policy';
 import {
   Injectable,
@@ -349,6 +350,10 @@ export class AdstationService {
       `/>`,
     ].join('\n');
 
+    const evaluatedAt = new Date();
+    const readiness = readinessReport('slot', slot.id, evaluatedAt);
+    websiteReadiness(readiness, website, evaluatedAt, false);
+    installationReadiness(readiness, slot, evaluatedAt);
     return {
       slotId: slot.id,
       slotTagId: slot.slotTagId,
@@ -357,6 +362,7 @@ export class AdstationService {
       lifecycleStatus: slot.lifecycleStatus,
       installationStatus: slot.installationStatus,
       deliveryReadiness:slotDeliveryDiagnostics(slot,website),
+      readiness: readiness.result(),
       adsPublicUrl,
       htmlSnippet,
       sdkSnippet,

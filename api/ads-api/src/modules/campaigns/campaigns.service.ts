@@ -1,3 +1,5 @@
+import { readinessReport } from '../delivery/readiness-report';
+import { paidDeliveryReadiness } from '../delivery/paid-delivery-policy';
 import { CampaignWorkflow, campaignCapabilities, assertEditableCampaign, currentApproval, controlRequired, fingerprint, type MutationControl } from './campaign-workflow';
 import { imageSpecsView } from "../uploads/prepared-image";
 import { createHash } from "crypto";
@@ -1270,6 +1272,129 @@ export class CampaignsService {
       remainingBudgetUsd: c.remainingBudgetUsdCents / 100,
       spentUsd: (c.budgetUsdCents - c.remainingBudgetUsdCents) / 100,
     }));
+  }
+
+  async getStaffDeliveryReadiness(campaignId: string) {
+    const [campaign] = await this.db.select({ owner: adsCampaigns.advertiserId }).from(adsCampaigns)
+      .where(eq(adsCampaigns.id, campaignId)).limit(1);
+    if (!campaign) throw new NotFoundException("Campaign not found.");
+    const report = await this.getDeliveryReadiness(campaignId, campaign.owner);
+    return { ...report, gates: report.gates.map(gate => ({ ...gate, action: undefined })) };
+  }
+
+  async getDeliveryReadiness(campaignId: string, advertiserId: string) {
+    return this.db.transaction(async tx => {
+      await tx.execute(sql`SET LOCAL statement_timeout='8s'`);
+      const [campaign] = await tx.select().from(adsCampaigns)
+        .where(and(eq(adsCampaigns.id, campaignId), eq(adsCampaigns.advertiserId, advertiserId))).limit(1);
+      if (!campaign) throw new NotFoundException("Campaign not found.");
+
+      const [accounts, escrows, serves] = await Promise.all([
+        tx.select({ status: schema.users.status, verified: schema.users.isEmailVerified })
+          .from(schema.users).where(eq(schema.users.id, advertiserId)).limit(1),
+        tx.select({ status: adsCampaignEscrows.status, owner: adsCampaignEscrows.userId })
+          .from(adsCampaignEscrows).where(eq(adsCampaignEscrows.campaignId, campaignId)).limit(1),
+        tx.select({ id: schema.adsServes.id, at: schema.adsServes.servedAt, reservationId: schema.adsServes.opportunityReservationId, decisionId: schema.adsServes.auctionDecisionId })
+          .from(schema.adsServes)
+          .where(and(eq(schema.adsServes.campaignId, campaignId), eq(schema.adsServes.inventoryClass, 'paid')))
+          .orderBy(desc(schema.adsServes.servedAt)).limit(1),
+      ]);
+      const [account] = accounts;
+      const [escrow] = escrows;
+      const [serve] = serves;
+      const now = new Date();
+      const report = readinessReport('campaign', campaignId, now);
+      report.add('ADVERTISER_ACCOUNT', !account ? 'unknown' : account.status === 'ACTIVE' ? 'eligible' : 'blocked',
+        account?.status === 'ACTIVE' ? 'Advertiser account is active.' : 'Paid delivery requires an active advertiser account.',
+        'Advertiser', 'Auth account');
+      report.add('ADVERTISER_EMAIL', !account ? 'unknown' : account.verified ? 'eligible' : 'action_required',
+        account?.verified ? 'Email verified.' : 'Check your email verification in CrimFig Auth.',
+        'Advertiser', 'Auth account', account && !account.verified ? 'verify_email' : undefined);
+      const approval = currentApproval(campaign);
+      const pending = ['pending_primary_review', 'pending_manager_approval'].includes(campaign.moderationStatus);
+      report.add('CAMPAIGN_APPROVAL', approval ? 'eligible' : pending ? 'pending' : 'action_required',
+        approval ? 'Current revision is approved.' : campaign.moderationStatus === 'pending_manager_approval'
+          ? 'Awaiting manager approval.' : 'Current campaign revision needs approval.',
+        pending ? 'Moderation' : 'Advertiser', 'Campaign revision');
+      const active = campaign.status === 'active';
+      report.add('CAMPAIGN_ACTIVE', active ? 'eligible' : 'blocked',
+        active ? 'Campaign is active.' : 'Campaign must be active to deliver.', 'Advertiser', 'Campaign status');
+      const inWindow = (!campaign.startsAt || campaign.startsAt <= now) && (!campaign.endsAt || campaign.endsAt > now);
+      report.add('CAMPAIGN_WINDOW', inWindow ? 'eligible' : 'blocked',
+        inWindow ? 'Campaign is within its start and end dates.' : 'Campaign is outside its start and end dates.',
+        'Advertiser', 'Campaign dates');
+      const funded = escrow?.status === 'active' && escrow.owner === advertiserId && campaign.remainingBudgetUsdCents > 0;
+      report.add('CAMPAIGN_ESCROW', funded ? 'eligible' : 'blocked',
+        funded ? 'Active escrow and campaign budget are recorded. Billing checks capacity at delivery.'
+          : 'An active funded escrow and remaining budget are required.', 'Advertiser', 'Campaign escrow');
+      const releaseReady = paidDeliveryReadiness().ready;
+      report.add('ADS_RELEASE', releaseReady ? 'eligible' : 'blocked',
+        releaseReady ? 'Ads release checks pass. Billing checks its own release at reservation.'
+          : 'Paid serving is unavailable. Ads Operations owns this check.', 'Ads Operations', 'Ads release configuration');
+      report.add('REQUEST_ELIGIBILITY', 'unknown',
+        'Publisher inventory, targeting, creative compatibility, pacing and traffic are evaluated for each request.',
+        'Ads Operations', 'Paid request evaluation');
+      const [decision] = serve?.decisionId ? await tx.select({ at: schema.adsAuctionDecisions.createdAt })
+        .from(schema.adsAuctionDecisions).where(and(
+          eq(schema.adsAuctionDecisions.id, serve.decisionId),
+          eq(schema.adsAuctionDecisions.serveId, serve.id),
+          eq(schema.adsAuctionDecisions.winnerCampaignId, campaignId),
+          eq(schema.adsAuctionDecisions.inventoryClass, 'paid'),
+        )).limit(1) : [];
+      report.add('AUCTION_SELECTION', decision ? 'observed' : 'unknown',
+        decision ? 'A paid auction decision selected this campaign for the latest serve.'
+          : 'No linked paid auction selection was found. No-fill and losing requests are outside this sample.',
+        'Ads Operations', 'Linked auction decision', undefined, decision?.at);
+      report.add('PAID_SERVE', serve ? 'observed' : 'unknown',
+        serve ? 'Latest paid serve recorded for this campaign.' : 'No paid serve evidence was found for this campaign.',
+        'Ads Operations', 'Paid serve record', undefined, serve?.at);
+      if (serve) {
+        const [renders, claims, settlements] = await Promise.all([
+          tx.select({ at: schema.adsInteractions.createdAt }).from(schema.adsInteractions)
+            .where(and(eq(schema.adsInteractions.serveId, serve.id), eq(schema.adsInteractions.type, 'render')))
+            .orderBy(desc(schema.adsInteractions.createdAt)).limit(1),
+          serve.reservationId ? tx.select({ at: schema.adsOpportunityReservations.claimedAt,
+            eventId: schema.adsOpportunityReservations.claimEventId })
+            .from(schema.adsOpportunityReservations).where(and(
+              eq(schema.adsOpportunityReservations.id, serve.reservationId),
+              eq(schema.adsOpportunityReservations.campaignId, campaignId),
+              eq(schema.adsOpportunityReservations.serveId, serve.id),
+              eq(schema.adsOpportunityReservations.isSimulated, false),
+            )).limit(1) : [],
+          tx.select({ status: schema.adsSettlementBatches.status, at: schema.adsSettlementBatches.completedAt })
+            .from(schema.adsSettlementClaims).innerJoin(schema.adsSettlementBatches,
+              eq(schema.adsSettlementClaims.batchId, schema.adsSettlementBatches.id))
+            .where(eq(schema.adsSettlementClaims.serveId, serve.id)).limit(1),
+        ]);
+        const [render] = renders;
+        const [claim] = claims;
+        report.add('PAID_RENDER', render ? 'observed' : 'unknown',
+          render ? 'Render receipt recorded for the latest paid serve.' : 'No render receipt found for the latest paid serve.',
+          'Ads Operations', 'Render receipt', undefined, render?.at);
+        const [assessment] = claim?.eventId ? await tx.select({
+          outcome: schema.adsEventAssessments.outcome, at: schema.adsEventAssessments.createdAt,
+        }).from(schema.adsEventAssessments).where(eq(schema.adsEventAssessments.eventId, claim.eventId))
+          .orderBy(desc(schema.adsEventAssessments.createdAt), desc(schema.adsEventAssessments.id)).limit(1) : [];
+        report.add('BILLABLE_EVENT', assessment?.outcome === 'eligible' ? 'observed'
+          : assessment?.outcome === 'invalid' ? 'blocked' : claim?.at ? 'pending' : 'unknown',
+          assessment?.outcome === 'eligible' ? 'Billing assessment marked the claimed event eligible.'
+            : assessment?.outcome === 'invalid' ? 'Billing assessment marked the event invalid.'
+            : claim?.at ? 'Billing claim recorded. Eligible assessment evidence is pending.' : 'No Billing claim found.',
+          'Billing Operations', 'Latest Billing event assessment', undefined, assessment?.at ?? claim?.at ?? undefined);
+        const [settlement] = settlements;
+        report.add('RECONCILIATION', settlement?.status === 'completed' && settlement.at ? 'observed'
+          : settlement?.status === 'failed' ? 'unavailable' : settlement ? 'pending' : 'unknown',
+          settlement?.status === 'completed' && settlement.at ? 'A completed settlement batch contains this serve.'
+            : settlement?.status === 'failed' ? 'Settlement batch failed. Billing Operations owns the investigation.'
+            : settlement ? 'Settlement batch is pending.' : 'No settlement claim found for this serve.',
+          'Billing Operations', 'Settlement claim and batch', undefined, settlement?.at ?? undefined);
+      } else {
+        report.add('PAID_RENDER', 'unknown', 'Awaiting paid render evidence.', 'Ads Operations', 'Render receipt');
+        report.add('BILLABLE_EVENT', 'unknown', 'Awaiting a validated Billing claim.', 'Billing Operations', 'Billing event');
+        report.add('RECONCILIATION', 'unknown', 'Awaiting settlement evidence.', 'Billing Operations', 'Settlement');
+      }
+      return report.result();
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
   }
 
   async getCampaignDetails(campaignId: string, advertiserId: string) {

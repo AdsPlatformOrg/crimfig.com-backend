@@ -11,8 +11,8 @@ Use an origin such as `https://billing.crimfig.com`: no path, wildcard, credenti
 backslash, query string or fragment. Keep valid JSON, with commas between entries.
 Rebuild and deploy the backend after editing; the file is included in the compiled shared package.
 
-Use `auth.staging.crimfig.com`, `ads.staging.crimfig.com` and
-`billing.staging.crimfig.com` for staging session acceptance. Their common site
+Use `staging-auth.crimfig.com`, `staging-ads.crimfig.com` and
+`staging-billing.crimfig.com` for staging session acceptance. Their common site
 supports secure, host-only Auth cookies with `SameSite=Strict`. The separate Railway
 preview domains are suitable for health checks, but do not establish this cookie flow.
 
