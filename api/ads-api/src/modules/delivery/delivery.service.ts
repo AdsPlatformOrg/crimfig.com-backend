@@ -5,7 +5,7 @@ import {houseProgramRequested} from '../cfig/cfig-allocation';
 import { assertEventReplay, assertInstanceBinding } from './interaction-binding';
 import {DeliveryDeadlineError,DELIVERY_RUNTIME,requireDeliveryTime,withinDeliveryBudget} from './delivery-budgets';
 import {EvidenceService} from './evidence.service';
-import {OpportunityClient,OpportunityHttpError} from '../billing/opportunity-client';
+import {OpportunityClient,OpportunityConflictError,OpportunityHttpError} from '../billing/opportunity-client';
 import {adDigest,approvedAdPolicy,stableAdValue} from '@crimfig/shared';
 import { currentApproval } from '../campaigns/campaign-workflow';
 import { paidDeliveryReadiness } from './paid-delivery-policy';
@@ -1724,7 +1724,8 @@ export class DeliveryService {
         409: 'BILLING_OPPORTUNITY_CONFLICT',
       };
       const rejection = upstreamStatus === null ? undefined : rejectionReasons[upstreamStatus];
-      const reasonCode = error instanceof DeliveryDeadlineError ? 'DELIVERY_DEADLINE_EXCEEDED' : rejection ?? 'BILLING_OUTCOME_UNCONFIRMED';
+      const reasonCode = error instanceof DeliveryDeadlineError ? 'DELIVERY_DEADLINE_EXCEEDED' :
+        (error instanceof OpportunityConflictError ? error.reasonCode : undefined) ?? rejection ?? 'BILLING_OUTCOME_UNCONFIRMED';
       const attemptOutcome = rejection ? 'rejected' : 'unconfirmed';
       return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
         promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',

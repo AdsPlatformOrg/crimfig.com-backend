@@ -1,6 +1,8 @@
 import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
 import { AdOpportunityController } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.controller';
 import { AdOpportunityService } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.service';
+import { OpportunityClient, OpportunityConflictError } from '../../../api/ads-api/src/modules/billing/opportunity-client';
+import { ConfigService } from '@nestjs/config';
 import { eventPriceNanos, reservePriceMicrosForModel } from '../../../api/ads-api/src/modules/delivery/pricing-contract';
 import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
 import { PublisherInventoryController } from '../../../api/ads-api/src/modules/publisher-inventory/publisher-inventory.controller';
@@ -113,10 +115,12 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     @Module({controllers:[AdOpportunityController],providers:[{provide:AdOpportunityService,useValue:new AdOpportunityService(db)}]})
     class BillingHandoffFixture {}
     const app = await NestFactory.create(BillingHandoffFixture, {logger:false});
+    app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(new ValidationPipe({transform:true,whitelist:true}));
     try {
       await app.listen(0,'127.0.0.1');
-      const base = `${await app.getUrl()}/ecosystem/ad-opportunities`;
+      const origin = await app.getUrl();
+      const base = `${origin}/api/v1/ecosystem/ad-opportunities`;
       const id = randomUUID();
       const request = (body: object, internalKey?: string) => fetch(`${base}/reserve`, {
         method:'POST',headers:{'Content-Type':'application/json',...(internalKey?{'x-internal-key':internalKey}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(5000),
@@ -148,6 +152,11 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       const priceNanos=eventPriceNanos('cpc',clearingPriceMicros).toString();
       const decision={requestId:opportunityId,winnerCampaignId:f.campaign.id,winnerCreativeId:f.creative.id,clearingPriceMicros,billingPriceNanos:priceNanos,policyVersion:'plan0092-fixture',bidderGroupingMode:'advertiser',tieSeed:'fixture',candidateCount:1,eligibleGroupCount:1,evaluatedCandidates:[],excludedCandidates:[]};
       const paid={...body,serveBefore:new Date(Date.now()+9000).toISOString(),opportunityId,campaignId:f.campaign.id,creativeId:f.creative.id,submissionId:f.campaign.currentSubmissionId,contentRevision:f.campaign.contentRevision,promoterId:f.promoter.id,websiteId:site.id,slotId:slot.id,policyVersion:decision.policyVersion,priceNanos,clearingPriceMicros,decision};
+      const client = new OpportunityClient(new ConfigService({ BILLING_API_URL:origin, INTERNAL_ECOSYSTEM_KEY:key }));
+      await pool.query("update users set status='SUSPENDED' where id=$1",[f.publisher]);
+      await expect(client.reserve(paid)).rejects.toMatchObject({reasonCode:'BILLING_ACCOUNT_INELIGIBLE'} satisfies Partial<OpportunityConflictError>);
+      expect((await pool.query('select count(*)::int n from ads_opportunity_reservations where opportunity_id=$1',[opportunityId])).rows[0].n).toBe(0);
+      await pool.query("update users set status='ACTIVE' where id=$1",[f.publisher]);
       const first=await request(paid,key);
       expect(first.status).toBe(201);
       await first.arrayBuffer(); // Model a lost acknowledgement and replay the same binding.
@@ -155,6 +164,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect(repeated.status).toBe(201);
       const held=(await repeated.json() as any).data;
       expect(held).toMatchObject({authorityVersion:'opportunity-v1',opportunityId,state:'HELD'});
+      await expect(client.reserve({...paid, visitorKey:'b'.repeat(64)})).rejects.toMatchObject({reasonCode:'BILLING_IDENTITY_CONFLICT'});
       const issue=()=>fetch(`${base}/${held.reservationId}/issue`,{method:'POST',headers:{'Content-Type':'application/json','x-internal-key':key},body:JSON.stringify({bindingFingerprint:held.bindingFingerprint}),signal:AbortSignal.timeout(5000)});
       const issued=await issue();
       expect(issued.status).toBe(201);
