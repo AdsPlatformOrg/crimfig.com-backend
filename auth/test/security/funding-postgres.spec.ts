@@ -145,7 +145,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
         ADS_AUCTION_POLICY_APPROVAL:JSON.stringify({version:'plan0092-fixture',approvedBy:'JED',approvedAt:'2026-11-03T00:00:00Z',pricing:'second_price',bidderGrouping:'advertiser',floors:'bid_and_clearing',fractionalClosure:'write_off_subcent',pctrBasisPoints:150,eventWindowMs:900000,ingestionToleranceMs:60000}),
       });
       await pool.query('update ads_campaigns set cost_per_click_usd_cents=100 where id=$1',[f.campaign.id]);
-      await pool.query("update ads_creatives set ad_format='banner' where id=$1",[f.creative.id]);
+      await pool.query("update ads_creatives set ad_format='banner',ad_type='image',image_url='https://billing.example.test/banner.png' where id=$1",[f.creative.id]);
       const [site] = await db.insert(schema.adsPromoterWebsites).values({promoterId:f.promoter.id,url:'https://billing.example.test',domain:'billing.example.test',verificationToken:randomUUID(),verificationMethod:'dns_txt',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'approved'}).returning();
       const [slot] = await db.insert(schema.adstationSlots).values({websiteId:site.id,promoterId:f.promoter.id,name:'Billing fixture',slotTagId:'cf-slot-plan0092-billing',slotType:'network',format:'banner',lifecycleStatus:'active',installationStatus:'verified',allowedAdTypes:'["text"]',isActive:true}).returning();
       const opportunityId=randomUUID(), clearingPriceMicros=reservePriceMicrosForModel('cpc');
@@ -153,10 +153,37 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       const decision={requestId:opportunityId,winnerCampaignId:f.campaign.id,winnerCreativeId:f.creative.id,clearingPriceMicros,billingPriceNanos:priceNanos,policyVersion:'plan0092-fixture',bidderGroupingMode:'advertiser',tieSeed:'fixture',candidateCount:1,eligibleGroupCount:1,evaluatedCandidates:[],excludedCandidates:[]};
       const paid={...body,serveBefore:new Date(Date.now()+9000).toISOString(),opportunityId,campaignId:f.campaign.id,creativeId:f.creative.id,submissionId:f.campaign.currentSubmissionId,contentRevision:f.campaign.contentRevision,promoterId:f.promoter.id,websiteId:site.id,slotId:slot.id,policyVersion:decision.policyVersion,priceNanos,clearingPriceMicros,decision};
       const client = new OpportunityClient(new ConfigService({ BILLING_API_URL:origin, INTERNAL_ECOSYSTEM_KEY:key }));
+      const ledgerBefore=(await pool.query('select count(*)::int n from billing_transactions')).rows[0].n;
       await pool.query("update users set status='SUSPENDED' where id=$1",[f.publisher]);
       await expect(client.reserve(paid)).rejects.toMatchObject({reasonCode:'BILLING_ACCOUNT_INELIGIBLE'} satisfies Partial<OpportunityConflictError>);
       expect((await pool.query('select count(*)::int n from ads_opportunity_reservations where opportunity_id=$1',[opportunityId])).rows[0].n).toBe(0);
       await pool.query("update users set status='ACTIVE' where id=$1",[f.publisher]);
+      await pool.query("update ads_creatives set ad_format='card' where id=$1",[f.creative.id]);
+      await expect(client.reserve(paid)).rejects.toMatchObject({reasonCode:'BILLING_CREATIVE_FORMAT_MISMATCH'});
+      await pool.query("update ads_creatives set ad_format='banner', review_status='pending' where id=$1",[f.creative.id]);
+      await expect(client.reserve(paid)).rejects.toMatchObject({reasonCode:'BILLING_CREATIVE_NOT_APPROVED'});
+      await pool.query("update ads_creatives set review_status='approved' where id=$1",[f.creative.id]);
+      await expect(client.reserve({...paid,creativeId:randomUUID(),decision:{...decision,winnerCreativeId:'different'}})).rejects.toMatchObject({reasonCode:'BILLING_DECISION_BINDING_MISMATCH'});
+      const missingCreativeId = randomUUID();
+      await expect(client.reserve({...paid,creativeId:missingCreativeId,decision:{...decision,winnerCreativeId:missingCreativeId}})).rejects.toMatchObject({reasonCode:'BILLING_CREATIVE_NOT_FOUND'});
+      await pool.query("update ads_creatives set status='paused' where id=$1",[f.creative.id]);
+      await expect(client.reserve(paid)).rejects.toMatchObject({reasonCode:'BILLING_CREATIVE_INACTIVE'});
+      await pool.query("update ads_creatives set status='active' where id=$1",[f.creative.id]);
+      await pool.query('update ads_creative_stacks set archived=true where id=$1',[f.creative.adStackId]);
+      await expect(client.reserve(paid)).rejects.toMatchObject({reasonCode:'BILLING_CREATIVE_STACK_ARCHIVED'});
+      await pool.query('update ads_creative_stacks set archived=false where id=$1',[f.creative.adStackId]);
+      process.env.CREATIVE_VIDEO_AUTHORING_ENABLED='false';
+      await pool.query("update ads_creatives set ad_type='video' where id=$1",[f.creative.id]);
+      await expect(client.reserve(paid)).rejects.toMatchObject({reasonCode:'BILLING_CREATIVE_VIDEO_DISABLED'});
+      await pool.query("update ads_creatives set ad_type='image' where id=$1",[f.creative.id]);
+      for (const [stored, reasonCode] of [['[]','BILLING_CREATIVE_TYPE_NOT_ALLOWED'],['["text"]','BILLING_CREATIVE_TYPE_NOT_ALLOWED'],['{','BILLING_CREATIVE_SLOT_TYPES_INVALID'],['["IMAGE"]','BILLING_CREATIVE_SLOT_TYPES_INVALID']]) {
+        await pool.query('update adstation_slots set allowed_ad_types=$1 where id=$2',[stored,slot.id]);
+        await expect(client.reserve(paid)).rejects.toMatchObject({reasonCode});
+      }
+      await pool.query('update adstation_slots set allowed_ad_types=null where id=$1',[slot.id]);
+      expect((await pool.query('select count(*)::int n from ads_opportunity_reservations where opportunity_id=$1',[opportunityId])).rows[0].n).toBe(0);
+      expect((await pool.query('select count(*)::int n from billing_transactions')).rows[0].n).toBe(ledgerBefore);
+      paid.serveBefore=new Date(Date.now()+9000).toISOString();
       const first=await request(paid,key);
       expect(first.status).toBe(201);
       await first.arrayBuffer(); // Model a lost acknowledgement and replay the same binding.

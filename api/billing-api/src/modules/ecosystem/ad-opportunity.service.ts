@@ -1,3 +1,4 @@
+import { resolveSlotCreativeTypes } from './creative-slot-policy';
 import type { OpportunityConflictCode } from './ad-opportunity-conflict-codes';
 import {BadRequestException,ConflictException,Inject,Injectable,NotFoundException,ServiceUnavailableException} from '@nestjs/common';
 import {randomUUID} from 'crypto';
@@ -66,7 +67,18 @@ export class AdOpportunityService {
       const supply=await this.supply(tx,input,c);
       const [creative]=await tx.select().from(s.adsCreatives).where(and(eq(s.adsCreatives.id,input.creativeId),eq(s.adsCreatives.campaignId,c.id))).for('share').limit(1);
       const [stack]=creative?await tx.select().from(s.adsCreativeStacks).where(eq(s.adsCreativeStacks.id,creative.adStackId)).for('share').limit(1):[];
-      if(!creative||creative.adType==='video'&&process.env.CREATIVE_VIDEO_AUTHORING_ENABLED!=='true'||creative.status!=='active'||creative.reviewStatus!=='approved'||!stack||stack.archived||stack.campaignId!==c.id||supply.slot.format!==creative.adFormat||!JSON.parse(supply.slot.allowedAdTypes||'[]').includes(creative.adType))throw opportunityConflict('BILLING_CREATIVE_INELIGIBLE','Creative eligibility changed');
+      if (!creative) throw opportunityConflict('BILLING_CREATIVE_NOT_FOUND', 'Creative is unavailable for this campaign');
+      if (creative.adType === 'video' && process.env.CREATIVE_VIDEO_AUTHORING_ENABLED !== 'true')
+        throw opportunityConflict('BILLING_CREATIVE_VIDEO_DISABLED', 'Video delivery is disabled');
+      if (creative.status !== 'active') throw opportunityConflict('BILLING_CREATIVE_INACTIVE', 'Creative is inactive');
+      if (creative.reviewStatus !== 'approved') throw opportunityConflict('BILLING_CREATIVE_NOT_APPROVED', 'Creative is not approved');
+      if (!stack) throw opportunityConflict('BILLING_CREATIVE_STACK_NOT_FOUND', 'Creative stack is unavailable');
+      if (stack.archived) throw opportunityConflict('BILLING_CREATIVE_STACK_ARCHIVED', 'Creative stack is archived');
+      if (stack.campaignId !== c.id) throw opportunityConflict('BILLING_CREATIVE_STACK_MISMATCH', 'Creative stack does not belong to this campaign');
+      if (supply.slot.format !== creative.adFormat) throw opportunityConflict('BILLING_CREATIVE_FORMAT_MISMATCH', 'Creative format does not match the slot');
+      const allowed = resolveSlotCreativeTypes(supply.slot.allowedAdTypes);
+      if (allowed.source === 'invalid') throw opportunityConflict('BILLING_CREATIVE_SLOT_TYPES_INVALID', 'Slot creative type settings are invalid');
+      if (!allowed.types.includes(creative.adType)) throw opportunityConflict('BILLING_CREATIVE_TYPE_NOT_ALLOWED', 'Creative type is not allowed for this slot');
       const [escrow]=await tx.select().from(s.adsCampaignEscrows).where(eq(s.adsCampaignEscrows.campaignId,c.id)).for('update').limit(1);
       if(!escrow||escrow.status!=='active'||escrow.userId!==c.advertiserId)throw opportunityConflict('BILLING_ESCROW_INACTIVE','Active funded escrow is required');
       const [proof]=await tx.select().from(s.billingTransactions).where(eq(s.billingTransactions.idempotencyKey,`ads-escrow:v2:${escrow.id}:reserve:${escrow.allocatedUsdCents}`)).limit(1);

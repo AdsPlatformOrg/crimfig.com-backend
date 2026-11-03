@@ -1,5 +1,24 @@
 import { paidDeliveryReadiness, slotDeliveryDiagnostics } from '../../../api/ads-api/src/modules/delivery/paid-delivery-policy';
 import { ConflictException } from '@nestjs/common';
+import { resolveSlotCreativeTypes } from '../../../api/billing-api/src/modules/ecosystem/creative-slot-policy';
+
+describe('PLAN-0094 canonical slot creative types', () => {
+  it.each([
+    [null, 'default', ['text', 'image']],
+    [undefined, 'default', ['text', 'image']],
+    ['[]', 'configured', []],
+    ['["image"]', 'configured', ['image']],
+    ['["video"]', 'configured', ['video']],
+    ['null', 'invalid', []],
+    ['{}', 'invalid', []],
+    ['[', 'invalid', []],
+    ['["IMAGE"]', 'invalid', []],
+    ['["image","unsupported"]', 'invalid', []],
+    ['', 'invalid', []],
+  ] as const)('resolves stored setting %s without widening explicit rules', (stored, source, types) => {
+    expect(resolveSlotCreativeTypes(stored)).toEqual({source, types});
+  });
+});
 import { DeliveryService, CRIMFIG_HOUSE_CREATIVE, HOUSE_CAMPAIGN_UUID, HOUSE_CREATIVE_UUID } from '../../../api/ads-api/src/modules/delivery/delivery.service';
 import { AuctionEngineService } from '../../../api/ads-api/src/modules/delivery/auction-engine.service';
 import { ImpressionTokenService } from '../../../api/ads-api/src/modules/delivery/impression-token.service';

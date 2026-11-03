@@ -1,3 +1,4 @@
+import { resolveSlotCreativeTypes } from '../../../../billing-api/src/modules/ecosystem/creative-slot-policy';
 import { responsiveImageBounds } from './image-sizing';
 import { APPROVED_IMAGE_AD_PRESETS } from '../uploads/image-ad-presets';
 import { adsPublicOrigin } from '@crimfig/shared';
@@ -1453,6 +1454,9 @@ export class DeliveryService {
         campaignSchedule: adsCampaigns.schedule,
         campaignGeoMode: adsCampaigns.geoMode,
         adStackId: adsCreatives.adStackId,
+        creativeStatus: adsCreatives.status,
+        creativeModerationStatus: adsCreatives.reviewStatus,
+        stackArchived: adsCreativeStacks.archived,
         stackGeoMode: adsCreativeStacks.geoMode,
         stackTargetDevices: adsCreativeStacks.targetDevices,
         stackTargetHours: adsCreativeStacks.targetHours,
@@ -1496,15 +1500,8 @@ export class DeliveryService {
     const requestedHandle = canonicalSlot
       ? canonicalSlot.slotTagId
       : this.requestedPlacementHandle(token, false);
-    const allowedTypes = new Set(
-      canonicalSlot?.allowedAdTypes
-        ? this.parseStringArray(canonicalSlot.allowedAdTypes)
-        : this.allowedAdTypes(requestedHandle),
-    );
-    if (allowedTypes.size === 0) {
-      allowedTypes.add('text');
-      allowedTypes.add('image');
-    }
+    const slotTypePolicy = canonicalSlot ? resolveSlotCreativeTypes(canonicalSlot.allowedAdTypes) : null;
+    const allowedTypes = new Set(slotTypePolicy?.types ?? this.allowedAdTypes(requestedHandle));
 
     if (
       placement &&
@@ -1545,7 +1542,7 @@ export class DeliveryService {
 
     const compatibleCandidates = eligibleCandidates.filter((candidate: any) => {
       if (!allowedTypes.has(candidate.adType || 'text')) return false;
-      if (candidate.format !== requestedLayout && candidate.adType !== 'video')
+      if (candidate.format !== requestedLayout && (canonicalSlot || candidate.adType !== 'video'))
         return false;
       if (candidate.adType === 'image') {
         const rendition = selectImageRendition(
@@ -1733,6 +1730,20 @@ export class DeliveryService {
         excludedCandidates: [{ reasonCode, stage: billingStage, campaignId: finalCampaignId, creativeId: finalCreativeId,
           parentOpportunityId: requestId,
           transportRequestId: requestHeaders?.transportRequestId ?? null,
+          creativeCompatibility: {
+            stackId: winningCreative.adStackId ?? null,
+            format: winningCreative.format ?? null,
+            type: winningCreative.adType ?? null,
+            status: winningCreative.creativeStatus ?? null,
+            approval: winningCreative.creativeModerationStatus ?? null,
+            stackArchived: winningCreative.stackArchived ?? null,
+            slotId: canonicalSlot.id,
+            slotFormat: canonicalSlot.format,
+            allowedTypeSource: slotTypePolicy?.source ?? null,
+            allowedTypes: slotTypePolicy?.types ?? [],
+            submissionId: winningCreative.currentSubmissionId ?? null,
+            contentRevision: winningCreative.contentRevision ?? null,
+          },
           billingHandoff: {
             reserve: reserveConfirmedAt !== undefined ? 'confirmed' : reserveAttempted ? attemptOutcome : 'not_attempted',
             issue: reserveConfirmedAt !== undefined ? attemptOutcome : 'not_attempted',
