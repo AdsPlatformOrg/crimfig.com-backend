@@ -3,6 +3,11 @@ import {ConfigService} from '@nestjs/config';
 import {AD_AUTHORITY_VERSION} from '@crimfig/shared';
 import type {OpportunityInput} from '../../../../billing-api/src/modules/ecosystem/ad-opportunity.service';
 export interface OpportunityReceipt {authorityVersion:string;reservationId:string;opportunityId:string;campaignId:string;escrowId:string;escrowAllocatedUsdCents:number;submissionId:string;contentRevision:number;creativeId:string;serveId:string|null;promoterId:string;websiteId:string;slotId:string;policyVersion:string;state:string;priceNanos:string;eventDeadline:string;ingestDeadline:string;expiresAt:string;bindingFingerprint:string;}
+export class OpportunityHttpError extends ServiceUnavailableException {
+  constructor(readonly upstreamStatus: number) {
+    super('Opportunity outcome is unconfirmed; reconcile by its existing identity');
+  }
+}
 @Injectable()
 export class OpportunityClient {
   private readonly base:string;private readonly key:string;
@@ -10,8 +15,9 @@ export class OpportunityClient {
   private async call(path:string,body?:unknown):Promise<any>{if(!this.key)throw new ServiceUnavailableException('Billing authority is not configured');try{
     const response=await fetch(this.base+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json','x-internal-key':this.key},body:body===undefined?undefined:JSON.stringify(body),redirect:'error',signal:AbortSignal.timeout(3000)});
     if(response.status===409)throw new ConflictException('Opportunity eligibility or capacity changed');
-    const json:any=await response.json();if(!response.ok||json.status!=='success'||!json.data)throw new Error('Invalid acknowledgement');return json.data;
-  }catch(error){if(error instanceof ConflictException)throw error;throw new ServiceUnavailableException('Opportunity outcome is unconfirmed; reconcile by its existing identity');}}
+    if(!response.ok)throw new OpportunityHttpError(response.status);
+    const json:any=await response.json();if(json.status!=='success'||!json.data)throw new Error('Invalid acknowledgement');return json.data;
+  }catch(error){if(error instanceof ConflictException||error instanceof OpportunityHttpError)throw error;throw new ServiceUnavailableException('Opportunity outcome is unconfirmed; reconcile by its existing identity');}}
   private checked(value:any,input:Partial<OpportunityInput> & Partial<OpportunityReceipt>):OpportunityReceipt {
     if(value?.authorityVersion!==AD_AUTHORITY_VERSION||typeof value.reservationId!=='string'||!/^[a-f0-9]{64}$/.test(value.bindingFingerprint)||!/^\d+$/.test(value.priceNanos)||
       ['opportunityId','campaignId','creativeId','submissionId','contentRevision','priceNanos','promoterId','websiteId','slotId','policyVersion','reservationId','escrowId','escrowAllocatedUsdCents','bindingFingerprint'].some(k=>(input as any)[k]!==undefined&&value[k]!== (input as any)[k]))throw new ServiceUnavailableException('Opportunity receipt does not match its binding');return value;

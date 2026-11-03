@@ -203,6 +203,8 @@ export class DeliveryController {
         ? {
             measurementConsent: consent === 'granted',
             consentState: consent === 'granted' || consent === 'denied' ? consent : 'unknown',
+            transportRequestId: 'requestId' in req && typeof req.requestId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(req.requestId)
+              ? req.requestId : undefined,
             origin: req.headers['origin'] as string | undefined,
             referer: req.headers['referer'] as string | undefined,
           }

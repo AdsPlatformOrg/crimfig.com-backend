@@ -1,4 +1,6 @@
 import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
+import { AdOpportunityController } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.controller';
+import { AdOpportunityService } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.service';
 import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
 import { PublisherInventoryController } from '../../../api/ads-api/src/modules/publisher-inventory/publisher-inventory.controller';
 import { PublisherSlotsService } from '../../../api/ads-api/src/modules/publisher-inventory/publisher-slots.service';
@@ -96,6 +98,36 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query("insert into billing_exchange_rates(id,usd_to_ngn,source) values($1,100,'exchangerate_api')",[rateId]);
   });
   afterAll(async () => { await pool?.end(); });
+  test('PLAN0092 Billing HTTP rejects unauthorized and disabled reserve attempts without database writes', async () => {
+    const key = 'local-plan0092-authority-key';
+    const previousKey = process.env.INTERNAL_ECOSYSTEM_KEY;
+    const previousRelease = process.env.ADS_PAID_RELEASE_ENABLED;
+    process.env.INTERNAL_ECOSYSTEM_KEY = key;
+    process.env.ADS_PAID_RELEASE_ENABLED = 'false';
+    @Module({controllers:[AdOpportunityController],providers:[{provide:AdOpportunityService,useValue:new AdOpportunityService(db)}]})
+    class BillingHandoffFixture {}
+    const app = await NestFactory.create(BillingHandoffFixture, {logger:false});
+    app.useGlobalPipes(new ValidationPipe({transform:true,whitelist:true}));
+    try {
+      await app.listen(0,'127.0.0.1');
+      const base = `${await app.getUrl()}/ecosystem/ad-opportunities`;
+      const id = randomUUID();
+      const request = (body: object, internalKey?: string) => fetch(`${base}/reserve`, {
+        method:'POST',headers:{'Content-Type':'application/json',...(internalKey?{'x-internal-key':internalKey}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(5000),
+      });
+      const body = {serveBefore:new Date(Date.now()+5000).toISOString(),opportunityId:id,campaignId:randomUUID(),creativeId:randomUUID(),submissionId:randomUUID(),contentRevision:1,promoterId:randomUUID(),websiteId:randomUUID(),slotId:randomUUID(),policyVersion:'fixture',priceNanos:'1000',clearingPriceMicros:1,visitorKey:'a'.repeat(64),ipHash:'a'.repeat(16),decision:{}};
+      expect((await request(body)).status).toBe(401);
+      expect((await request({...body, opportunityId:'invalid'},key)).status).toBe(400);
+      expect((await request(body,key)).status).toBe(503);
+      expect((await request(body,key)).status).toBe(503);
+      expect((await pool.query('select count(*)::int n from ads_opportunity_reservations where opportunity_id=$1',[id])).rows[0].n).toBe(0);
+      expect((await fetch(`${base}/${id}`,{headers:{'x-internal-key':key},signal:AbortSignal.timeout(5000)})).status).toBe(404);
+    } finally {
+      await app.close();
+      if(previousKey===undefined)delete process.env.INTERNAL_ECOSYSTEM_KEY;else process.env.INTERNAL_ECOSYSTEM_KEY=previousKey;
+      if(previousRelease===undefined)delete process.env.ADS_PAID_RELEASE_ENABLED;else process.env.ADS_PAID_RELEASE_ENABLED=previousRelease;
+    }
+  });
   test('PLAN0079 owner-scoped embed readiness HTTP is non-writing and refuses foreign or missing profiles',async()=>{
     const [promoter]=await db.insert(schema.adsPromoters).values({userId:owner,type:'WEBSITE'}).returning();
     const [website]=await db.insert(schema.adsPromoterWebsites).values({promoterId:promoter.id,url:'https://example.test',domain:'example.test',verificationToken:randomUUID(),verificationMethod:'dns_txt',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'testing'}).returning();

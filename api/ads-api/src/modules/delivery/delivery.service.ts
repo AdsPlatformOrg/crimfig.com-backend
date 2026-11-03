@@ -5,7 +5,7 @@ import {houseProgramRequested} from '../cfig/cfig-allocation';
 import { assertEventReplay, assertInstanceBinding } from './interaction-binding';
 import {DeliveryDeadlineError,DELIVERY_RUNTIME,requireDeliveryTime,withinDeliveryBudget} from './delivery-budgets';
 import {EvidenceService} from './evidence.service';
-import {OpportunityClient} from '../billing/opportunity-client';
+import {OpportunityClient,OpportunityHttpError} from '../billing/opportunity-client';
 import {adDigest,approvedAdPolicy,stableAdValue} from '@crimfig/shared';
 import { currentApproval } from '../campaigns/campaign-workflow';
 import { paidDeliveryReadiness } from './paid-delivery-policy';
@@ -16,6 +16,7 @@ import {
   Inject,
   NotFoundException,
   ForbiddenException,
+  ConflictException,
   Logger,
   Optional,
 } from '@nestjs/common';
@@ -1116,7 +1117,7 @@ export class DeliveryService {
       city?: string;
       device?: string;
     },
-    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean; consentState?: 'granted' | 'denied' | 'unknown' },
+    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean; consentState?: 'granted' | 'denied' | 'unknown'; transportRequestId?: string },
   ) {
     this.tokenService.assertConfigured();
     const requestId = crypto.randomUUID();
@@ -1697,19 +1698,47 @@ export class DeliveryService {
 
     if(!canonicalSlot || !canonicalWebsite || !this.opportunities || !auctionResult)throw new ForbiddenException('Paid delivery requires canonical funded inventory');
     let serve:{id:string};
+    let billingStage: 'billing_reserve' | 'billing_issue' = 'billing_reserve';
+    const handoffStartedAt = Date.now();
+    let reserveAttempted = false;
+    let reserveConfirmedAt: number | undefined;
     try {
       const viewer=this.fraudRules.computeKeyedIpHash(clientIp).keyedIpHash;
       requireDeliveryTime(serverDeadline,'reserve');
+      reserveAttempted = true;
       const receipt=await this.opportunities.reserve({serveBefore:new Date(serverDeadline).toISOString(),opportunityId:requestId,campaignId:finalCampaignId,creativeId:finalCreativeId,
         submissionId:(winningCreative as any).currentSubmissionId,contentRevision:(winningCreative as any).contentRevision,
         promoterId,websiteId:canonicalWebsite.id,slotId:canonicalSlot.id,policyVersion:approvedAdPolicy()!.version,
         priceNanos:billingPriceNanos.toString(),clearingPriceMicros,visitorKey:viewer,ipHash,selectedImageUrl:winningCreative.imageUrl??undefined,
         decision:stableAdValue({...auctionResult.decisionSnapshot,consentState:requestHeaders?.consentState??"unknown"})});
+      billingStage = 'billing_issue';
+      reserveConfirmedAt = Date.now();
       const issued=await this.opportunities.issue(receipt);serve={id:issued.serveId};
     } catch(error) {
       // Unknown remote outcomes retain their existing opportunity for reconciliation. Never locally release an issued token.
+      const upstreamStatus = error instanceof OpportunityHttpError ? error.upstreamStatus : error instanceof ConflictException ? 409 : null;
+      const rejectionReasons: Record<number, string> = {
+        400: 'BILLING_REQUEST_INVALID',
+        401: 'BILLING_AUTHORIZATION_REJECTED',
+        403: 'BILLING_AUTHORIZATION_REJECTED',
+        409: 'BILLING_OPPORTUNITY_CONFLICT',
+      };
+      const rejection = upstreamStatus === null ? undefined : rejectionReasons[upstreamStatus];
+      const reasonCode = error instanceof DeliveryDeadlineError ? 'DELIVERY_DEADLINE_EXCEEDED' : rejection ?? 'BILLING_OUTCOME_UNCONFIRMED';
+      const attemptOutcome = rejection ? 'rejected' : 'unconfirmed';
       return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
-        promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',clientIp,userAgent,referrerDomain:canonicalWebsite.domain,clientGeo});
+        promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',
+        candidateCount: auctionResult.decisionSnapshot.candidateCount,
+        excludedCandidates: [{ reasonCode, stage: billingStage, campaignId: finalCampaignId, creativeId: finalCreativeId,
+          parentOpportunityId: requestId,
+          transportRequestId: requestHeaders?.transportRequestId ?? null,
+          billingHandoff: {
+            reserve: reserveConfirmedAt !== undefined ? 'confirmed' : reserveAttempted ? attemptOutcome : 'not_attempted',
+            issue: reserveConfirmedAt !== undefined ? attemptOutcome : 'not_attempted',
+            elapsedMs: Date.now() - handoffStartedAt,
+          },
+          upstreamStatus }],
+        clientIp,userAgent,referrerDomain:canonicalWebsite.domain,clientGeo});
     }
 
     // Generate cryptographic signed impression token binding this serve

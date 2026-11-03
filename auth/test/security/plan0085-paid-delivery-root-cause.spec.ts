@@ -1,4 +1,5 @@
 import { paidDeliveryReadiness, slotDeliveryDiagnostics } from '../../../api/ads-api/src/modules/delivery/paid-delivery-policy';
+import { ConflictException } from '@nestjs/common';
 import { DeliveryService, CRIMFIG_HOUSE_CREATIVE, HOUSE_CAMPAIGN_UUID, HOUSE_CREATIVE_UUID } from '../../../api/ads-api/src/modules/delivery/delivery.service';
 import { AuctionEngineService } from '../../../api/ads-api/src/modules/delivery/auction-engine.service';
 import { ImpressionTokenService } from '../../../api/ads-api/src/modules/delivery/impression-token.service';
@@ -295,7 +296,10 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
       process.env = { ...ORIGINAL_ENV };
     });
 
-    it.each([undefined, 'unknown', 'denied', 'granted'] as const)('serves the eligible paid candidate with consent state %s', async (consentState) => {
+    it.each([
+      [undefined, undefined], ['unknown', undefined], ['denied', undefined], ['granted', undefined],
+      ['unknown', 'reserve'], ['unknown', 'issue'],
+    ] as const)('evaluates paid delivery with consent %s and Billing failure %s', async (consentState, failure) => {
       const eligibleCandidate = {
         campaignId: '99999999-9999-4999-8999-999999999999',
         creativeId: '88888888-8888-4888-8888-888888888888',
@@ -338,9 +342,15 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
           winnerCreativeId: eligibleCandidate.creativeId,
           pricingModel: 'cpm',
           inventoryClass: 'paid',
+          candidateCount: 1,
         },
       });
 
+      const fallback = jest.spyOn(service, 'serveHouseOrShadowAd');
+      if (failure) {
+        service.opportunities[failure].mockRejectedValueOnce(new ConflictException());
+        fallback.mockResolvedValueOnce({ isHouseAd: true });
+      }
       const ad = await service.getAdForPlacement(
         STAGING_SLOT_TAG,
         '203.0.113.50',
@@ -352,7 +362,18 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
         { origin: `https://${STAGING_DOMAIN}`, consentState, measurementConsent: consentState === 'granted' },
       );
 
-      // PROOF: An eligible paid candidate is delivered as a PAID ad, NOT a house ad!
+      if (failure) {
+        expect(ad.isHouseAd).toBe(true);
+        expect(fallback).toHaveBeenCalledWith(expect.objectContaining({
+          parentOpportunityId: expect.any(String), candidateCount: 1,
+          excludedCandidates: [expect.objectContaining({
+            reasonCode: 'BILLING_OPPORTUNITY_CONFLICT', stage: `billing_${failure}`, campaignId: eligibleCandidate.campaignId,
+            upstreamStatus: 409,
+            billingHandoff: expect.objectContaining({reserve: failure === 'reserve' ? 'rejected' : 'confirmed', issue: failure === 'issue' ? 'rejected' : 'not_attempted'}),
+          })],
+        }));
+        return;
+      }
       expect(ad.isHouseAd).toBe(false);
       expect(ad.headline).toBe('Staging Paid Sponsor Ad');
       expect(ad.clickUrl).toContain('/api/v1/delivery/go/');
