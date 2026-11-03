@@ -1053,20 +1053,18 @@ export class AdstationService {
   /**
    * Admin / Compliance: Inspect recent auction decisions (`GET /api/v1/adstation/admin/auction-decisions`)
    */
-  async listAuctionDecisions(limit = 50, slotTagId?: string) {
+  async listAuctionDecisions(limit = 50, slotTagId?: string, requestId?: string) {
     const safeLimit = Math.min(Math.max(1, Number(limit) || 50), 200);
-    const rows = slotTagId
-      ? await this.db
-          .select()
-          .from(adsAuctionDecisions)
-          .where(eq(adsAuctionDecisions.slotTagId, slotTagId))
-          .orderBy(desc(adsAuctionDecisions.createdAt))
-          .limit(safeLimit)
-      : await this.db
-          .select()
-          .from(adsAuctionDecisions)
-          .orderBy(desc(adsAuctionDecisions.createdAt))
-          .limit(safeLimit);
+    const conditions: any[] = [];
+    if (slotTagId) conditions.push(eq(adsAuctionDecisions.slotTagId, slotTagId));
+    if (requestId) conditions.push(eq(adsAuctionDecisions.requestId, requestId));
+
+    const rows = await this.db
+      .select()
+      .from(adsAuctionDecisions)
+      .where(conditions.length === 1 ? conditions[0] : conditions.length > 1 ? and(...conditions) : undefined)
+      .orderBy(desc(adsAuctionDecisions.createdAt))
+      .limit(safeLimit);
 
     // Drizzle schema uses BigInt for billingPriceNanos which crashes JSON.stringify if returned raw
     return rows.map((row) => ({
@@ -1076,6 +1074,22 @@ export class AdstationService {
           ? row.billingPriceNanos.toString()
           : row.billingPriceNanos,
     }));
+  }
+
+  async getAuctionDecision(requestId: string) {
+    const [row] = await this.db
+      .select()
+      .from(adsAuctionDecisions)
+      .where(eq(adsAuctionDecisions.requestId, requestId))
+      .limit(1);
+    if (!row) return null;
+    return {
+      ...row,
+      billingPriceNanos:
+        typeof row.billingPriceNanos === 'bigint'
+          ? row.billingPriceNanos.toString()
+          : row.billingPriceNanos,
+    };
   }
 
   /**

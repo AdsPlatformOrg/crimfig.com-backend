@@ -463,12 +463,24 @@ export class AdstationController {
   async listAuctionDecisions(
     @Query('limit') limit?: number,
     @Query('slotTagId') slotTagId?: string,
+    @Query('requestId') requestId?: string,
   ) {
     const decisions = await this.adstationService.listAuctionDecisions(
       limit,
       slotTagId,
+      requestId,
     );
     return { status: 'success', data: decisions };
+  }
+
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
+  @Get('admin/auction-decisions/:requestId')
+  @ApiOperation({
+    summary: 'Admin: Get single tamper-evident auction decision snapshot by requestId',
+  })
+  async getAuctionDecision(@Param('requestId') requestId: string) {
+    const decision = await this.adstationService.getAuctionDecision(requestId);
+    return { status: 'success', data: decision };
   }
 
   @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
