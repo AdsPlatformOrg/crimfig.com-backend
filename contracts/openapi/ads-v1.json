@@ -210,8 +210,111 @@
       "AdsOperations_getAuctionDecisionResponse": {
         "properties": {
           "data": {
-            "additionalProperties": true,
-            "type": "object"
+            "allOf": [
+              {
+                "additionalProperties": true,
+                "nullable": true,
+                "properties": {
+                  "pricingBreakdown": {
+                    "additionalProperties": true,
+                    "nullable": true,
+                    "properties": {
+                      "batchStatus": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "bidUsdCents": {
+                        "nullable": true,
+                        "type": "number"
+                      },
+                      "billingUnit": {
+                        "enum": [
+                          "eligible click",
+                          "eligible viewable impression"
+                        ],
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "claimId": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "claimPriceNanos": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "clearingBasis": {
+                        "enum": [
+                          "single_group_reserve",
+                          "runner_up_with_floor"
+                        ],
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "pctrBasisPoints": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "publisherClearanceStatus": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "publisherEarningsCents": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "reservationId": {
+                        "type": "string"
+                      },
+                      "reservationSettledAt": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "reservationState": {
+                        "type": "string"
+                      },
+                      "reservedNanos": {
+                        "type": "string"
+                      },
+                      "secondPriceMicros": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "settledDebitCents": {
+                        "nullable": true,
+                        "type": "string"
+                      },
+                      "winnerScoreMicros": {
+                        "nullable": true,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "reservationId",
+                      "reservationState",
+                      "reservedNanos",
+                      "reservationSettledAt",
+                      "pctrBasisPoints",
+                      "winnerScoreMicros",
+                      "secondPriceMicros",
+                      "claimId",
+                      "claimPriceNanos",
+                      "batchStatus",
+                      "settledDebitCents",
+                      "publisherEarningsCents",
+                      "publisherClearanceStatus",
+                      "bidUsdCents",
+                      "billingUnit",
+                      "clearingBasis"
+                    ],
+                    "type": "object"
+                  }
+                },
+                "required": [],
+                "type": "object"
+              }
+            ],
+            "nullable": true
           },
           "status": {
             "enum": [

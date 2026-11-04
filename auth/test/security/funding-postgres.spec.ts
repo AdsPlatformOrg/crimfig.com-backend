@@ -202,11 +202,17 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect((await replay.json() as any).data.serveId).toBe(result.serveId);
       expect((await pool.query('select count(*)::int n from ads_opportunity_reservations where opportunity_id=$1',[opportunityId])).rows[0].n).toBe(1);
       expect((await pool.query('select count(*)::int n from ads_serves where request_id=$1',[opportunityId])).rows[0].n).toBe(1);
+      const trace = await new AdsOperationsService(db).getAuctionDecision(opportunityId);
+      expect(trace?.billingPriceNanos).toBe(priceNanos);
+      expect(trace?.pricingBreakdown).toMatchObject({
+        billingUnit:'eligible click',reservedNanos:priceNanos,reservationState:'ISSUED',
+        clearingBasis:'single_group_reserve',pctrBasisPoints:'150',claimId:null,settledDebitCents:null,publisherEarningsCents:null,
+      });
     } finally {
       await app.close();
       process.env = previousEnv;
     }
-  });
+  }, 30_000);
   test('PLAN0079 owner-scoped embed readiness HTTP is non-writing and refuses foreign or missing profiles',async()=>{
     const [promoter]=await db.insert(schema.adsPromoters).values({userId:owner,type:'WEBSITE'}).returning();
     const [website]=await db.insert(schema.adsPromoterWebsites).values({promoterId:promoter.id,url:'https://example.test',domain:'example.test',verificationToken:randomUUID(),verificationMethod:'dns_txt',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'testing'}).returning();

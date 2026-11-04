@@ -233,12 +233,45 @@ export class AdsOperationsService {
     }
 
     const platformDiagnostics = paidDeliveryDiagnostics();
+    let pricingBreakdown: Record<string, unknown> | null = null;
+    if (row.inventoryClass === 'paid' && row.opportunityReservationId && row.serveId) {
+      const result = await this.db.execute(sql`
+        SELECT r.id AS "reservationId", r.state AS "reservationState",
+          r.reserved_nanos::text AS "reservedNanos", r.settled_at AS "reservationSettledAt",
+          r.policy_snapshot->'policy'->>'pctrBasisPoints' AS "pctrBasisPoints",
+          r.policy_snapshot->'decision'->>'winnerScoreMicros' AS "winnerScoreMicros",
+          r.policy_snapshot->'decision'->>'secondPriceMicros' AS "secondPriceMicros",
+          c.id AS "claimId", c.price_nanos::text AS "claimPriceNanos", b.status AS "batchStatus",
+          CASE WHEN b.status='completed' AND debit.id IS NOT NULL THEN i.billed_usd_cents::text END AS "settledDebitCents",
+          CASE WHEN b.status='completed' AND debit.id IS NOT NULL THEN i.earned_usd_cents::text END AS "publisherEarningsCents",
+          i.clearance_status AS "publisherClearanceStatus"
+        FROM ads_opportunity_reservations r
+        LEFT JOIN ads_settlement_claims c ON c.serve_id=r.serve_id AND c.escrow_id=r.escrow_id
+        LEFT JOIN ads_settlement_batches b ON b.id=c.batch_id
+        LEFT JOIN ads_promoter_settlement_items i ON i.batch_id=b.id AND i.idempotency_key='ads-item:v3:'||c.interaction_id::text
+        LEFT JOIN billing_transactions debit ON debit.reference='ads-spend-v3-'||b.id::text AND debit.type='ads_spend' AND debit.status='completed'
+        WHERE r.id=${row.opportunityReservationId} AND r.opportunity_id=${row.requestId}
+          AND r.serve_id=${row.serveId} AND r.campaign_id=${row.winnerCampaignId} AND NOT r.is_simulated
+        LIMIT 1`);
+      const [billing] = result.rows;
+      if (billing) {
+        const winner = Array.isArray(row.evaluatedCandidates) ? row.evaluatedCandidates.find((candidate: any) =>
+          candidate.campaignId === row.winnerCampaignId && candidate.creativeId === row.winnerCreativeId) : undefined;
+        pricingBreakdown = {
+          ...billing,
+          bidUsdCents: typeof winner?.bidUsdCents === 'number' && Number.isSafeInteger(winner.bidUsdCents) ? winner.bidUsdCents : null,
+          billingUnit: row.pricingModel === 'cpc' ? 'eligible click' : row.pricingModel === 'cpm' ? 'eligible viewable impression' : null,
+          clearingBasis: row.eligibleGroupCount === 1 ? 'single_group_reserve' : row.runnerUpCampaignId ? 'runner_up_with_floor' : null,
+        };
+      }
+    }
 
     return {
       ...row,
       website,
       slot,
       platformDiagnostics,
+      pricingBreakdown,
       billingPriceNanos:
         typeof row.billingPriceNanos === 'bigint'
           ? row.billingPriceNanos.toString()

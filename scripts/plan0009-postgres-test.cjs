@@ -129,6 +129,7 @@ try {
     ...(process.argv.includes('--plan0092') ? ['--testNamePattern','PLAN0092 Billing|PLAN0081 readiness|funded settlement races|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0092/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0093') ? ['--testNamePattern','PLAN0092 Billing|funded settlement races|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0093/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0094') ? ['--testNamePattern','PLAN0092 Billing|funded settlement races|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0094/backend-integration-results.json'] : []),
+    ...(process.argv.includes('--plan0095') ? ['--testNamePattern','PLAN0092 Billing|funded settlement races|CPM fractions survive|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0095/backend-integration-results.json'] : []),
     ...(process.argv.includes('--website-policy') ? ['--testNamePattern','PLAN0079 owner-scoped|PLAN0080 website policy','--json','--outputFile=../docs/reviews/plan-0080/backend-integration-results.json'] : []),
     ...(process.argv.includes('--provider-only') ? ['--testNamePattern', 'real Paystack TEST'] : []),
     ...(process.argv.includes('--transfer-only') ? ['--testNamePattern', 'real Paystack TEST transfer'] : []),

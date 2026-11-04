@@ -102,7 +102,16 @@ const responses: Record<string, Record<string, Schema>> = {
   AdsOperationsController: {
     suspendWebsite: json(), reinstateWebsite: json(), adminListWebsites: json(),
     adminGetWebsite: json(), reviewWebsitePolicy: json(), listAuctionDecisions: json(),
-    getAuctionDecision: json(), adminCheckSlotInstallation: json(), adminUpdateSlotLifecycle: json(),
+    getAuctionDecision: nullable(optionalObject({
+      pricingBreakdown: nullable(object({
+        reservationId: str(), reservationState: str(), reservedNanos: str(), reservationSettledAt: nullable(str()),
+        pctrBasisPoints: nullable(str()), winnerScoreMicros: nullable(str()), secondPriceMicros: nullable(str()),
+        claimId: nullable(str()), claimPriceNanos: nullable(str()), batchStatus: nullable(str()),
+        settledDebitCents: nullable(str()), publisherEarningsCents: nullable(str()), publisherClearanceStatus: nullable(str()),
+        bidUsdCents: nullable(num()), billingUnit: nullable(enumeration('eligible click', 'eligible viewable impression')),
+        clearingBasis: nullable(enumeration('single_group_reserve', 'runner_up_with_floor')),
+      })),
+    })), adminCheckSlotInstallation: json(), adminUpdateSlotLifecycle: json(),
   },
   CampaignsController: {
     campaignPage:object({items:array(campaign),page:{type:'integer'},pageSize:{type:'integer'},total:{type:'integer'},counts:{type:'object',additionalProperties:{type:'integer'}}}),
