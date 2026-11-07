@@ -1,4 +1,5 @@
 import * as crypto from 'crypto';
+import { matchesDeviceTarget } from './device-targeting';
 import {
   DailySchedule,
   legacySchedule,
@@ -17,6 +18,15 @@ import {
 } from './pricing-contract';
 
 export type BidderGroupingMode = 'advertiser' | 'campaign';
+
+export interface DeliveryEvaluation {
+  device: string | null;
+  deviceSource: 'request_context' | 'user_agent' | 'unknown';
+  auctionPolicyVersion: string | null;
+  counts: { discovered: number; targetingEligible: number; creativeCompatible: number; auctionEntered: number; eligibleGroups: number };
+  preAuctionExclusions: Array<{ campaignId: string; creativeId: string; reasonCode: string; stage: string }>;
+  omittedPreAuctionExclusions?: number;
+}
 
 export type ExclusionReasonCode =
   | 'INVALID_PRICING_VERSION'
@@ -89,6 +99,7 @@ export interface AuctionResolutionContext {
   clientGeoCity?: string;
   clientDevice?: 'desktop' | 'android' | 'ios' | 'tablet';
   requestedAt?: Date;
+  deliveryEvaluation?: DeliveryEvaluation;
 }
 
 export interface EvaluatedCandidateAudit {
@@ -99,6 +110,7 @@ export interface EvaluatedCandidateAudit {
   bidUsdCents: number;
   scoreMicros: number;
   tieDigest: string;
+  deliveryEvaluation?: DeliveryEvaluation;
 }
 
 export interface ExcludedCandidateAudit {
@@ -215,6 +227,7 @@ export class AuctionEngineService {
     candidates: AuctionCandidate[],
     context: AuctionResolutionContext,
     previousHash: string | null = null,
+    excludedCandidates: ExcludedCandidateAudit[] = [],
   ): AuctionResult | null {
     const requestId =
       context.requestId ||
@@ -230,7 +243,6 @@ export class AuctionEngineService {
     }
 
     const now = context.requestedAt || new Date();
-    const excludedCandidates: ExcludedCandidateAudit[] = [];
     const eligibleRaw: AuctionCandidate[] = [];
 
     // 1. Deterministic Eligibility Filtering with explicit reason codes
@@ -422,8 +434,7 @@ export class AuctionEngineService {
       // Device targeting filter
       if (cand.targetDevices && cand.targetDevices.length > 0) {
         if (
-          !context.clientDevice ||
-          !cand.targetDevices.includes(context.clientDevice)
+          !matchesDeviceTarget(cand.targetDevices, context.clientDevice)
         ) {
           excludedCandidates.push({
             campaignId: cand.campaignId,
@@ -438,7 +449,7 @@ export class AuctionEngineService {
       if (cand.targetCountries && cand.targetCountries.length > 0) {
         if (
           !context.clientGeoCountry ||
-          !cand.targetCountries.includes(context.clientGeoCountry)
+          !cand.targetCountries.some(country => country.toUpperCase() === context.clientGeoCountry!.toUpperCase())
         ) {
           excludedCandidates.push({
             campaignId: cand.campaignId,
@@ -599,7 +610,7 @@ export class AuctionEngineService {
     );
 
     const evaluatedCandidates: EvaluatedCandidateAudit[] =
-      groupedRepresentatives.map((item) => ({
+      groupedRepresentatives.map((item, index) => ({
         campaignId: item.candidate.campaignId,
         creativeId: item.candidate.creativeId,
         bidderGroupKey: item.bidderGroupKey,
@@ -607,6 +618,10 @@ export class AuctionEngineService {
         bidUsdCents: item.bidUsdCents,
         scoreMicros: item.score,
         tieDigest: item.tieDigest,
+        ...(index === 0 && context.deliveryEvaluation ? { deliveryEvaluation: {
+          ...context.deliveryEvaluation,
+          counts: { ...context.deliveryEvaluation.counts, eligibleGroups: groupedRepresentatives.length },
+        } } : {}),
       }));
 
     const snapshotDraft: Omit<AuctionDecisionSnapshot, 'recordHash'> = {
@@ -670,6 +685,7 @@ export class AuctionEngineService {
         tieSeed: expectedSnapshot.tieSeed,
         policyVersion: expectedSnapshot.policyVersion,
         bidderGroupingMode: expectedSnapshot.bidderGroupingMode,
+        deliveryEvaluation: expectedSnapshot.evaluatedCandidates[0]?.deliveryEvaluation ?? context.deliveryEvaluation,
       },
       expectedSnapshot.previousHash,
     );

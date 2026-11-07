@@ -1,4 +1,10 @@
 import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
+import { DeliveryController } from '../../../api/ads-api/src/modules/delivery/delivery.controller';
+import { DeliveryService } from '../../../api/ads-api/src/modules/delivery/delivery.service';
+import { AuctionEngineService } from '../../../api/ads-api/src/modules/delivery/auction-engine.service';
+import { ImpressionTokenService } from '../../../api/ads-api/src/modules/delivery/impression-token.service';
+import { FraudRulesService } from '../../../api/ads-api/src/modules/verification/fraud-rules.service';
+import { EvidenceService } from '../../../api/ads-api/src/modules/delivery/evidence.service';
 import { AdOpportunityController } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.controller';
 import { AdOpportunityService } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.service';
 import { OpportunityClient, OpportunityConflictError } from '../../../api/ads-api/src/modules/billing/opportunity-client';
@@ -79,6 +85,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
     const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsTrafficControls, schema.adsEvidenceRecords, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
     const enums = new Set<string>();
+    tables.splice(tables.indexOf(schema.adsCreatives), 0, schema.adsMediaAssets as any, schema.crimfigGeoTargets as any, schema.adsHouseCreatives as any);
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
       if (col.enum && !enums.has(col.enum.enumName)) {
         enums.add(col.enum.enumName); await pool.query(`create type ${quote(col.enum.enumName)} as enum (${col.enum.enumValues.map(literal).join(',')})`);
@@ -101,6 +108,78 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query("insert into billing_exchange_rates(id,usd_to_ngn,source) values($1,100,'exchangerate_api')",[rateId]);
   });
   afterAll(async () => { await pool?.end(); });
+  test('PLAN0096 matched Android iOS and desktop delivery traverses real HTTP and Billing reservation', async () => {
+    const prior = { ...process.env };
+    const key = 'plan0096-isolated-authority';
+    Object.assign(process.env, { INTERNAL_ECOSYSTEM_KEY:key, ADS_PAID_SERVING_ENABLED:'true', ADS_PAID_RELEASE_ENABLED:'true',
+      ADS_IMPRESSION_SIGNING_KEY:'plan0096-local-impression-secret-32-bytes', ADS_EVIDENCE_HASH_SECRET:'plan0096-local-evidence-secret-32-bytes',
+      ADS_AUCTION_POLICY_APPROVAL:JSON.stringify({version:'plan0096-fixture',approvedBy:'JED',approvedAt:'2026-11-06T00:00:00Z',pricing:'second_price',bidderGrouping:'advertiser',floors:'bid_and_clearing',fractionalClosure:'write_off_subcent',pctrBasisPoints:150,eventWindowMs:900000,ingestionToleranceMs:60000}) });
+    const f = await settlementFixture();
+    await pool.query("update ads_campaigns set target_devices='[\"desktop\",\"mobile\"]',cost_per_click_usd_cents=10,cost_per_impression_usd_cents=50 where id=$1",[f.campaign.id]);
+    await pool.query("update ads_creatives set ad_format='banner',ad_type='text' where id=$1",[f.creative.id]);
+    await pool.query('update ads_promoters set trust_score=90 where id=$1',[f.promoter.id]);
+    const [site] = await db.insert(schema.adsPromoterWebsites).values({promoterId:f.promoter.id,url:'https://mobile.example.test',domain:'mobile.example.test',verificationToken:randomUUID(),verificationMethod:'dns_txt',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'approved',trustScore:90}).returning();
+    const [slot] = await db.insert(schema.adstationSlots).values({websiteId:site.id,promoterId:f.promoter.id,name:'Mobile integration',slotTagId:'cf-slot-plan0096-mobile',slotType:'network',format:'banner',lifecycleStatus:'active',installationStatus:'verified',allowedAdTypes:'["text"]',isActive:true}).returning();
+    @Module({controllers:[AdOpportunityController],providers:[
+      {provide:AdOpportunityService,useValue:new AdOpportunityService(db)},
+    ]}) class MobileDeliveryFixture {}
+    const app = await NestFactory.create(MobileDeliveryFixture,{logger:false});
+    app.setGlobalPrefix('api/v1'); app.useGlobalPipes(new ValidationPipe({transform:true,whitelist:true}));
+    let deliveryApp: Awaited<ReturnType<typeof NestFactory.create>> | undefined;
+    try {
+      await app.listen(0,'127.0.0.1'); const origin = await app.getUrl(); process.env.BILLING_API_URL=origin;
+      const client = new OpportunityClient(new ConfigService({BILLING_API_URL:origin,INTERNAL_ECOSYSTEM_KEY:key}));
+      const delivery = new DeliveryService(db,new ImpressionTokenService(),new AuctionEngineService(),new FraudRulesService(),client,new EvidenceService(db,client));
+      @Module({controllers:[DeliveryController],providers:[{provide:DeliveryService,useValue:delivery}]}) class AdsDeliveryFixture {}
+      deliveryApp = await NestFactory.create(AdsDeliveryFixture,{logger:false});
+      deliveryApp.setGlobalPrefix('api/v1');
+      await deliveryApp.listen(0,'127.0.0.1'); const deliveryOrigin = await deliveryApp.getUrl();
+      const ledgerBefore = (await pool.query('select count(*)::int n from billing_transactions')).rows[0].n;
+      const agents = [
+        'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36',
+      ];
+      const traces: any[] = [];
+      for (const agent of agents) {
+        const response = await fetch(deliveryOrigin+'/api/v1/delivery/ad/'+slot.slotTagId+'?domain=mobile.example.test',{headers:{'user-agent':agent,origin:'https://mobile.example.test'}});
+        const result: any = await response.json();
+        expect({status:response.status,body:result}).toMatchObject({status:200});
+        expect(result).toMatchObject({status:'success',data:{isHouseAd:false,impToken:expect.stringMatching(/^imp_/)}});
+        const record = (await pool.query('select request_id from ads_serves where slot_id=$1 order by served_at desc limit 1',[slot.id])).rows[0];
+        const trace = await new AdsOperationsService(db).getAuctionDecision(record.request_id);
+        expect(trace?.inventoryClass).toBe('paid'); expect(trace?.eligibleGroupCount).toBe(1);
+        expect(trace?.pricingBreakdown?.reservationState).toBe('ISSUED');
+        traces.push(trace);
+      }
+      expect((await pool.query('select count(*)::int n from ads_serves where slot_id=$1',[slot.id])).rows[0].n).toBe(3);
+      expect((await pool.query('select count(*)::int n from billing_transactions')).rows[0].n).toBe(ledgerBefore);
+      const fs = require('fs'); const path = require('path');
+      fs.writeFileSync(path.resolve(__dirname,'../../../../docs/reviews/plan-0096/integration-contract.json'),JSON.stringify(traces.map(trace=>({inventoryClass:trace.inventoryClass,evaluatedCandidates:trace.evaluatedCandidates,excludedCandidates:trace.excludedCandidates})),null,2));
+      await db.insert(schema.adsHouseCreatives).values({title:'House fixture',headline:'House fixture',bodyText:'Local test',adType:'text',format:'banner'});
+      const reservationsBefore = (await pool.query('select count(*)::int n from ads_opportunity_reservations')).rows[0].n;
+      for (const [statement,reason] of [
+        ["update ads_campaigns set target_devices='[\"desktop\"]' where id=$1",'DEVICE_MISMATCH'],
+        ["update ads_campaigns set target_devices='[\"mobile\"]',cost_per_click_usd_cents=1 where id=$1",'BELOW_MODEL_BID_FLOOR'],
+        ["update ads_campaigns set target_devices='{' where id=$1",'INVALID_TARGETING'],
+        ["update ads_creatives set ad_format='card' where campaign_id=$1",'CREATIVE_FORMAT_MISMATCH'],
+      ]) {
+        await pool.query("update ads_campaigns set target_devices='[\"mobile\"]',cost_per_click_usd_cents=10 where id=$1",[f.campaign.id]);
+        await pool.query(statement,[f.campaign.id]);
+        const response = await fetch(deliveryOrigin+'/api/v1/delivery/ad/'+slot.slotTagId+'?domain=mobile.example.test',{headers:{'user-agent':agents[0],origin:'https://mobile.example.test'}});
+        const result: any = await response.json();
+        expect({status:response.status,result}).toMatchObject({status:200,result:{data:{isHouseAd:true}}});
+        const payload = JSON.parse(Buffer.from(result.data.impToken.slice(4).split('.')[0],'base64url').toString());
+        const [record] = (await pool.query('select request_id from ads_serves where id=$1',[payload.servedId])).rows;
+        const trace = await new AdsOperationsService(db).getAuctionDecision(record.request_id);
+        expect(trace?.excludedCandidates).toEqual(expect.arrayContaining([expect.objectContaining({reasonCode:reason,campaignId:f.campaign.id,creativeId:f.creative.id})]));
+        expect(trace?.billingPriceNanos).toBe('0');
+        fs.writeFileSync(path.resolve(__dirname,'../../../../docs/reviews/plan-0096/fallback-contract.json'),JSON.stringify({evaluatedCandidates:trace?.evaluatedCandidates,excludedCandidates:trace?.excludedCandidates},null,2));
+      }
+      expect((await pool.query('select count(*)::int n from ads_opportunity_reservations')).rows[0].n).toBe(reservationsBefore);
+      expect((await pool.query('select count(*)::int n from billing_transactions')).rows[0].n).toBe(ledgerBefore);
+    } finally { await deliveryApp?.close(); await app.close(); process.env=prior; }
+  },30000);
   test('PLAN0092 Billing expiry compares interaction events using the PostgreSQL enum', async () => {
     await expect(pool.query("select type = case when true then 'click' else 'viewable_impression' end from ads_interactions limit 1"))
       .rejects.toMatchObject({ code: '42883' });

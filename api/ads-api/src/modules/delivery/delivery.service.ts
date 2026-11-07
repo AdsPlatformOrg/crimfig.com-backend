@@ -1,4 +1,5 @@
 import { resolveSlotCreativeTypes } from '../../../../billing-api/src/modules/ecosystem/creative-slot-policy';
+import { matchesDeviceTarget } from './device-targeting';
 import { responsiveImageBounds } from './image-sizing';
 import { APPROVED_IMAGE_AD_PRESETS } from '../uploads/image-ad-presets';
 import { adsPublicOrigin } from '@crimfig/shared';
@@ -47,7 +48,7 @@ import {
   ImpressionTokenService,
   ImpressionTokenPayload,
 } from './impression-token.service';
-import { AuctionEngineService } from './auction-engine.service';
+import { AuctionEngineService, DeliveryEvaluation, ExcludedCandidateAudit } from './auction-engine.service';
 import { FraudRulesService } from '../verification/fraud-rules.service';
 import { DEFAULT_AUCTION_POLICY_VERSION } from './pricing-contract';
 
@@ -600,17 +601,20 @@ export class DeliveryService {
 })();`;
   }
 
-  private parseStringArray(value: string | string[] | null | undefined): string[] {
+  private parseStringArray(value: string | string[] | null | undefined, strict = false): string[] {
     if (!value) return [];
     if (Array.isArray(value)) {
+      if (strict && value.some((item) => typeof item !== 'string')) throw new Error('Invalid targeting array');
       return value.filter((item) => typeof item === 'string');
     }
     try {
       const parsed = JSON.parse(value);
+      if (strict && (!Array.isArray(parsed) || parsed.some((item: unknown) => typeof item !== 'string'))) throw new Error('Invalid targeting array');
       return Array.isArray(parsed)
         ? parsed.filter((item) => typeof item === 'string')
         : [];
     } catch {
+      if (strict) throw new Error('Invalid targeting array');
       return [];
     }
   }
@@ -661,6 +665,7 @@ export class DeliveryService {
       city?: string;
       device?: string;
     },
+    exclusions: Array<{campaignId: string; creativeId: string; reasonCode: string; stage: string}> = [],
   ): Promise<any[]> {
     if (candidates.length === 0) return [];
     const campaignIds = [
@@ -717,6 +722,20 @@ export class DeliveryService {
     };
 
     return candidates.filter((candidate) => {
+      const reject = (reasonCode: string) => {
+        exclusions.push({ campaignId: candidate.campaignId, creativeId: candidate.creativeId, reasonCode, stage: 'targeting_schedule' });
+        return false;
+      };
+      try {
+        for (const value of [candidate.targetCountries, candidate.targetStates, candidate.targetDevices, candidate.stackTargetDevices]) {
+          this.parseStringArray(value, true);
+        }
+        for (const value of [candidate.targetHours, candidate.stackTargetHours]) {
+          if (value == null || value === '') continue;
+          const hours = typeof value === 'string' ? JSON.parse(value) : value;
+          if (!Array.isArray(hours) || hours.some(hour => !Number.isInteger(hour) || hour < 0 || hour > 23)) return reject('INVALID_TARGETING');
+        }
+      } catch { return reject('INVALID_TARGETING'); }
       const targeting = effectiveTargets(candidate);
       const countries =
         targeting.geoMode === 'targeted'
@@ -749,7 +768,7 @@ export class DeliveryService {
             ]
           : [];
       if (targeting.geoMode === 'targeted' && targeting.rows.length === 0)
-        return false;
+        return reject('GEO_TARGETS_MISSING');
       if (
         countries.length > 0 &&
         (!clientGeo?.country ||
@@ -757,7 +776,7 @@ export class DeliveryService {
             .map((c) => c.toUpperCase())
             .includes(clientGeo.country.toUpperCase()))
       ) {
-        return false;
+        return reject('COUNTRY_MISMATCH');
       }
       if (subdivisions.length > 0) {
         if (
@@ -766,28 +785,15 @@ export class DeliveryService {
             this.regionMatches(value, clientGeo.region!),
           )
         )
-          return false;
+          return reject('STATE_MISMATCH');
       }
       if (cities.length > 0) {
-        if (!clientGeo?.city || !cities.includes(clientGeo.city)) return false;
+        if (!clientGeo?.city || !cities.includes(clientGeo.city)) return reject('CITY_MISMATCH');
       }
-      const devices = candidate.stackTargetDevices
+      const devices = candidate.stackTargetDevices != null && candidate.stackTargetDevices !== ''
         ? this.parseStringArray(candidate.stackTargetDevices)
         : this.parseStringArray(candidate.targetDevices);
-      if (devices.length > 0) {
-        const device = clientGeo?.device;
-        if (!device) return false;
-        if (device === 'tablet' && devices.includes('mobile')) {
-          // Tablets count as mobile only when the campaign opted into the broad category.
-        } else if (
-          !devices.includes(device) &&
-          !(device === 'android' || device === 'ios'
-            ? devices.includes('mobile')
-            : false)
-        ) {
-          return false;
-        }
-      }
+      if (!matchesDeviceTarget(devices, clientGeo?.device)) return reject('DEVICE_MISMATCH');
       try {
         candidate.schedule = resolvedSchedule(
           candidate.campaignSchedule,
@@ -798,7 +804,7 @@ export class DeliveryService {
         candidate.scheduleValidated = true;
       } catch {
         this.logger.warn('Invalid stored campaign schedule excluded');
-        return false;
+        return reject('INVALID_SCHEDULE');
       }
       const hours = candidate.stackTargetHours
         ? this.parseNumberArray(candidate.stackTargetHours)
@@ -1491,10 +1497,6 @@ export class DeliveryService {
     const formattedCandidates = activeCandidates.map((c) => ({
       ...c,
       pricingModel: (c.pricingModel || 'cpm') as 'cpm' | 'cpc',
-      targetCountries: c.targetCountries ? JSON.parse(c.targetCountries) : null,
-      targetStates: c.targetStates ? JSON.parse(c.targetStates) : null,
-      targetDevices: c.targetDevices ? JSON.parse(c.targetDevices) : null,
-      targetHours: c.targetHours ? JSON.parse(c.targetHours) : null,
     }));
 
     const requestedHandle = canonicalSlot
@@ -1522,12 +1524,14 @@ export class DeliveryService {
       | 'tablet'
       | undefined;
 
+    const preAuctionExclusions: DeliveryEvaluation['preAuctionExclusions'] = [];
     const eligibleCandidates = await withinDeliveryBudget(this.filterEligibleCandidates(
       formattedCandidates,
       {
         ...clientGeo,
         device: resolvedDevice,
       },
+      preAuctionExclusions,
     ),candidateDeadline,'candidate_targeting');
 
     const requestedLayout = canonicalSlot
@@ -1541,16 +1545,20 @@ export class DeliveryService {
     );
 
     const compatibleCandidates = eligibleCandidates.filter((candidate: any) => {
-      if (!allowedTypes.has(candidate.adType || 'text')) return false;
-      if (candidate.format !== requestedLayout && (canonicalSlot || candidate.adType !== 'video'))
+      const reject = (reasonCode: string) => {
+        preAuctionExclusions.push({ campaignId: candidate.campaignId, creativeId: candidate.creativeId, reasonCode, stage: 'creative_compatibility' });
         return false;
+      };
+      if (!allowedTypes.has(candidate.adType || 'text')) return reject('CREATIVE_TYPE_NOT_ALLOWED');
+      if (candidate.format !== requestedLayout && (canonicalSlot || candidate.adType !== 'video'))
+        return reject('CREATIVE_FORMAT_MISMATCH');
       if (candidate.adType === 'image') {
         const rendition = selectImageRendition(
           candidate,
           requestedLayout,
           imageCap,
         );
-        if (!rendition) return false;
+        if (!rendition) return reject('CREATIVE_RENDITION_INCOMPATIBLE');
         candidate.imageUrl = rendition.url;
         candidate.width = rendition.width;
         candidate.height = rendition.height;
@@ -1564,6 +1572,16 @@ export class DeliveryService {
         ? this.parseStringArray(canonicalPromoter.allowedCategories)
         : undefined;
 
+    const deliveryEvaluation: DeliveryEvaluation = {
+      device: resolvedDevice ?? null,
+      deviceSource: clientGeo?.device ? 'request_context' : resolvedDevice ? 'user_agent' : 'unknown',
+      auctionPolicyVersion: approvedAdPolicy()?.version ?? null,
+      counts: { discovered: formattedCandidates.length, targetingEligible: eligibleCandidates.length,
+        creativeCompatible: compatibleCandidates.length, auctionEntered: compatibleCandidates.length, eligibleGroups: 0 },
+      preAuctionExclusions: preAuctionExclusions.slice(0, 100),
+      omittedPreAuctionExclusions: Math.max(0, preAuctionExclusions.length - 100),
+    };
+    const auctionExclusions: ExcludedCandidateAudit[] = [];
     const auctionDeadline=Math.min(serverDeadline,Date.now()+DELIVERY_RUNTIME.auctionMs);
     requireDeliveryTime(auctionDeadline,'auction');
     const auctionResult = this.auctionEngine.resolveAuction(
@@ -1582,7 +1600,10 @@ export class DeliveryService {
         clientGeoCountry: clientGeo?.country,
         clientGeoRegion: clientGeo?.region,
         clientGeoCity: clientGeo?.city,
+        deliveryEvaluation,
       },
+      null,
+      auctionExclusions,
     );
 
     requireDeliveryTime(auctionDeadline,'auction');
@@ -1619,7 +1640,8 @@ export class DeliveryService {
         terminationStage,
         candidateEvaluationStatus: 'evaluated',
         candidateCount: formattedCandidates.length,
-        excludedCandidates: [{ reasonCode: fallbackReasonCode, stage: terminationStage, count: formattedCandidates.length }],
+        excludedCandidates: [{ reasonCode: fallbackReasonCode, stage: terminationStage, count: formattedCandidates.length, deliveryEvaluation },
+          ...preAuctionExclusions, ...auctionExclusions.map(item => ({ ...item, stage: 'auction' }))],
         clientIp,
         userAgent,
         referrerDomain,
@@ -1728,6 +1750,7 @@ export class DeliveryService {
         promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',
         candidateCount: auctionResult.decisionSnapshot.candidateCount,
         excludedCandidates: [{ reasonCode, stage: billingStage, campaignId: finalCampaignId, creativeId: finalCreativeId,
+          deliveryEvaluation: auctionResult.decisionSnapshot.evaluatedCandidates[0]?.deliveryEvaluation ?? deliveryEvaluation,
           parentOpportunityId: requestId,
           transportRequestId: requestHeaders?.transportRequestId ?? null,
           creativeCompatibility: {
