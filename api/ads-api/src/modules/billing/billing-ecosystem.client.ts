@@ -149,8 +149,8 @@ export class BillingEcosystemClient {
     return this.checkedEscrow(data, userId, campaignId, 'release');
   }
 
-  async changeCampaignStatus(userId: string, campaignId: string, status: 'active' | 'paused' | 'trash') {
-    if (!['active', 'paused', 'trash'].includes(status)) throw new BadRequestException('Unsupported campaign status');
+  async changeCampaignStatus(userId: string, campaignId: string, status: 'active' | 'paused' | 'trash' | 'draft') {
+    if (!['active', 'paused', 'trash', 'draft'].includes(status)) throw new BadRequestException('Unsupported campaign status');
     const data = await this.request(userId, `campaign-escrows/${encodeURIComponent(campaignId)}/status`, { status });
     if (data?.campaign?.id !== campaignId || data?.campaign?.advertiserId !== userId || data?.campaign?.status !== status) {
       throw new ServiceUnavailableException('Billing returned an invalid campaign transition receipt; reconcile before retrying');

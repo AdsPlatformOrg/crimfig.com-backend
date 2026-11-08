@@ -41,7 +41,7 @@ function database(balance = 2000) {
     tail = new Promise<void>(resolve => { release = resolve; }); await previous;
     const before = structuredClone(state);
     const tx: any = {
-      execute: async (query: any) => { locks.push(dialect.sqlToQuery(query).sql); },
+      execute: async (query: any) => { locks.push(dialect.sqlToQuery(query).sql); return { rows: [] }; },
       select: () => {
         let table: any, predicate: any;
         const run = () => structuredClone(state[tables.get(table)!].filter((row: any) => match(row, predicate)));
@@ -208,6 +208,9 @@ test('HTTP Billing boundary returns committed receipts to the real Ads client wi
     expect((await client.changeCampaignStatus(owner, campaignId, 'active')).status).toBe('active');
     expect((await client.changeCampaignStatus(owner, campaignId, 'paused')).status).toBe('paused');
     await client.releaseCampaignEscrow(owner, campaignId);
+    Object.assign(store.state().campaigns[1], { moderationStatus: 'draft', currentSubmissionId: null });
+    expect((await client.changeCampaignStatus(owner, secondCampaign, 'trash')).status).toBe('trash');
+    expect((await client.changeCampaignStatus(owner, secondCampaign, 'draft')).status).toBe('draft');
     expect(store.state().receipts).toHaveLength(2);
     expect(store.state().wallets[0]).toMatchObject({ balanceUsdCents: 2000, lockedUsdCents: 0 });
   } finally {
@@ -235,6 +238,26 @@ test('public embed pings update diagnostics without auto-verifying websites/apps
   expect(updates).toEqual([expect.objectContaining({ embedPingLastAt: expect.any(Date) }), { isProcessed: true, auditFlags: null }]);
   expect(updates.every(values => !('verificationStatus' in values) && !('verifiedAt' in values))).toBe(true);
   expect(settlement.processPendingSettlement).not.toHaveBeenCalled();
+});
+
+test('submitted campaigns and foreign owners cannot use draft recovery', async () => {
+  const store = database();
+  const service = new CampaignEscrowService(store.db);
+  const before = structuredClone(store.state());
+  await expect(service.change(owner, campaignId, 'release', undefined, 'trash')).rejects.toBeInstanceOf(ConflictException);
+  await expect(service.change(stranger, campaignId, 'release', undefined, 'draft')).rejects.toBeInstanceOf(NotFoundException);
+  expect(store.state()).toEqual(before);
+});
+
+test('unsubmitted draft can move to Trash and restore without a monetary receipt', async () => {
+  const store = database();
+  const service = new CampaignEscrowService(store.db);
+  Object.assign(store.state().campaigns[0], { moderationStatus: 'draft', currentSubmissionId: null });
+  expect((await service.change(owner, campaignId, 'release', undefined, 'trash')).campaign.status).toBe('trash');
+  await expect(service.change(owner, campaignId, 'release', undefined, 'paused')).rejects.toBeInstanceOf(ConflictException);
+  expect((await service.change(owner, campaignId, 'release', undefined, 'draft')).campaign.status).toBe('draft');
+  expect(store.state().receipts).toHaveLength(0);
+  expect(store.state().wallets[0].balanceUsdCents).toBe(2000);
 });
 
 test('trashed campaign cannot use an existing receipt to bypass activation rules', async () => {

@@ -26712,6 +26712,27 @@
             "schema": {
               "type": "number"
             }
+          },
+          {
+            "in": "query",
+            "name": "search",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "enum": [
+                "newest",
+                "oldest",
+                "title"
+              ],
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -28329,7 +28350,8 @@
                     "enum": [
                       "active",
                       "paused",
-                      "trash"
+                      "trash",
+                      "draft"
                     ],
                     "type": "string"
                   }

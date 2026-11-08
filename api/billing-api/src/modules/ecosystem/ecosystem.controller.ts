@@ -54,8 +54,8 @@ export class CreditEarningDto {
 }
 
 export class CampaignStatusDto {
-  @IsIn(['active', 'paused', 'trash'])
-  status: 'active' | 'paused' | 'trash';
+  @IsIn(['active', 'paused', 'trash', 'draft'])
+  status: 'active' | 'paused' | 'trash' | 'draft';
 }
 
 export class FundedSettlementDto {

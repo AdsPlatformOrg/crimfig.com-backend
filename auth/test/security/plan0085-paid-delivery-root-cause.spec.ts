@@ -1,6 +1,6 @@
 import { paidDeliveryReadiness, slotDeliveryDiagnostics } from '../../../api/ads-api/src/modules/delivery/paid-delivery-policy';
 import { ConflictException } from '@nestjs/common';
-import { resolveSlotCreativeTypes } from '../../../api/billing-api/src/modules/ecosystem/creative-slot-policy';
+import { resolveGeneralSlotCreativeTypes, resolveSlotCreativeTypes } from '../../../api/billing-api/src/modules/ecosystem/creative-slot-policy';
 
 describe('PLAN-0094 canonical slot creative types', () => {
   it.each([
@@ -58,6 +58,7 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
     websiteVerified?: boolean;
     verificationExpired?: boolean;
     candidates?: any[];
+    slotFormat?: 'general';
   }) {
     const insertedServes: any[] = [];
     const insertedDecisions: any[] = [];
@@ -67,7 +68,7 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
       slot: {
         id: STAGING_SLOT_ID,
         slotTagId: STAGING_SLOT_TAG,
-        format: 'banner',
+        format: options.slotFormat ?? 'banner',
         lifecycleStatus: options.slotLifecycle,
         isActive: true,
         allowedAdTypes: JSON.stringify(['text', 'image']),
@@ -218,6 +219,16 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
     return { service, insertedServes, insertedDecisions };
   }
 
+  it('keeps optional types off for general slots unless both enabled and selected', () => {
+    process.env.ADS_PUBLISHER_TEXT_DELIVERY_ENABLED = 'false';
+    process.env.CREATIVE_VIDEO_AUTHORING_ENABLED = 'false';
+    expect(resolveGeneralSlotCreativeTypes('["image","text","video"]').types).toEqual(['image']);
+    process.env.ADS_PUBLISHER_TEXT_DELIVERY_ENABLED = 'true';
+    expect(resolveGeneralSlotCreativeTypes(null).types).toEqual(['image']);
+    expect(resolveGeneralSlotCreativeTypes('["image","text"]').types).toEqual(['image', 'text']);
+    expect(resolveGeneralSlotCreativeTypes('invalid').types).toEqual([]);
+  });
+
   describe('Gate 1 & Gate 2: Why jed.com.ng Serves House Ads When Lifecycle is "testing" or Policy is Pending', () => {
     it('PROVES ROOT CAUSE 1: slot in "testing" lifecycle automatically triggers fallback to zero-charge House Ad', async () => {
       // Slot state exactly matching staging jed.com.ng screenshot: lifecycle = 'testing'
@@ -316,9 +327,9 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
     });
 
     it.each([
-      [undefined, undefined], ['unknown', undefined], ['denied', undefined], ['granted', undefined],
-      ['unknown', 'reserve'], ['unknown', 'issue'],
-    ] as const)('evaluates paid delivery with consent %s and Billing failure %s', async (consentState, failure) => {
+      [undefined, undefined, undefined], ['unknown', undefined, undefined], ['denied', undefined, undefined], ['granted', undefined, undefined],
+      ['unknown', 'reserve', undefined], ['unknown', 'issue', undefined], ['unknown', undefined, 'general'],
+    ] as const)('evaluates paid delivery with consent %s and Billing failure %s in layout %s', async (consentState, failure, slotFormat) => {
       const eligibleCandidate = {
         campaignId: '99999999-9999-4999-8999-999999999999',
         creativeId: '88888888-8888-4888-8888-888888888888',
@@ -331,6 +342,7 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
         adType: 'image',
         format: 'banner',
         imageUrl: 'https://cdn.example.com/banner.png',
+        imageBytes: 80_000, width: 600, height: 600,
         pricingModel: 'cpm',
         pricingVersion: 2,
         costPerImpressionUsdCents: 50,
@@ -347,11 +359,12 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
         slotLifecycle: 'active',
         websitePolicy: 'approved',
         candidates: [eligibleCandidate],
+        slotFormat,
       });
 
       // Mock resolveAuction to return the winning candidate
-      jest.spyOn((service as any).auctionEngine, 'resolveAuction').mockReturnValue({
-        winner: eligibleCandidate,
+      jest.spyOn((service as any).auctionEngine, 'resolveAuction').mockImplementation((...args: any[]) => ({
+        winner: slotFormat === 'general' ? args[0][0] : eligibleCandidate,
         clearingPriceMicros: 500000,
         billingPriceNanos: 500000000n,
         decisionSnapshot: {
@@ -363,7 +376,7 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
           inventoryClass: 'paid',
           candidateCount: 1,
         },
-      });
+      }));
 
       const fallback = jest.spyOn(service, 'serveHouseOrShadowAd');
       if (failure) {
@@ -395,6 +408,10 @@ describe('PLAN-0085: Paid Delivery Root-Cause Investigation & Real Gate Proof', 
       }
       expect(ad.isHouseAd).toBe(false);
       expect(ad.headline).toBe('Staging Paid Sponsor Ad');
+      if (slotFormat === 'general') {
+        expect(ad).toMatchObject({ format: 'large_square', width: 300, height: 300 });
+        expect(service.opportunities.reserve).toHaveBeenCalledWith(expect.objectContaining({ selectedImageUrl: eligibleCandidate.imageUrl }));
+      }
       expect(ad.clickUrl).toContain('/api/v1/delivery/go/');
       expect(ad.impToken).toBeDefined();
     });

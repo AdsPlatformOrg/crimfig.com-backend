@@ -263,6 +263,18 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect((await pool.query('select count(*)::int n from ads_opportunity_reservations where opportunity_id=$1',[opportunityId])).rows[0].n).toBe(0);
       expect((await pool.query('select count(*)::int n from billing_transactions')).rows[0].n).toBe(ledgerBefore);
       paid.serveBefore=new Date(Date.now()+9000).toISOString();
+      const imageUrl = 'https://billing.example.test/rectangle.webp';
+      const [asset] = await db.insert(schema.adsMediaAssets).values({
+        ownerId: f.campaign.advertiserId, storageKey: randomUUID(), cdnUrl: imageUrl,
+        width: 336, height: 280, bytes: 80_000, mimeType: 'image/webp', sha256: 'a'.repeat(64), status: 'ready',
+      }).returning();
+      await pool.query("update ads_creatives set ad_format='card', media_asset_id=$1, image_url=$2 where id=$3",[asset.id,imageUrl,f.creative.id]);
+      await pool.query("update adstation_slots set format='general', allowed_preset_ids=$1 where id=$2",['["large_square"]',slot.id]);
+      const general = {...paid, selectedImageUrl:imageUrl};
+      await expect(client.reserve(general)).rejects.toMatchObject({reasonCode:'BILLING_RENDITION_INVALID'});
+      await pool.query('update adstation_slots set allowed_preset_ids=$1 where id=$2',['["medium_rectangle"]',slot.id]);
+      await expect(client.reserve({...general, selectedImageUrl:'https://billing.example.test/substituted.webp'})).rejects.toMatchObject({reasonCode:'BILLING_RENDITION_INVALID'});
+      Object.assign(paid, general, {serveBefore:new Date(Date.now()+9000).toISOString()});
       const first=await request(paid,key);
       expect(first.status).toBe(201);
       await first.arrayBuffer(); // Model a lost acknowledgement and replay the same binding.
@@ -1063,6 +1075,20 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await db.insert(schema.billingWallets).values({userId:owner,balanceUsdCents:balance});return row;
   }
   const escrow = () => new CampaignEscrowService(db);
+  test('PLAN0099 Trash and Restore serialize without posting a ledger entry', async () => {
+    const [draft] = await db.insert(schema.adsCampaigns).values({
+      advertiserId:owner, title:'Trash fixture', budgetUsdCents:1000, remainingBudgetUsdCents:1000,
+      status:'draft', moderationStatus:'draft',
+    }).returning();
+    await expect(escrow().change(randomUUID(),draft.id,'release',undefined,'trash')).rejects.toMatchObject({status:404});
+    const trash = await Promise.all(Array.from({length:4},()=>escrow().change(owner,draft.id,'release',undefined,'trash')));
+    expect(trash.every(result=>result.campaign.status==='trash' && result.operationId===null)).toBe(true);
+    await expect(escrow().change(owner,draft.id,'release',undefined,'paused')).rejects.toMatchObject({status:409});
+    const restored = await Promise.all(Array.from({length:4},()=>escrow().change(owner,draft.id,'release',undefined,'draft')));
+    expect(restored.every(result=>result.campaign.status==='draft' && result.operationId===null)).toBe(true);
+    expect((await pool.query('select status, moderation_status from ads_campaigns where id=$1',[draft.id])).rows[0]).toEqual({status:'draft',moderation_status:'draft'});
+    expect((await pool.query('select count(*)::int n from billing_transactions')).rows[0].n).toBe(0);
+  });
   test('concurrent owner activations commit one debit, escrow and campaign status',async()=>{
     const row=await campaign();const results=await Promise.allSettled(Array.from({length:6},()=>escrow().change(owner,row.id,'reserve',undefined,'active')));
     expect(results.every(item=>item.status==='fulfilled')).toBe(true);expect((await pool.query('select balance_usd_cents from billing_wallets')).rows[0].balance_usd_cents).toBe(1000);

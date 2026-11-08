@@ -137,14 +137,14 @@ export const CURRENT_IMAGE_PRESETS_POLICY_VERSION = 1;
  * Validates if a preset ID is one of the exactly 9 approved presets.
  */
 export function isApprovedImagePreset(presetId: string): boolean {
-  return typeof presetId === 'string' && presetId in IMAGE_AD_PRESET_MAP;
+  return typeof presetId === 'string' && Object.prototype.hasOwnProperty.call(IMAGE_AD_PRESET_MAP, presetId);
 }
 
 /**
  * Look up preset by ID.
  */
 export function getImagePreset(presetId: string): ImageAdPreset | null {
-  return IMAGE_AD_PRESET_MAP[presetId] ?? null;
+  return isApprovedImagePreset(presetId) ? IMAGE_AD_PRESET_MAP[presetId] : null;
 }
 
 /**
@@ -238,3 +238,40 @@ export function canSourceFulfillPreset(
   return { eligible: true };
 }
 
+
+export const GENERAL_SLOT_IMAGE_CAP = 250_000;
+
+type SlotRendition = { url: string; width: number; height: number; bytes: number };
+
+export function selectGeneralSlotImage(
+  renditions: readonly SlotRendition[],
+  slot: { allowedPresetIds?: string | null; width?: number | null; height?: number | null },
+  selectedUrl?: string,
+) {
+  if (!Array.isArray(renditions)) return null;
+  let ids = APPROVED_IMAGE_PRESET_IDS;
+  if (slot.allowedPresetIds != null) {
+    try {
+      const stored: unknown = JSON.parse(slot.allowedPresetIds);
+      if (!Array.isArray(stored) || !stored.length || !stored.every(isApprovedImagePreset)) return null;
+      ids = stored;
+    } catch {
+      return null;
+    }
+  }
+  const choices = renditions.filter(image => image != null &&
+    typeof image.url === 'string' && image.url.length > 0 &&
+    (selectedUrl === undefined || image.url === selectedUrl) &&
+    Number.isSafeInteger(image.width) && Number.isSafeInteger(image.height) &&
+    Number.isSafeInteger(image.bytes) && image.bytes > 0 && image.bytes <= GENERAL_SLOT_IMAGE_CAP,
+  ).sort((a, b) => a.bytes - b.bytes);
+  for (const image of choices) {
+    const preset = ids.map(id => IMAGE_AD_PRESET_MAP[id])
+      .filter(item => (slot.width == null || item.width <= slot.width) &&
+        (slot.height == null || item.height <= slot.height) &&
+        canSourceFulfillPreset(image.width, image.height, item.id).eligible)
+      .sort((a, b) => b.width * b.height - a.width * a.height)[0];
+    if (preset) return { ...image, width: preset.width, height: preset.height, presetId: preset.id };
+  }
+  return null;
+}

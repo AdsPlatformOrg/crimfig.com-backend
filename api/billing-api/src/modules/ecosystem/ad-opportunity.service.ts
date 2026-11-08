@@ -1,4 +1,5 @@
-import { resolveSlotCreativeTypes } from './creative-slot-policy';
+import { selectGeneralSlotImage } from '../../../../ads-api/src/modules/uploads/image-ad-presets';
+import { resolveGeneralSlotCreativeTypes, resolveSlotCreativeTypes } from './creative-slot-policy';
 import type { OpportunityConflictCode } from './ad-opportunity-conflict-codes';
 import {BadRequestException,ConflictException,Inject,Injectable,NotFoundException,ServiceUnavailableException} from '@nestjs/common';
 import {randomUUID} from 'crypto';
@@ -75,8 +76,8 @@ export class AdOpportunityService {
       if (!stack) throw opportunityConflict('BILLING_CREATIVE_STACK_NOT_FOUND', 'Creative stack is unavailable');
       if (stack.archived) throw opportunityConflict('BILLING_CREATIVE_STACK_ARCHIVED', 'Creative stack is archived');
       if (stack.campaignId !== c.id) throw opportunityConflict('BILLING_CREATIVE_STACK_MISMATCH', 'Creative stack does not belong to this campaign');
-      if (supply.slot.format !== creative.adFormat) throw opportunityConflict('BILLING_CREATIVE_FORMAT_MISMATCH', 'Creative format does not match the slot');
-      const allowed = resolveSlotCreativeTypes(supply.slot.allowedAdTypes);
+      if (supply.slot.format !== 'general' && supply.slot.format !== creative.adFormat) throw opportunityConflict('BILLING_CREATIVE_FORMAT_MISMATCH', 'Creative format does not match the slot');
+      const allowed = (supply.slot.format === 'general' ? resolveGeneralSlotCreativeTypes : resolveSlotCreativeTypes)(supply.slot.allowedAdTypes);
       if (allowed.source === 'invalid') throw opportunityConflict('BILLING_CREATIVE_SLOT_TYPES_INVALID', 'Slot creative type settings are invalid');
       if (!allowed.types.includes(creative.adType)) throw opportunityConflict('BILLING_CREATIVE_TYPE_NOT_ALLOWED', 'Creative type is not allowed for this slot');
       const [escrow]=await tx.select().from(s.adsCampaignEscrows).where(eq(s.adsCampaignEscrows.campaignId,c.id)).for('update').limit(1);
@@ -97,9 +98,14 @@ export class AdOpportunityService {
       if(BigInt(u.outstanding)+BigInt((carry.rows??carry)[0].nanos)+price>remaining||c.dailyBudgetUsdCents!=null&&BigInt(u.daily)+price>BigInt(c.dailyBudgetUsdCents)*NANO_CENT||
         c.hourlyPacingUsdCents!=null&&BigInt(u.hourly)+price>BigInt(c.hourlyPacingUsdCents)*NANO_CENT||u.frequency>=c.frequencyCapPerDay)throw opportunityConflict('BILLING_CAPACITY_UNAVAILABLE','Opportunity capacity is unavailable');
       let artwork=creative.imageUrl;
+      if (supply.slot.format === 'general' && creative.adType === 'image' && (!creative.mediaAssetId || !input.selectedImageUrl)) {
+        throw opportunityConflict('BILLING_RENDITION_INVALID', 'General slots require a validated image rendition');
+      }
       if(creative.mediaAssetId){const [asset]=await tx.select().from(s.adsMediaAssets).where(and(eq(s.adsMediaAssets.id,creative.mediaAssetId),eq(s.adsMediaAssets.ownerId,c.advertiserId),eq(s.adsMediaAssets.status,'ready'))).for('share').limit(1);
         if(!asset)throw opportunityConflict('BILLING_MEDIA_UNAVAILABLE','Media asset is unavailable');
-        if(input.selectedImageUrl){const choices=(asset.preparation as any)?.renditions??[{url:asset.cdnUrl,bytes:asset.bytes}];if(!choices.some((r:any)=>r.url===input.selectedImageUrl&&Number(r.bytes)<=(supply.slot.format==='banner'?100000:300000)))throw opportunityConflict('BILLING_RENDITION_INVALID','Invalid artwork rendition');artwork=input.selectedImageUrl;}}
+        if(input.selectedImageUrl){const choices=(asset.preparation as any)?.renditions??[{url:asset.cdnUrl,bytes:asset.bytes}];if (!(supply.slot.format === 'general'
+          ? selectGeneralSlotImage((asset.preparation as any)?.renditions ?? [{ url: asset.cdnUrl, bytes: asset.bytes, width: asset.width, height: asset.height }], supply.slot, input.selectedImageUrl)
+          : choices.some((r:any)=>r.url===input.selectedImageUrl&&Number(r.bytes)<=(supply.slot.format==='banner'?100000:300000))))throw opportunityConflict('BILLING_RENDITION_INVALID','Invalid artwork rendition');artwork=input.selectedImageUrl;}}
       const now=new Date(),eventDeadline=new Date(now.getTime()+EVENT_WINDOW_MS),ingestDeadline=new Date(eventDeadline.getTime()+INGEST_TOLERANCE_MS);
       const [row]=await tx.insert(s.adsOpportunityReservations).values({opportunityId:input.opportunityId,campaignId:c.id,escrowId:escrow.id,escrowAllocatedUsdCents:escrow.allocatedUsdCents,
         creativeId:creative.id,submissionId:input.submissionId,contentRevision:c.contentRevision,promoterId:input.promoterId,websiteId:input.websiteId,slotId:input.slotId,

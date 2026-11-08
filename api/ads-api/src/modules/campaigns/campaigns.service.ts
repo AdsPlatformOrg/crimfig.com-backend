@@ -85,6 +85,10 @@ export interface CreativeInput {
   mediaAssetId?: string;
 }
 
+function advertiserCanAuthorType(type: AdType): boolean {
+  return type === "image";
+}
+
 function videoAuthoringEnabled(): boolean {
   return (
     (process.env.CREATIVE_VIDEO_AUTHORING_ENABLED || "false").toLowerCase() ===
@@ -180,14 +184,13 @@ export class CampaignsService {
   ) {}
 
   creationCapabilities() {
-    const enabled = videoAuthoringEnabled();
     return {
       geoTargetingEnabled: process.env.GEO_TARGETING_ENABLED === "true",
-      videoAuthoringEnabled: enabled,
-      allowedVideoPlacements: enabled ? ALLOWED_VIDEO_PLACEMENTS : [],
+      videoAuthoringEnabled: false,
+      allowedVideoPlacements: [],
       scheduleVersion: 1,
       imagePreparationEnabled: true,
-      supportedAdTypes: enabled ? [...AD_TYPES] : ["text", "image"],
+      supportedAdTypes: ["image"],
     };
   }
 
@@ -655,6 +658,7 @@ export class CampaignsService {
     if (!adType) {
       adType = input.videoUrl ? "video" : input.imageUrl ? "image" : "text";
     }
+    if (!advertiserCanAuthorType(adType)) throw new BadRequestException("Replace legacy ads with an image before saving or submitting.");
     if (!AD_TYPES.includes(adType))
       throw new BadRequestException("Unsupported ad type.");
     if (adType === "video" && !videoAuthoringEnabled()) {
@@ -1203,18 +1207,27 @@ export class CampaignsService {
 
   // ── Reads ───────────────────────────────────────────────────────────────────
 
-  async campaignPage(advertiserId:string,status='all',page=1,pageSize=25) {
+  async campaignPage(advertiserId:string,status='all',page=1,pageSize=25,search='',sort='newest') {
     if(!Number.isSafeInteger(page)||page<1||page>100000||!Number.isSafeInteger(pageSize)||pageSize<1||pageSize>100) throw new BadRequestException('Invalid campaign page.');
     const owner=eq(adsCampaigns.advertiserId,advertiserId);
     const review=or(eq(adsCampaigns.moderationStatus,'pending_primary_review'),eq(adsCampaigns.moderationStatus,'pending_manager_approval'));
     if(!['all','draft','active','paused','under_review','rejected','trash','suspended','completed','cancelled'].includes(status)) throw new BadRequestException('Unsupported campaign filter.');
-    const filtered=status==='all'?owner:and(owner,status==='under_review'?review:and(eq(adsCampaigns.status,status as any),status==='paused'?sql`${adsCampaigns.moderationStatus} NOT IN ('pending_primary_review','pending_manager_approval')`:undefined));
+    if (typeof search !== 'string' || search.length > 100 || !['newest', 'oldest', 'title'].includes(sort)) {
+      throw new BadRequestException('Invalid campaign search or sort.');
+    }
+    const matches = search.trim()
+      ? sql`strpos(lower(${adsCampaigns.title}), lower(${search.trim()})) > 0`
+      : undefined;
+    const statusFilter=status==='all'?and(owner,sql`${adsCampaigns.status} <> 'trash'`):and(owner,status==='under_review'?review:and(eq(adsCampaigns.status,status as any),status==='paused'?sql`${adsCampaigns.moderationStatus} NOT IN ('pending_primary_review','pending_manager_approval')`:undefined));
+    const filtered = and(statusFilter, matches);
+    const order = sort === 'title' ? sql`lower(${adsCampaigns.title}) asc`
+      : sort === 'oldest' ? sql`${adsCampaigns.createdAt} asc` : desc(adsCampaigns.createdAt);
     return this.db.transaction(async tx=>{
-      const rows=await tx.select().from(adsCampaigns).where(filtered).orderBy(desc(adsCampaigns.createdAt),desc(adsCampaigns.id)).limit(pageSize).offset((page-1)*pageSize);
+      const rows=await tx.select().from(adsCampaigns).where(filtered).orderBy(order,desc(adsCampaigns.id)).limit(pageSize).offset((page-1)*pageSize);
       const [total]=await tx.select({count:sql<number>`count(*)::int`}).from(adsCampaigns).where(filtered);
-      const counts=await tx.select({status:adsCampaigns.status,moderationStatus:adsCampaigns.moderationStatus,count:sql<number>`count(*)::int`}).from(adsCampaigns).where(owner).groupBy(adsCampaigns.status,adsCampaigns.moderationStatus);
+      const counts=await tx.select({status:adsCampaigns.status,moderationStatus:adsCampaigns.moderationStatus,count:sql<number>`count(*)::int`}).from(adsCampaigns).where(and(owner,matches)).groupBy(adsCampaigns.status,adsCampaigns.moderationStatus);
       const summary:Record<string,number>={all:0};
-      for(const row of counts){const key=['pending_primary_review','pending_manager_approval'].includes(row.moderationStatus)?'under_review':row.status;summary[key]=(summary[key]??0)+row.count;summary.all+=row.count;}
+      for(const row of counts){const key=['pending_primary_review','pending_manager_approval'].includes(row.moderationStatus)?'under_review':row.status;summary[key]=(summary[key]??0)+row.count;if(row.status!=='trash')summary.all+=row.count;}
 
       // Fetch creative counts for rows
       const rowIds = rows.map(r => r.id);
@@ -1226,7 +1239,7 @@ export class CampaignsService {
               approvedCreatives: sql<number>`count(*) filter (where ${adsCreatives.reviewStatus} = 'approved')::int`,
             })
             .from(adsCreatives)
-            .where(and(sql`${adsCreatives.campaignId} IN ${rowIds}`, eq(adsCreatives.status, 'active')))
+            .where(and(inArray(adsCreatives.campaignId, rowIds), eq(adsCreatives.status, 'active')))
             .groupBy(adsCreatives.campaignId)
         : [];
 
@@ -1687,7 +1700,7 @@ export class CampaignsService {
       )
       .limit(1);
     if (!campaign) throw new NotFoundException("Campaign not found.");
-    if (!["active", "paused", "trash"].includes(status)) {
+    if (!["active", "paused", "trash", "draft"].includes(status)) {
       throw new BadRequestException(
         "Use the review workflow for moderation states.",
       );
@@ -1704,7 +1717,7 @@ export class CampaignsService {
     return this.escrowService.changeCampaignStatus(
       campaignId,
       advertiserId,
-      status as "active" | "paused" | "trash",
+      status as "active" | "paused" | "trash" | "draft",
     );
   }
 }

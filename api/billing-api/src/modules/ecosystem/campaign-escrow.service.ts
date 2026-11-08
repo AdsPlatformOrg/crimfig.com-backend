@@ -21,11 +21,11 @@ export class CampaignEscrowService {
     return `ads-escrow:v2:${escrowId}:${action}:${allocated}`;
   }
 
-  async change(userId: string, campaignId: string, action: 'reserve' | 'release', amountUsdCents?: number, targetStatus?: 'active' | 'paused' | 'trash') {
+  async change(userId: string, campaignId: string, action: 'reserve' | 'release', amountUsdCents?: number, targetStatus?: 'active' | 'paused' | 'trash' | 'draft') {
     if (!uuid.test(userId) || !uuid.test(campaignId)) throw new BadRequestException('Valid owner and campaign IDs are required');
     if (action !== 'reserve' && action !== 'release') throw new BadRequestException('Unsupported escrow operation');
     if (targetStatus && ((targetStatus === 'active') !== (action === 'reserve'))) throw new BadRequestException('Campaign status and escrow operation disagree');
-    if (targetStatus && !['active', 'paused', 'trash'].includes(targetStatus)) throw new BadRequestException('Unsupported campaign status');
+    if (targetStatus && !['active', 'paused', 'trash', 'draft'].includes(targetStatus)) throw new BadRequestException('Unsupported campaign status');
     if (!targetStatus && action === 'reserve' && (!Number.isSafeInteger(amountUsdCents) || amountUsdCents! < 500 || amountUsdCents! > MAX_CENTS)) {
       throw new BadRequestException('Escrow requires 500 to 2147483647 integer USD cents');
     }
@@ -39,6 +39,14 @@ export class CampaignEscrowService {
       if (!campaign) throw new NotFoundException('Campaign not found');
       if (targetStatus && (['suspended','completed','cancelled'].includes(campaign.status) || campaign.submissionIntentId || (targetStatus === 'active' && !currentApproval(campaign)))) {
         throw new ConflictException('Campaign requires staff moderation before this transition');
+      }
+      if ((targetStatus === 'trash' || targetStatus === 'draft') &&
+          (campaign.moderationStatus !== 'draft' || campaign.currentSubmissionId ||
+           ![targetStatus, targetStatus === 'trash' ? 'draft' : 'trash'].includes(campaign.status))) {
+        throw new ConflictException('Only unsubmitted drafts can be moved to Trash or restored');
+      }
+      if (campaign.status === 'trash' && targetStatus === 'paused') {
+        throw new ConflictException('Restore this campaign to Draft first');
       }
       const finish = async (result: any) => {
         if (!targetStatus) return result;

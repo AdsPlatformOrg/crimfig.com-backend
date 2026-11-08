@@ -146,7 +146,7 @@ describe("PLAN-0035 ad stacks and geography", () => {
     expect(regions.map((item) => item.id)).toEqual(["region:western-africa"]);
   });
 
-  it("keeps video authoring server-gated and lists only card placements when enabled", () => {
+  it("advertises only image authoring even when the legacy video flag is set", () => {
     const service = new CampaignsService(
       {} as any,
       {} as any,
@@ -159,17 +159,13 @@ describe("PLAN-0035 ad stacks and geography", () => {
       allowedVideoPlacements: [],
       scheduleVersion: 1,
       imagePreparationEnabled: true,
-      supportedAdTypes: ["text", "image"],
+      supportedAdTypes: ["image"],
     });
     process.env.CREATIVE_VIDEO_AUTHORING_ENABLED = "true";
     const enabled = service.creationCapabilities();
-    expect(enabled.videoAuthoringEnabled).toBe(true);
-    expect(enabled.supportedAdTypes).toEqual(["text", "image", "video"]);
-    expect(enabled.allowedVideoPlacements).toEqual([
-      "in_content_mid",
-      "in_content_end",
-      "listing_interstitial",
-    ]);
+    expect(enabled.videoAuthoringEnabled).toBe(false);
+    expect(enabled.supportedAdTypes).toEqual(["image"]);
+    expect(enabled.allowedVideoPlacements).toEqual([]);
   });
 
   it("keeps video delivery gated and the embed renderer honest", () => {

@@ -51,7 +51,7 @@ export class AdsEscrowService {
     return { message: 'Escrow release confirmed', escrow };
   }
 
-  async changeCampaignStatus(campaignId: string, userId: string, status: 'active' | 'paused' | 'trash') {
+  async changeCampaignStatus(campaignId: string, userId: string, status: 'active' | 'paused' | 'trash' | 'draft') {
     await this.requireCampaignOwner(campaignId, userId);
     return this.billingClient.changeCampaignStatus(userId, campaignId, status);
   }

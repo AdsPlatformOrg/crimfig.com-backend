@@ -73,6 +73,13 @@ describe('PLAN-0038 type-aware creative copy', () => {
     expect(result).toMatchObject({ headline: 'Optional context', ctaText: 'Shop now' });
   });
 
+  it.each(['text', 'video'])('rejects advertiser authoring of %s before looking up media', async adType => {
+    await expect((service() as any).validateCreative({}, 'advertiser-1', {
+      adType,
+      destinationUrl: 'https://example.com/product',
+    })).rejects.toThrow('Replace legacy ads with an image');
+  });
+
   it('rejects an image without an owned, ready asset', async () => {
     await expect((service() as any).validateCreative(txWith(null), 'advertiser-1', {
       adType: 'image',

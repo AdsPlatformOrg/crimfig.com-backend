@@ -1,3 +1,4 @@
+import { availablePublisherAdTypes } from '../../../../billing-api/src/modules/ecosystem/creative-slot-policy';
 import { readinessReport, websiteReadiness, installationReadiness } from '../delivery/readiness-report';
 import { slotDeliveryDiagnostics } from '../delivery/paid-delivery-policy';
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
@@ -32,6 +33,22 @@ export interface UpdateAdstationSlotDto {
   responsive?: boolean;
   allowedAdTypes?: string[];
   allowedPresetIds?: string[];
+}
+
+function slotTypesForWrite(types: string[] | undefined): string {
+  const available = availablePublisherAdTypes();
+  if (types !== undefined && (!Array.isArray(types) || types.some(type =>
+    !available.some(item => item === type)
+  ))) throw new BadRequestException('Select only currently available ad types.');
+  return JSON.stringify([...new Set(['image', ...(types ?? [])])]);
+}
+
+function slotPresetPolicy(ids?: string[]) {
+  try {
+    return normalizeSlotPresetPolicy(ids);
+  } catch {
+    throw new BadRequestException('Choose approved image sizes for this slot.');
+  }
 }
 
 @Injectable()
@@ -92,7 +109,7 @@ export class PublisherSlotsService {
     const initialLifecycle =
       website.policyStatus === 'approved' ? 'testing' : 'testing';
 
-    const normalizedPolicy = normalizeSlotPresetPolicy(dto.allowedPresetIds);
+    const normalizedPolicy = slotPresetPolicy(dto.allowedPresetIds);
 
     const [slot] = await this.db
       .insert(adstationSlots)
@@ -101,7 +118,7 @@ export class PublisherSlotsService {
         websiteId: dto.websiteId,
         name: dto.name.trim(),
         slotType: dto.slotType,
-        format: dto.format || 'banner',
+        format: dto.format || (dto.slotType === 'network' ? 'general' : 'banner'),
         isConsiderationSlot: isConsideration,
         isConsiderationVerified: false,
         slotDeliveryPreference: dto.slotDeliveryPreference,
@@ -110,9 +127,7 @@ export class PublisherSlotsService {
         width: dto.width ?? null,
         height: dto.height ?? null,
         responsive: dto.responsive ?? true,
-        allowedAdTypes: dto.allowedAdTypes
-          ? JSON.stringify(dto.allowedAdTypes)
-          : null,
+        allowedAdTypes: slotTypesForWrite(dto.allowedAdTypes),
         presetPolicy: normalizedPolicy.policy,
         allowedPresetIds:
           dto.allowedPresetIds && dto.allowedPresetIds.length > 0
@@ -204,7 +219,7 @@ export class PublisherSlotsService {
 
     let presetUpdates = {};
     if (dto.allowedPresetIds !== undefined) {
-      const normalized = normalizeSlotPresetPolicy(dto.allowedPresetIds);
+      const normalized = slotPresetPolicy(dto.allowedPresetIds);
       presetUpdates = {
         presetPolicy: normalized.policy,
         allowedPresetIds:
@@ -226,8 +241,8 @@ export class PublisherSlotsService {
         ...(dto.width !== undefined ? { width: dto.width } : {}),
         ...(dto.height !== undefined ? { height: dto.height } : {}),
         ...(dto.responsive !== undefined ? { responsive: dto.responsive } : {}),
-        ...(dto.allowedAdTypes
-          ? { allowedAdTypes: JSON.stringify(dto.allowedAdTypes) }
+        ...(dto.allowedAdTypes !== undefined
+          ? { allowedAdTypes: slotTypesForWrite(dto.allowedAdTypes) }
           : {}),
         ...presetUpdates,
         lifecycleStatus: nextLifecycle,

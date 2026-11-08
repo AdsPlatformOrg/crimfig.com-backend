@@ -217,7 +217,7 @@ export function documentAdsController(controller: AnyConstructor) {
     for (const [key, arg] of Object.entries(args) as [string, { index: number; data?: string }][]) {
       if (key.startsWith('3:') && !arg.data && types[arg.index] && types[arg.index] !== Object) documentValidatedDto(types[arg.index]);
     }
-    if (name === 'updateStatus') apply(ApiBody({ schema: object({ status: enumeration('active', 'paused', 'trash') }) }));
+    if (name === 'updateStatus') apply(ApiBody({ schema: object({ status: enumeration('active', 'paused', 'trash', 'draft') }) }));
     if (['getQueue','getClaim'].includes(name)) apply(ApiQuery({ name: 'stage', required: false, enum: ['reviewer', 'manager'] }));
     if (name === 'operationsSummary') apply(ApiQuery({name:'targetType',required:false,enum:['all','creative','stack','campaign']}));
     if (['getQueue','itemDetail'].includes(name)) apply(ApiQuery({ name:'page',required:false,type:Number }));

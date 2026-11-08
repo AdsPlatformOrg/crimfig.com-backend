@@ -1,7 +1,7 @@
-import { resolveSlotCreativeTypes } from '../../../../billing-api/src/modules/ecosystem/creative-slot-policy';
+import { resolveGeneralSlotCreativeTypes, resolveSlotCreativeTypes } from '../../../../billing-api/src/modules/ecosystem/creative-slot-policy';
 import { matchesDeviceTarget } from './device-targeting';
 import { responsiveImageBounds } from './image-sizing';
-import { APPROVED_IMAGE_AD_PRESETS } from '../uploads/image-ad-presets';
+import { APPROVED_IMAGE_AD_PRESETS, selectGeneralSlotImage } from '../uploads/image-ad-presets';
 import { adsPublicOrigin } from '@crimfig/shared';
 import {houseProgramRequested} from '../cfig/cfig-allocation';
 import { assertEventReplay, assertInstanceBinding } from './interaction-binding';
@@ -413,7 +413,8 @@ export class DeliveryService {
   var imageFormats = ${JSON.stringify(Object.fromEntries([...APPROVED_IMAGE_AD_PRESETS.map(p=>[p.id,{width:p.width,height:p.height}]),['banner',{width:728,height:250}],['card',{width:336,height:280}],['sidebar_sticky',{width:300,height:600}]]))};
   function renderAdCard(container, ad, mode, slotApiBase, state) {
     var activeBase = slotApiBase || apiBase;
-    var imageFormat=container.getAttribute('data-ad-format')||ad.format||'banner';
+    var slotFormat=container.getAttribute('data-ad-format');
+    var imageFormat=(slotFormat==='general'?ad.format:slotFormat)||ad.format||'banner';
     var limits=Object.prototype.hasOwnProperty.call(imageFormats,imageFormat)?imageFormats[imageFormat]:imageFormats.banner;
     var bounds=imageBounds(ad.width,ad.height,limits.width,limits.height);
     var assets=[];
@@ -901,8 +902,8 @@ export class DeliveryService {
       if (dbHouseCreatives && dbHouseCreatives.length > 0) {
         // PLAN-0067: Size-aware House creative matching considering slot allowed preset policy
         const candidateCreatives = dbHouseCreatives.filter(c => 
-          this.allowedAdTypes(params.format).includes(c.adType as any) &&
-          (c.format === params.format || c.format === 'any') &&
+          (params.format === 'general' || this.allowedAdTypes(params.format).includes(c.adType as any)) &&
+          (params.format === 'general' || c.format === params.format || c.format === 'any') &&
           (c.adType === 'text' || (c.adType === 'image' && !!c.imageUrl) || (c.adType === 'video' && !!c.videoUrl))
         );
 
@@ -913,12 +914,34 @@ export class DeliveryService {
             .select({
               presetPolicy: adstationSlots.presetPolicy,
               allowedPresetIds: adstationSlots.allowedPresetIds,
+              width: adstationSlots.width,
+              height: adstationSlots.height,
+              allowedAdTypes: adstationSlots.allowedAdTypes,
             })
             .from(adstationSlots)
             .where(eq(adstationSlots.id, params.slotId))
             .limit(1);
 
-          if (slotRecord?.allowedPresetIds) {
+          if (params.format === 'general') {
+            const allowed = resolveGeneralSlotCreativeTypes(slotRecord?.allowedAdTypes);
+            preferred = candidateCreatives.find(candidate => {
+              if (!allowed.types.includes(candidate.adType as 'text' | 'image' | 'video')) return false;
+              if (candidate.adType !== 'image') return true;
+              const preset = APPROVED_IMAGE_AD_PRESETS.find(item => item.id === candidate.targetPreset);
+              const width = candidate.renditionWidth ?? candidate.width;
+              const height = candidate.renditionHeight ?? candidate.height;
+              if (!preset || width !== preset.width || height !== preset.height) return false;
+              if (slotRecord?.width != null && preset.width > slotRecord.width) return false;
+              if (slotRecord?.height != null && preset.height > slotRecord.height) return false;
+              if (slotRecord?.allowedPresetIds == null) return true;
+              try {
+                const ids: unknown = JSON.parse(slotRecord.allowedPresetIds);
+                return Array.isArray(ids) && ids.includes(preset.id);
+              } catch {
+                return false;
+              }
+            })!;
+          } else if (slotRecord?.allowedPresetIds) {
             try {
               const allowed: string[] = JSON.parse(slotRecord.allowedPresetIds);
               const matchingPreset = candidateCreatives.find(c => c.targetPreset && allowed.includes(c.targetPreset));
@@ -939,7 +962,7 @@ export class DeliveryService {
             campaignId: HOUSE_CAMPAIGN_UUID,
             creativeId: preferred.id,
             adType: (preferred.adType as 'image' | 'text' | 'video') || 'image',
-            format: preferred.format || params.format || 'banner',
+            format: (params.format === 'general' ? preferred.targetPreset : preferred.format) || 'banner',
             headline: preferred.headline,
             bodyText: preferred.bodyText,
             ctaText: preferred.ctaText || 'Start Advertising',
@@ -1085,7 +1108,7 @@ export class DeliveryService {
 
     return {
       adType: activeHouseCreative.adType,
-      format: params.format || activeHouseCreative.format,
+      format: params.format === 'general' ? activeHouseCreative.format : params.format || activeHouseCreative.format,
       headline: activeHouseCreative.headline,
       bodyText: activeHouseCreative.bodyText,
       ctaText: activeHouseCreative.ctaText,
@@ -1502,7 +1525,9 @@ export class DeliveryService {
     const requestedHandle = canonicalSlot
       ? canonicalSlot.slotTagId
       : this.requestedPlacementHandle(token, false);
-    const slotTypePolicy = canonicalSlot ? resolveSlotCreativeTypes(canonicalSlot.allowedAdTypes) : null;
+    const slotTypePolicy = canonicalSlot
+      ? (canonicalSlot.format === 'general' ? resolveGeneralSlotCreativeTypes : resolveSlotCreativeTypes)(canonicalSlot.allowedAdTypes)
+      : null;
     const allowedTypes = new Set(slotTypePolicy?.types ?? this.allowedAdTypes(requestedHandle));
 
     if (
@@ -1550,14 +1575,17 @@ export class DeliveryService {
         return false;
       };
       if (!allowedTypes.has(candidate.adType || 'text')) return reject('CREATIVE_TYPE_NOT_ALLOWED');
-      if (candidate.format !== requestedLayout && (canonicalSlot || candidate.adType !== 'video'))
+      if (requestedLayout !== 'general' && candidate.format !== requestedLayout && (canonicalSlot || candidate.adType !== 'video'))
         return reject('CREATIVE_FORMAT_MISMATCH');
       if (candidate.adType === 'image') {
-        const rendition = selectImageRendition(
-          candidate,
-          requestedLayout,
-          imageCap,
-        );
+        const general = requestedLayout === 'general' && canonicalSlot
+          ? selectGeneralSlotImage(candidate.preparation?.renditions ?? [{
+              url: candidate.imageUrl, bytes: candidate.imageBytes, width: candidate.width, height: candidate.height,
+            }], canonicalSlot)
+          : null;
+        const rendition = requestedLayout === 'general' ? general
+          : selectImageRendition(candidate, requestedLayout, imageCap);
+        if (general) candidate.renderPresetId = general.presetId;
         if (!rendition) return reject('CREATIVE_RENDITION_INCOMPATIBLE');
         candidate.imageUrl = rendition.url;
         candidate.width = rendition.width;
@@ -1750,7 +1778,7 @@ export class DeliveryService {
         promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',
         candidateCount: auctionResult.decisionSnapshot.candidateCount,
         excludedCandidates: [{ reasonCode, stage: billingStage, campaignId: finalCampaignId, creativeId: finalCreativeId,
-          deliveryEvaluation: auctionResult.decisionSnapshot.evaluatedCandidates[0]?.deliveryEvaluation ?? deliveryEvaluation,
+          deliveryEvaluation: auctionResult.decisionSnapshot.evaluatedCandidates?.[0]?.deliveryEvaluation ?? deliveryEvaluation,
           parentOpportunityId: requestId,
           transportRequestId: requestHeaders?.transportRequestId ?? null,
           creativeCompatibility: {
@@ -1825,6 +1853,7 @@ export class DeliveryService {
     return {
       adType,
       format:
+        (winningCreative as any).renderPresetId ||
         (winningCreative as any).adFormat ||
         (winningCreative as any).format ||
         'card',

@@ -392,8 +392,10 @@ export class CampaignsController {
   @ApiQuery({name:'status',required:false})
   @ApiQuery({name:'page',required:false,type:Number})
   @ApiQuery({name:'pageSize',required:false,type:Number})
-  async campaignPage(@Req() req:any,@Query('status') status?:string,@Query('page') page?:string,@Query('pageSize') pageSize?:string) {
-    return {status:'success',data:await this.campaignsService.campaignPage(req.user.sub,status??'all',Number(page??1),Number(pageSize??25))};
+  @ApiQuery({name:'search',required:false,type:String})
+  @ApiQuery({name:'sort',required:false,enum:['newest','oldest','title']})
+  async campaignPage(@Req() req:any,@Query('status') status?:string,@Query('page') page?:string,@Query('pageSize') pageSize?:string,@Query('search') search?:string,@Query('sort') sort?:string) {
+    return {status:'success',data:await this.campaignsService.campaignPage(req.user.sub,status??'all',Number(page??1),Number(pageSize??25),search,sort)};
   }
 
   @Get(':id/mutations/:requestId')

@@ -5,6 +5,7 @@ import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString } from 'class-
 import { PromotersService } from '../promoters/promoters.service';
 import { SetupChecksService } from './setup-checks.service';
 import { CreateSetupCheckDto } from './create-setup-check.dto';
+import { availablePublisherAdTypes } from '../../../../billing-api/src/modules/ecosystem/creative-slot-policy';
 import { PublisherSlotsService, UpdateAdstationSlotDto } from './publisher-slots.service';
 
 export class CreateSlotDto {
@@ -77,7 +78,7 @@ export class PublisherInventoryController {
       'WEBSITE',
     );
     const slots = await this.publisherSlots.getSlots(promoter.id, websiteId);
-    return { status: 'success', data: slots };
+    return { status: 'success', data: slots, availableAdTypes: availablePublisherAdTypes() };
   }
 
   @Post('slots')

@@ -8,6 +8,7 @@ import {
   matchesApprovedPresetDimensions,
   normalizeSlotPresetPolicy,
   canSourceFulfillPreset,
+  selectGeneralSlotImage,
   CURRENT_IMAGE_PRESETS_POLICY_VERSION,
 } from '../../../api/ads-api/src/modules/uploads/image-ad-presets';
 
@@ -144,3 +145,24 @@ describe('PLAN-0067 Canonical Image Ad Presets and Validation', () => {
   });
 });
 
+
+describe('PLAN-0099 general slot rendition eligibility', () => {
+  const square = { url: '/square.webp', width: 600, height: 600, bytes: 80_000 };
+  const rectangle = { url: '/rect.webp', width: 336, height: 280, bytes: 90_000 };
+  it('rejects malformed restrictions, mismatched artwork and a substituted URL', () => {
+    expect(selectGeneralSlotImage([square], { allowedPresetIds: '["__proto__"]' })).toBeNull();
+    expect(selectGeneralSlotImage([square], { allowedPresetIds: '["medium_rectangle"]' })).toBeNull();
+    expect(selectGeneralSlotImage([square], {}, '/different.webp')).toBeNull();
+    expect(selectGeneralSlotImage([{ ...square, bytes: 250_001 }], {})).toBeNull();
+    expect(selectGeneralSlotImage([rectangle], { width: 299 })).toBeNull();
+  });
+  it('selects a compatible approved size and validates the same URL during Billing handoff', () => {
+    expect(selectGeneralSlotImage([square, rectangle], {})).toMatchObject({
+      url: square.url, presetId: 'large_square', width: 300, height: 300,
+    });
+    const restricted = { allowedPresetIds: '["medium_rectangle"]', width: 320 };
+    expect(selectGeneralSlotImage([square, rectangle], restricted, rectangle.url)).toMatchObject({
+      url: rectangle.url, presetId: 'medium_rectangle', width: 300, height: 250,
+    });
+  });
+});
