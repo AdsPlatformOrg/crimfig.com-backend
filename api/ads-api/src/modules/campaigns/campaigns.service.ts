@@ -29,6 +29,8 @@ import {
   adsCreativeStacks,
   adsMediaAssets,
   crimfigGeoTargets,
+  adsInteractions,
+  adsPlacements,
 } from "@crimfig/database/schema";
 import { and, asc, desc, eq, inArray, sql, or } from "drizzle-orm";
 import { DATABASE_TOKEN } from "../database/database.module";
@@ -1248,14 +1250,35 @@ export class CampaignsService {
         creativeMap.set(cc.campaignId, { total: cc.totalCreatives || 0, approved: cc.approvedCreatives || 0 });
       }
 
+      const performanceCounts = rowIds.length > 0
+        ? await tx
+            .select({
+              campaignId: adsPlacements.campaignId,
+              impressionsCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'impression')::int`,
+              clicksCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'click')::int`,
+              hoversCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'hover')::int`,
+              touchesCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'touch')::int`,
+            })
+            .from(adsInteractions)
+            .innerJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+            .where(and(inArray(adsPlacements.campaignId, rowIds), eq(adsInteractions.isValid, true)))
+            .groupBy(adsPlacements.campaignId)
+        : [];
+      const performanceMap = new Map(performanceCounts.map((metrics) => [metrics.campaignId, metrics]));
+
       return {
         items: rows.map(c => {
           const counts = creativeMap.get(c.id) || { total: 0, approved: 0 };
+          const metrics = performanceMap.get(c.id);
           return {
             ...c,
             capabilities: campaignCapabilities(c),
             totalCreativesCount: counts.total,
             approvedCreativesCount: counts.approved,
+            impressionsCount: Number(metrics?.impressionsCount ?? 0),
+            clicksCount: Number(metrics?.clicksCount ?? 0),
+            hoversCount: Number(metrics?.hoversCount ?? 0),
+            touchesCount: Number(metrics?.touchesCount ?? 0),
           };
         }),
         page,

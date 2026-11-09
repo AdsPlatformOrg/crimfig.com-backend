@@ -739,6 +739,106 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     };
     return {campaign,publisher,promoter,creative,placement,add,svc:new AdSettlementService(db)};
   }
+  test('PLAN0101 advertiser campaign metrics are owner-scoped and returned over HTTP', async () => {
+    const own = await settlementFixture(100_000_000n, 'cpc', false);
+    await db.insert(schema.adsInteractions).values([
+      { placementId: own.placement.id, promoterId: own.promoter.id, type: 'impression', isValid: true },
+      { placementId: own.placement.id, promoterId: own.promoter.id, type: 'impression', isValid: true },
+      { placementId: own.placement.id, promoterId: own.promoter.id, type: 'viewable_impression', isValid: true },
+      { placementId: own.placement.id, promoterId: own.promoter.id, type: 'click', isValid: true },
+      { placementId: own.placement.id, promoterId: own.promoter.id, type: 'click', isValid: false },
+      { placementId: own.placement.id, promoterId: own.promoter.id, type: 'hover', isValid: true },
+      { placementId: own.placement.id, promoterId: own.promoter.id, type: 'touch', isValid: true },
+      { placementId: own.placement.id, promoterId: own.promoter.id, type: 'render', isValid: true },
+    ]);
+
+    const foreignAdvertiser = randomUUID();
+    const foreignPublisher = randomUUID();
+    await pool.query("insert into users(id,email,status) values($1,'foreign-advertiser@example.test','ACTIVE'),($2,'foreign-publisher@example.test','ACTIVE')", [foreignAdvertiser, foreignPublisher]);
+    const [foreignCampaign] = await db.insert(schema.adsCampaigns).values({
+      advertiserId: foreignAdvertiser,
+      title: 'Foreign campaign',
+      budgetUsdCents: 1000,
+      remainingBudgetUsdCents: 1000,
+      status: 'paused',
+      moderationStatus: 'approved',
+      pricingVersion: 2,
+      pricingModel: 'cpc',
+      contentRevision: 1,
+      approvedRevision: 1,
+    }).returning();
+    const [foreignPromoter] = await db.insert(schema.adsPromoters).values({ userId: foreignPublisher, type: 'INDIVIDUAL' }).returning();
+    const [foreignStack] = await db.insert(schema.adsCreativeStacks).values({ campaignId: foreignCampaign.id, name: 'Foreign stack', position: 1 }).returning();
+    const [foreignCreative] = await db.insert(schema.adsCreatives).values({
+      campaignId: foreignCampaign.id,
+      adStackId: foreignStack.id,
+      headline: 'Foreign creative',
+      destinationUrl: 'https://example.test/foreign',
+      status: 'active',
+      reviewStatus: 'approved',
+    }).returning();
+    const [foreignPlacement] = await db.insert(schema.adsPlacements).values({
+      campaignId: foreignCampaign.id,
+      creativeId: foreignCreative.id,
+      promoterId: foreignPromoter.id,
+      placementToken: randomUUID(),
+    }).returning();
+    await db.insert(schema.adsInteractions).values({
+      placementId: foreignPlacement.id,
+      promoterId: foreignPromoter.id,
+      type: 'impression',
+      isValid: true,
+    });
+
+    @Module({
+      controllers: [CampaignsController],
+      providers: [{ provide: CampaignsService, useValue: new CampaignsService(db, {} as any, {} as any) }],
+    })
+    class CampaignMetricsFixture {}
+    const jwt = new JwtService({ secret: 'plan0101-isolated-test-signing-key' });
+    const app = await NestFactory.create(CampaignMetricsFixture, { logger: false });
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+    app.useGlobalGuards(new AdsAccessGuard(jwt, new Reflector(), db, { rolesFor: () => [] } as any));
+    await app.listen(0, '127.0.0.1');
+
+    async function campaignPage(actor: string, query = '') {
+      const token = jwt.sign({ sub: actor, email: 'fixture@example.test', type: 'access' }, { expiresIn: '2m' });
+      const response = await fetch((await app.getUrl()) + '/api/v1/campaigns/page' + query, {
+        headers: { Authorization: 'Bearer ' + token },
+        signal: AbortSignal.timeout(5000),
+      });
+      return { status: response.status, body: await response.json() as any };
+    }
+
+    try {
+      expect((await campaignPage(owner, '?page=0')).status).toBe(400);
+
+      const ownPage = await campaignPage(owner);
+      expect(ownPage.status).toBe(200);
+      expect(ownPage.body.data.items).toHaveLength(1);
+      expect(ownPage.body.data.items[0]).toMatchObject({
+        id: own.campaign.id,
+        impressionsCount: 2,
+        clicksCount: 1,
+        hoversCount: 1,
+        touchesCount: 1,
+      });
+
+      const foreignPage = await campaignPage(foreignAdvertiser);
+      expect(foreignPage.status).toBe(200);
+      expect(foreignPage.body.data.items).toHaveLength(1);
+      expect(foreignPage.body.data.items[0]).toMatchObject({
+        id: foreignCampaign.id,
+        impressionsCount: 1,
+        clicksCount: 0,
+        hoversCount: 0,
+        touchesCount: 0,
+      });
+    } finally {
+      await app.close();
+    }
+  }, 30000);
   test('PLAN0081 readiness HTTP scopes accounts and distinguishes House, paid serve and render', async () => {
     const f = await settlementFixture(undefined, undefined, false);
     await pool.query("update ads_campaigns set status='active' where id=$1", [f.campaign.id]);
