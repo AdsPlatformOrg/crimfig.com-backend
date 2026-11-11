@@ -1,3 +1,4 @@
+import { billedClick, observedClickRows } from './observed-clicks';
 import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -35,7 +36,7 @@ export class ReportsService {
           ${advertiser ? sql`0` : sql`CASE WHEN receipt.status = 'pending' AND item.clearance_status = 'pending' THEN ${earned} ELSE 0 END`} AS pending,
           0::numeric AS adjustments,
           (i.type = 'viewable_impression')::int AS "billableImpressions",
-          (i.type = 'click')::int AS "billableClicks", 0 AS impressions, 0 AS clicks
+          (i.type = 'click')::int AS "billableClicks", 0 AS impressions, 0 AS clicks, 0 AS "validClicks", 0 AS "billedClicks"
         FROM ads_settlement_claims claim
         JOIN ads_settlement_batches batch ON batch.id = claim.batch_id AND batch.status = 'completed'
         JOIN ads_interactions i ON i.id = claim.interaction_id AND i.serve_id = claim.serve_id
@@ -50,18 +51,25 @@ export class ReportsService {
           AND ((s.pricing_model = 'cpm' AND i.type = 'viewable_impression') OR (s.pricing_model = 'cpc' AND i.type = 'click'))
         UNION ALL
         SELECT i.created_at, campaign.id, s.creative_id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-          (i.type = 'impression')::int, (i.type = 'click')::int
+          (i.type = 'impression')::int, 0, 0, 0
         FROM ads_interactions i
         JOIN ads_serves s ON s.id = i.serve_id AND s.inventory_class = 'paid' AND s.delivery_mode = 'normal'
         JOIN ads_campaigns campaign ON campaign.id = s.campaign_id
         WHERE ${advertiser} AND campaign.advertiser_id = ${owner}
-          AND i.is_valid AND i.promoter_id = s.promoter_id AND i.type IN ('impression','click')
+          AND i.is_valid AND i.promoter_id = s.promoter_id AND i.type = 'impression'
           AND i.created_at >= ${start} AND i.created_at < ${end}
+        UNION ALL
+        SELECT click.at, click.campaign_id, s.creative_id, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, (click.valid is true)::int, (${billedClick})::int
+        FROM (${observedClickRows({ campaign: sql`select id from ads_campaigns where advertiser_id = ${owner}`,
+          from: first + 'T00:00:00+01:00', to: now < new Date(range.until + 'T00:00:00+01:00')
+            ? now.toISOString() : range.until + 'T00:00:00+01:00' })}) click
+        LEFT JOIN ads_serves s ON s.id = click.serve_id
+        WHERE ${advertiser}
         UNION ALL
         SELECT t.created_at, campaign.id, null::uuid, 0, 0, 0,
           CASE WHEN t.type = 'ads_spend' THEN t.amount_usd_cents::numeric * 10000000 ELSE 0 END,
           CASE WHEN t.type = 'internal_credit' THEN t.amount_usd_cents::numeric * 10000000 ELSE 0 END,
-          0, 0, 0, 0, 0, 0, 0
+          0, 0, 0, 0, 0, 0, 0, 0, 0
         FROM billing_transactions t
         JOIN ads_campaigns campaign ON campaign.id::text = (t.metadata::jsonb)->>'campaignId'
         WHERE ${advertiser} AND t.user_id = ${owner} AND campaign.advertiser_id = ${owner}
@@ -70,7 +78,7 @@ export class ReportsService {
           AND t.created_at >= ${start} AND t.created_at < ${end}
         UNION ALL
         SELECT t.created_at, item.campaign_id, s.creative_id, 0, 0, 0, 0, 0, 0, 0,
-          -t.amount_usd_cents::numeric * 10000000, 0, 0, 0, 0
+          -t.amount_usd_cents::numeric * 10000000, 0, 0, 0, 0, 0, 0
         FROM billing_transactions t
         JOIN ads_promoter_settlement_items item ON item.id::text = (t.metadata::jsonb)->>'itemId'
         JOIN ads_promoters publisher ON publisher.id = item.promoter_id

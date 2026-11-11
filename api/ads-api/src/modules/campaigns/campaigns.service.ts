@@ -1,3 +1,4 @@
+import { billedClick, observedClickRows } from '../analytics/observed-clicks';
 import { eventCampaignId } from '../analytics/event-attribution';
 import { readinessReport } from '../delivery/readiness-report';
 import { campaignListOrder } from './campaign-list-sort';
@@ -1268,6 +1269,16 @@ export class CampaignsService {
         : [];
       const performanceMap = new Map(performanceCounts.map((metrics) => [metrics.campaignId, metrics]));
 
+      const clickCounts = rowIds.length ? await tx.execute<{
+        campaignId: string; observed: number; billed: number;
+      }>(sql`
+        select campaign_id as "campaignId", count(*)::int as observed,
+          count(distinct event_id) filter (where ${billedClick})::int as billed
+        from (${observedClickRows({ campaign: sql.join(rowIds.map(id => sql`${id}`), sql`, `) })}) click
+        group by campaign_id
+      `) : { rows: [] };
+      const clicksByCampaign = new Map<string, { observed: number; billed: number }>();
+      for (const row of clickCounts.rows) clicksByCampaign.set(row.campaignId, row);
       return {
         items: rows.map(c => {
           const counts = creativeMap.get(c.id) || { total: 0, approved: 0 };
@@ -1278,7 +1289,9 @@ export class CampaignsService {
             totalCreativesCount: counts.total,
             approvedCreativesCount: counts.approved,
             impressionsCount: Number(metrics?.impressionsCount ?? 0),
-            clicksCount: Number(metrics?.clicksCount ?? 0),
+            clicksCount: clicksByCampaign.get(c.id)?.observed ?? 0,
+            validClicksCount: Number(metrics?.clicksCount ?? 0),
+            billedClicksCount: clicksByCampaign.get(c.id)?.billed ?? 0,
             hoversCount: Number(metrics?.hoversCount ?? 0),
             touchesCount: Number(metrics?.touchesCount ?? 0),
           };

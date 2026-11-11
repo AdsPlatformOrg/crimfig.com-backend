@@ -1899,8 +1899,9 @@ export class DeliveryService {
     let destinationUrl: string | undefined;
 
     // 1. Try to decode as cryptographically signed impression token (resilient to mobile proxy IP drift)
+    const strictTokenPayload = this.tokenService.verifyToken(token, clientIp);
     const tokenPayload =
-      this.tokenService.verifyToken(token, clientIp) ||
+      strictTokenPayload ||
       this.tokenService.verifyToken(token, clientIp, { allowIpMismatch: true });
 
     // Zero-charge CrimFig House/Shadow Ad click path (`G11`)
@@ -1998,7 +1999,10 @@ export class DeliveryService {
     // first consumes the dedupe key and rejects the very same click as DUP_CLICK.
     // Record click interaction telemetry with validation & GIVT/SIVT status for batch settlement
     if(!tokenPayload)throw new NotFoundException('Signed click attribution is required');
-    const interaction=tokenPayload?await this.logInteraction({impToken:token,type:'click',source:'share_link',clientIp,userAgent,referrer}):undefined;
+    const interaction = strictTokenPayload
+      ? await this.logInteraction({ impToken: token, type: 'click', source: 'share_link', clientIp, userAgent, referrer })
+      : undefined;
+    const recordingReason = interaction ? null : strictTokenPayload ? 'EVENT_NOT_RECORDED' : 'IP_BINDING_MISMATCH';
 
     const clickId = `clk_${Date.now().toString(36)}_${crypto.randomBytes(8).toString('hex')}`;
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -2007,7 +2011,8 @@ export class DeliveryService {
       await this.db.insert(schema.adsClicks).values({
         clickId,
         serveId,
-        interactionId: interaction?.id??null,
+        interactionId: interaction?.id ?? null,
+        recordingReason,
         campaignId,
         promoterId: promoterId || null,
         actorIp: null,

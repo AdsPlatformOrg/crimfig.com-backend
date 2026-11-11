@@ -28,6 +28,7 @@ export const adsClicks = pgTable(
     clickId: varchar('click_id', { length: 64 }).notNull().unique(), // e.g. clk_20261017_abcd1234efgh5678
     serveId: uuid('serve_id'),
     interactionId: uuid('interaction_id'),
+    recordingReason: varchar('recording_reason', { length: 40 }),
     campaignId: uuid('campaign_id').notNull().references(() => adsCampaigns.id, { onDelete: 'cascade' }),
     promoterId: uuid('promoter_id').references(() => adsPromoters.id, { onDelete: 'set null' }),
 
@@ -42,6 +43,7 @@ export const adsClicks = pgTable(
     index('ads_clicks_campaign_id_idx').on(t.campaignId),
     index('ads_clicks_promoter_id_idx').on(t.promoterId),
     index('ads_clicks_clicked_at_idx').on(t.clickedAt),
+    index('ads_clicks_interaction_id_idx').on(t.interactionId),
   ],
 );
 

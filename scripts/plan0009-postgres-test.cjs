@@ -76,6 +76,26 @@ try {
     if (checked.status) throw new Error('Read-only restored snapshot reconciliation failed');
     console.log(checked.stdout.trim());
     exitCode = 0;
+  } else if (process.argv.includes('--plan0104-migration')) {
+    const env = { ...process.env, DATABASE_URL: `postgresql://plan0009test:${password}@127.0.0.1:25432/plan0009_test`, DB_SSL: 'false' };
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const run = spawnSync(process.execPath, ['scripts/release-migrate.cjs', '--initialize-staging'], {
+        cwd: root, windowsHide: true, encoding: 'utf8', env: { ...env, RAILWAY_ENVIRONMENT_NAME: 'staging' },
+      });
+      if (run.status !== 0) throw new Error(`Migration verification failed: ${run.stderr}`);
+    }
+    const verify = `const {createRequire}=require('node:module');
+      const {Client}=createRequire(require('node:path').resolve('database/package.json'))('pg');
+      const c=new Client({connectionString:process.env.DATABASE_URL});
+      (async()=>{try{await c.connect();const {rows}=await c.query(\`SELECT
+        EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='ads_clicks' AND column_name='recording_reason' AND is_nullable='YES') AS reason,
+        EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname='public' AND tablename='ads_clicks' AND indexdef LIKE '%(interaction_id)%') AS linkage\`);
+        if (!rows[0].reason || !rows[0].linkage) throw new Error('Click receipt schema is incomplete');
+      }finally{await c.end();}})().catch(error=>{console.error(error.message);process.exitCode=1;});`;
+    const checked = spawnSync(process.execPath, ['-e', verify], { cwd: root, windowsHide: true, encoding: 'utf8', env });
+    if (checked.status !== 0) throw new Error(checked.stderr || 'Click receipt schema verification failed');
+    console.log('Click receipt recording reason and linkage index verified after migration and replay.');
+    exitCode = 0;
   } else if (process.argv.includes('--migrations')) {
     const env = { ...process.env, DATABASE_URL: `postgresql://plan0009test:${password}@127.0.0.1:25432/plan0009_test`, DB_SSL: 'false' };
     const baseline = path.join(temp, 'baseline');
@@ -134,6 +154,7 @@ try {
     ...(process.argv.includes('--plan0095') ? ['--testNamePattern','PLAN0092 Billing|funded settlement races|CPM fractions survive|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0095/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0099') ? ['--testNamePattern','PLAN0099 Trash|PLAN0092 Billing HTTP'] : []),
     ...(process.argv.includes('--plan0096') ? ['--testNamePattern','PLAN0096 matched|PLAN0092 Billing HTTP','--json','--outputFile=../docs/reviews/plan-0096/backend-integration-results.json'] : []),
+    ...(process.argv.includes('--plan0104') ? ['--testNamePattern','PLAN0104|PLAN0102 daily reports|PLAN0103 network and legacy|PLAN0101 advertiser','--json','--outputFile=../docs/reviews/plan-0104/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0102-reports') ? ['--testNamePattern','PLAN0102 daily reports','--json','--outputFile=../docs/reviews/plan-0102/reports-integration-results.json'] : []),
     ...(process.argv.includes('--plan0103-settlement') ? ['--testNamePattern','PLAN0092 Billing|funded settlement races|unproven legacy events|CPM fractions survive','--json','--outputFile=../docs/reviews/plan-0103/settlement-integration-results.json'] : []),
     ...(process.argv.includes('--plan0103') ? ['--testNamePattern','PLAN0103|PLAN0101 advertiser campaign metrics|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0103/backend-integration-results.json'] : []),

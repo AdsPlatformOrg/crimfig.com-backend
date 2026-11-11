@@ -274,6 +274,13 @@
       "when": 1793538000003,
       "tag": "0039_moderation_advisory_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "7",
+      "when": 1793538000004,
+      "tag": "0040_click_recording_reason",
+      "breakpoints": true
     }
   ]
 }

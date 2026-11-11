@@ -6,6 +6,7 @@ import { AnalyticsService } from '../../../api/ads-api/src/modules/analytics/ana
 import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
 import { DeliveryController } from '../../../api/ads-api/src/modules/delivery/delivery.controller';
 import { DeliveryService, HOUSE_PLACEMENT_UUID } from '../../../api/ads-api/src/modules/delivery/delivery.service';
+import { ClickAuditController } from '../../../api/ads-api/src/modules/analytics/click-audit.controller';
 import { AuctionEngineService } from '../../../api/ads-api/src/modules/delivery/auction-engine.service';
 import { ImpressionTokenService } from '../../../api/ads-api/src/modules/delivery/impression-token.service';
 import { FraudRulesService } from '../../../api/ads-api/src/modules/verification/fraud-rules.service';
@@ -88,7 +89,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query('create table apps(id uuid primary key)');
     // Actual Drizzle columns/defaults/enums/unique constraints/FKs, not the serialized mock adapter.
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
-    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsTrafficControls, schema.adsEvidenceRecords, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
+    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsTrafficControls, schema.adsEvidenceRecords, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsClicks, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
     const enums = new Set<string>();
     tables.splice(tables.indexOf(schema.adsCreatives), 0, schema.adsMediaAssets as any, schema.crimfigGeoTargets as any, schema.adsHouseCreatives as any);
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
@@ -866,7 +867,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     } finally {await app.close();}
   },30000);
 
-  test('PLAN0103 real signed click persists valid once and rejects repeat without settlement', async () => {
+  test('PLAN0104 signed redirects record valid, duplicate and changed-IP outcomes and reconcile audit HTTP', async () => {
     const prior={...process.env};
     Object.assign(process.env,{ADS_IMPRESSION_SIGNING_KEY:'plan0103-local-signing-secret-32-bytes',ADS_EVIDENCE_HASH_SECRET:'plan0103-local-evidence-secret-32-bytes'});
     try {
@@ -886,6 +887,44 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect(validate).toHaveBeenCalledTimes(1);
       await delivery.handleClick(token,undefined,'Mozilla/5.0 Chrome/130');
       expect(validate).toHaveBeenCalledTimes(2);
+      await expect(delivery.handleClick(token,'192.0.2.11','Mozilla/5.0 Chrome/130')).resolves.toContain('cf_click=');
+      expect(validate).toHaveBeenCalledTimes(2);
+      const pending=(await pool.query("select interaction_id, recording_reason from ads_clicks where recording_reason is not null")).rows;
+      expect(pending).toEqual([{interaction_id:null,recording_reason:'IP_BINDING_MISMATCH'}]);
+      // A historical unlinked receipt has no persisted reason.
+      await db.insert(schema.adsClicks).values({clickId:'clk_fixture_historical',serveId:serve.id,
+        campaignId:f.campaign.id,promoterId:f.promoter.id,expiresAt:new Date(Date.now()+3600000)});
+      const [staff]=await pool.query("insert into users(id,email,status) values($1,'click-audit@example.test','ACTIVE') returning id",[randomUUID()]).then(r=>r.rows);
+      const campaigns=new CampaignsService(db,{} as any,{} as any);
+      @Module({controllers:[ClickAuditController],providers:[{provide:DATABASE_TOKEN,useValue:db}]})
+      class ClickAuditFixture {}
+      const app=await NestFactory.create(ClickAuditFixture,{logger:false});
+      const jwt=new JwtService({secret:'plan0104-isolated-report-key'});
+      app.useGlobalGuards(new AdsAccessGuard(jwt,new Reflector(),db,{rolesFor:(actor:string)=>actor===staff.id?['ads_admin']:[]} as any));
+      await app.listen(0,'127.0.0.1');
+      const get=async(query:string,actor?:string)=>{
+        const access=actor&&jwt.sign({sub:actor,email:'fixture@example.test',type:'access'},{expiresIn:'1m'});
+        const response=await fetch((await app.getUrl())+'/admin/ads/click-audit?'+query,{
+          headers:access?{Authorization:'Bearer '+access}:{},signal:AbortSignal.timeout(5000),
+        });
+        return {status:response.status,body:await response.json() as any};
+      };
+      try {
+        const filter='campaign='+f.campaign.id;
+        expect((await get(filter)).status).toBe(401);
+        expect((await get(filter,owner)).status).toBe(403);
+        expect((await get('campaign=invalid',staff.id)).status).toBe(400);
+        const audit=await get(filter,staff.id);
+        expect(audit.status).toBe(200);
+        expect(audit.body.data.counts).toEqual({all:4,redirects:4,valid:1,rejected:1,missing:2,billed:0});
+        expect((await get(filter+'&outcome=missing',staff.id)).body.data.items).toEqual(expect.arrayContaining([
+          expect.objectContaining({event_id:null,valid:null,reason:'IP_BINDING_MISMATCH'}),
+          expect.objectContaining({event_id:null,valid:null,reason:null}),
+        ]));
+        expect((await get('campaign='+randomUUID(),staff.id)).body.data.total).toBe(0);
+        const campaignPage=await campaigns.campaignPage(owner,'all',1,10,'','clicks_desc');
+        expect(campaignPage.items[0]).toMatchObject({clicksCount:4,validClicksCount:1,billedClicksCount:0});
+      } finally { await app.close(); }
       const rows=(await pool.query("select is_valid,invalid_reason,verification_version from ads_interactions where type='click' order by created_at")).rows;
       expect(rows).toEqual([{is_valid:true,invalid_reason:null,verification_version:2},{is_valid:false,invalid_reason:'DUP_CLICK',verification_version:0}]);
       expect((await pool.query('select count(*)::int n from ads_evidence_records')).rows[0].n).toBe(2);
@@ -1046,7 +1085,9 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect(ownPage.body.data.items[0]).toMatchObject({
         id: own.campaign.id,
         impressionsCount: 2,
-        clicksCount: 1,
+        clicksCount: 2,
+        validClicksCount: 1,
+        billedClicksCount: 0,
         hoversCount: 1,
         touchesCount: 1,
       });

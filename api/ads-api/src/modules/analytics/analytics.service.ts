@@ -1,3 +1,4 @@
+import { billedClick, observedClickRows } from './observed-clicks';
 import { eventCampaignId } from './event-attribution';
 import { Injectable, Inject } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
@@ -22,6 +23,18 @@ export class AnalyticsService {
     @Inject(DATABASE_TOKEN)
     private readonly db: NodePgDatabase<typeof schema>,
   ) {}
+
+  private async advertiserClickCounts(advertiserId: string, from?: Date, to?: Date) {
+    const clickRows = observedClickRows({
+      campaign: sql`select id from ads_campaigns where advertiser_id = ${advertiserId}`,
+      from: from?.toISOString(), to: to?.toISOString(),
+    });
+    return this.db.execute<{ day: string; source: string; observed: number; billed: number }>(sql`
+      select to_char(click.at at time zone 'UTC', 'YYYY-MM-DD') as day, click.source,
+        count(*)::int as observed, count(distinct event_id) filter (where ${billedClick})::int as billed
+      from (${clickRows}) click group by 1, 2
+    `);
+  }
 
   /**
    * Performance and earnings analytics for a promoter.
@@ -128,6 +141,10 @@ export class AnalyticsService {
       }
     }
 
+    const validClicks = totalClicks;
+    const clickCounts = campaignIds.length ? (await this.advertiserClickCounts(advertiserId)).rows : [];
+    totalClicks = clickCounts.reduce((total, row) => total + row.observed, 0);
+    const billedClicks = clickCounts.reduce((total, row) => total + row.billed, 0);
     const totalBudgetCents = campaigns.reduce((acc, c) => acc + c.budgetUsdCents, 0);
     const totalRemainingCents = campaigns.reduce((acc, c) => acc + c.remainingBudgetUsdCents, 0);
     const totalSpentCents = totalBudgetCents - totalRemainingCents;
@@ -139,7 +156,7 @@ export class AnalyticsService {
       totalSpentUsd: totalSpentCents / 100,
       remainingBudgetUsd: totalRemainingCents / 100,
       impressions: totalImpressions,
-      clicks: totalClicks,
+      clicks: totalClicks, validClicks, billedClicks,
       hovers: totalHovers,
       touches: totalTouches,
       ctr: parseFloat(ctr.toFixed(2)),
@@ -219,12 +236,16 @@ export class AnalyticsService {
       }
     }
 
+    const validClicks = totalClicks;
+    const clickCounts = campaignIds.length ? (await this.advertiserClickCounts(advertiserId, startDate, now)).rows : [];
+    totalClicks = clickCounts.reduce((total, row) => total + row.observed, 0);
+    const billedClicks = clickCounts.reduce((total, row) => total + row.billed, 0);
     const totalBudgetCents = campaigns.reduce((acc, c) => acc + (Number(c.budgetUsdCents) || 0), 0);
     const totalRemainingCents = campaigns.reduce((acc, c) => acc + (Number(c.remainingBudgetUsdCents) || 0), 0);
     const totalSpentCents = Math.max(0, totalBudgetCents - totalRemainingCents);
     const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
     const avgCpmUsd = totalImpressions > 0 ? ((totalSpentCents / 100) / totalImpressions) * 1000 : 0;
-    const avgCpcUsd = totalClicks > 0 ? (totalSpentCents / 100) / totalClicks : 0;
+    const avgCpcUsd = billedClicks > 0 ? (totalSpentCents / 100) / billedClicks : 0;
 
     return {
       period,
@@ -248,7 +269,7 @@ export class AnalyticsService {
       },
       performance: {
         impressions: totalImpressions,
-        clicks: totalClicks,
+        clicks: totalClicks, validClicks, billedClicks,
         hovers: totalHovers,
         touches: totalTouches,
         ctr: Number.isFinite(ctr) ? parseFloat(ctr.toFixed(2)) : 0,
@@ -330,13 +351,18 @@ export class AnalyticsService {
       const count = Number(row.count || 0);
       if (row.type === 'impression') {
         item.impressions += count;
-      } else if (row.type === 'click') {
-        item.clicks += count;
       } else if (row.type === 'hover') {
         item.hovers += count;
       } else if (row.type === 'touch') {
         item.touches += count;
       }
+    }
+
+    const observed = await this.advertiserClickCounts(advertiserId, startDate, now);
+    for (const row of observed.rows) {
+      const item = lookupMap.get(row.day) ?? { impressions: 0, clicks: 0, hovers: 0, touches: 0, spend: 0 };
+      item.clicks += row.observed;
+      lookupMap.set(row.day, item);
     }
 
     const dailySpend = await this.db.select({
@@ -417,14 +443,17 @@ export class AnalyticsService {
       const c = Number(row.count || 0);
       if (row.source === 'embed_website' || row.source === 'embed') {
         if (row.type === 'impression') webImp += c;
-        else if (row.type === 'click') webClk += c;
       } else if (row.source === 'mobile_sdk' || row.source === 'app') {
         if (row.type === 'impression') appImp += c;
-        else if (row.type === 'click') appClk += c;
       } else {
         if (row.type === 'impression') socialImp += c;
-        else if (row.type === 'click') socialClk += c;
       }
+    }
+
+    for (const row of (await this.advertiserClickCounts(advertiserId, startDate, now)).rows) {
+      if (row.source === 'embed' || row.source === 'embed_website') webClk += row.observed;
+      else if (row.source === 'mobile_sdk' || row.source === 'app') appClk += row.observed;
+      else socialClk += row.observed;
     }
 
     const totalImp = webImp + appImp + socialImp;
