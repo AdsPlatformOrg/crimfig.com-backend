@@ -26729,7 +26729,22 @@
               "enum": [
                 "newest",
                 "oldest",
-                "title"
+                "title",
+                "title_desc",
+                "status",
+                "status_desc",
+                "budget",
+                "budget_desc",
+                "spend",
+                "spend_desc",
+                "creatives",
+                "creatives_desc",
+                "views",
+                "views_desc",
+                "clicks",
+                "clicks_desc",
+                "ctr",
+                "ctr_desc"
               ],
               "type": "string"
             }

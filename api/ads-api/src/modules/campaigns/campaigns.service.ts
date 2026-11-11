@@ -1,5 +1,6 @@
 import { eventCampaignId } from '../analytics/event-attribution';
 import { readinessReport } from '../delivery/readiness-report';
+import { campaignListOrder } from './campaign-list-sort';
 import { paidDeliveryReadiness } from '../delivery/paid-delivery-policy';
 import { CampaignWorkflow, campaignCapabilities, assertEditableCampaign, currentApproval, controlRequired, fingerprint, type MutationControl } from './campaign-workflow';
 import { imageSpecsView } from "../uploads/prepared-image";
@@ -1215,7 +1216,7 @@ export class CampaignsService {
     const owner=eq(adsCampaigns.advertiserId,advertiserId);
     const review=or(eq(adsCampaigns.moderationStatus,'pending_primary_review'),eq(adsCampaigns.moderationStatus,'pending_manager_approval'));
     if(!['all','draft','active','paused','under_review','rejected','trash','suspended','completed','cancelled'].includes(status)) throw new BadRequestException('Unsupported campaign filter.');
-    if (typeof search !== 'string' || search.length > 100 || !['newest', 'oldest', 'title'].includes(sort)) {
+    if (typeof search !== 'string' || search.length > 100) {
       throw new BadRequestException('Invalid campaign search or sort.');
     }
     const matches = search.trim()
@@ -1223,8 +1224,7 @@ export class CampaignsService {
       : undefined;
     const statusFilter=status==='all'?and(owner,sql`${adsCampaigns.status} <> 'trash'`):and(owner,status==='under_review'?review:and(eq(adsCampaigns.status,status as any),status==='paused'?sql`${adsCampaigns.moderationStatus} NOT IN ('pending_primary_review','pending_manager_approval')`:undefined));
     const filtered = and(statusFilter, matches);
-    const order = sort === 'title' ? sql`lower(${adsCampaigns.title}) asc`
-      : sort === 'oldest' ? sql`${adsCampaigns.createdAt} asc` : desc(adsCampaigns.createdAt);
+    const order = campaignListOrder(sort);
     return this.db.transaction(async tx=>{
       const rows=await tx.select().from(adsCampaigns).where(filtered).orderBy(order,desc(adsCampaigns.id)).limit(pageSize).offset((page-1)*pageSize);
       const [total]=await tx.select({count:sql<number>`count(*)::int`}).from(adsCampaigns).where(filtered);

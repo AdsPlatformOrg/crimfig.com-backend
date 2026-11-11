@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const root = path.resolve(__dirname, '..');
+const postgresPort = process.argv.includes('--plan0099-sort') ? '25439' : '25432';
 const binaries = 'C:\\Program Files\\PostgreSQL\\17\\bin';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crimfig-plan0009-pg-'));
 const data = path.join(temp, 'data');
@@ -35,11 +36,11 @@ try {
   pg('initdb', ['-D', data, '-U', 'plan0009test', '--pwfile', passwordFile, '--auth=scram-sha-256', '--encoding=UTF8', '--no-locale']);
   initialized = true;
   fs.unlinkSync(passwordFile);
-  fs.appendFileSync(path.join(data, 'postgresql.conf'), "\nlisten_addresses='127.0.0.1'\nport=25432\n");
+  fs.appendFileSync(path.join(data, 'postgresql.conf'), `\nlisten_addresses='127.0.0.1'\nport=${postgresPort}\n`);
   pg('pg_ctl', ['-D', data, '-l', path.join(temp, 'postgres.log'), '-w', 'start']);
   started = true;
-  pg('createdb', ['-h', '127.0.0.1', '-p', '25432', '-U', 'plan0009test', 'plan0009_test']);
-  console.log('Isolated PostgreSQL 17 SCRAM cluster ready on loopback 25432. Existing services untouched.');
+  pg('createdb', ['-h', '127.0.0.1', '-p', postgresPort, '-U', 'plan0009test', 'plan0009_test']);
+  console.log(`Isolated PostgreSQL 17 SCRAM cluster ready on loopback ${postgresPort}. Existing services untouched.`);
   if (process.argv.includes('--oauth')) {
     const redisConfig = path.join(temp, 'redis.conf');
     fs.writeFileSync(redisConfig, `bind 127.0.0.1\nport 26379\nprotected-mode yes\nrequirepass ${password}\nsave ""\nappendonly no\ndir "${temp.replace(/\\/g, '/')}"\n`);
@@ -121,8 +122,9 @@ try {
   const providerIndex = process.argv.indexOf('--provider-env');
   const providerEnv = providerIndex < 0 ? undefined : path.resolve(root, process.argv[providerIndex + 1] || 'api/billing-api/.env');
   if (providerEnv && !providerEnv.startsWith(root + path.sep)) throw new Error('Provider configuration must be inside this backend workspace');
+  if (process.argv.includes('--plan0099-sort')) fs.mkdirSync(path.resolve(root, '../docs/reviews/plan-0099'), { recursive: true });
   const result = spawnSync(process.execPath, ['node_modules/jest/bin/jest.js', '--config', 'auth/jest.config.js',
-    '--runInBand', '--runTestsByPath', ...(process.argv.includes('--moderation') ? ['auth/test/security/plan0077-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0077/backend-integration-results.json'] : ['auth/test/security/funding-postgres.spec.ts']),
+    '--runInBand', '--runTestsByPath', ...(process.argv.includes('--plan0099-sort') ? ['auth/test/security/plan0099-sort-postgres.spec.ts','--json','--outputFile=../docs/reviews/plan-0099/backend-sort-integration-results.json'] : process.argv.includes('--moderation') ? ['auth/test/security/plan0077-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0077/backend-integration-results.json'] : ['auth/test/security/funding-postgres.spec.ts']),
     ...(process.argv.includes('--delivery-readiness') ? ['--testNamePattern','PLAN0079 owner-scoped','--json','--outputFile=../docs/reviews/plan-0079/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0081-readiness') ? ['--testNamePattern','PLAN0081 readiness','--json','--outputFile=../docs/reviews/plan-0081/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0091') ? ['--testNamePattern','PLAN0079 owner-scoped|PLAN0080 website policy|funded settlement races|CPM fractions survive|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0091/backend-integration-results.json'] : []),
@@ -139,7 +141,7 @@ try {
     ...(process.argv.includes('--transfer-only') ? ['--testNamePattern', 'real Paystack TEST transfer'] : []),
     ...(process.argv.includes('--oauth') ? ['--testNamePattern', 'real Redis OAuth'] : [])], {
     cwd: root, windowsHide: true, stdio: 'inherit',
-    env: { ...process.env, PLAN0009_PG_URL: `postgresql://plan0009test:${password}@127.0.0.1:25432/plan0009_test`,
+    env: { ...process.env, PLAN0009_PG_URL: `postgresql://plan0009test:${password}@127.0.0.1:${postgresPort}/plan0009_test`,
       ...(providerEnv ? { PLAN0009_PROVIDER_ENV: providerEnv } : {}),
       ...(redis ? { PLAN0009_REDIS_URL: `redis://:${password}@127.0.0.1:26379` } : {}) },
   });
