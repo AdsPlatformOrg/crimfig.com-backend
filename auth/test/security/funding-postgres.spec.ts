@@ -1,3 +1,4 @@
+import { AdOpportunityWorker } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.worker';
 import { AnalyticsController } from '../../../api/ads-api/src/modules/analytics/analytics.controller';
 import { AnalyticsService } from '../../../api/ads-api/src/modules/analytics/analytics.service';
 import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
@@ -188,7 +189,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     const service = new AdOpportunityService(db);
     await expect(db.transaction((tx: typeof db) => (service as any).expire(tx, randomUUID()))).resolves.toBeUndefined();
   });
-  test('PLAN0092 Billing HTTP validates, reserves, issues and replays with isolated PostgreSQL', async () => {
+  test.each(['cpc', 'cpm'] as const)('PLAN0092 Billing HTTP validates, issues and settles %s network events', async model => {
     const key = 'local-plan0092-authority-key';
     const previousEnv = { ...process.env };
     process.env.INTERNAL_ECOSYSTEM_KEY = key;
@@ -213,7 +214,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect((await request(body,key)).status).toBe(503);
       expect((await pool.query('select count(*)::int n from ads_opportunity_reservations where opportunity_id=$1',[id])).rows[0].n).toBe(0);
       expect((await fetch(`${base}/${id}`,{headers:{'x-internal-key':key},signal:AbortSignal.timeout(5000)})).status).toBe(404);
-      const f = await settlementFixture();
+      const f = await settlementFixture(undefined, model);
       const [reservation] = await db.insert(schema.adsOpportunityReservations).values({
         opportunityId:id,campaignId:f.campaign.id,expiresAt:new Date(Date.now()+5000),
       }).returning();
@@ -225,14 +226,17 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
         ADS_PAID_SERVING_ENABLED:'true',ADS_PAID_RELEASE_ENABLED:'true',ADS_EVIDENCE_HASH_SECRET:'plan0092-local-evidence-secret-32-bytes',
         ADS_AUCTION_POLICY_APPROVAL:JSON.stringify({version:'plan0092-fixture',approvedBy:'JED',approvedAt:'2026-11-03T00:00:00Z',pricing:'second_price',bidderGrouping:'advertiser',floors:'bid_and_clearing',fractionalClosure:'write_off_subcent',pctrBasisPoints:150,eventWindowMs:900000,ingestionToleranceMs:60000}),
       });
-      await pool.query('update ads_campaigns set cost_per_click_usd_cents=100 where id=$1',[f.campaign.id]);
+      await pool.query('update ads_campaigns set cost_per_click_usd_cents=100,cost_per_impression_usd_cents=50 where id=$1',[f.campaign.id]);
       await pool.query("update ads_creatives set ad_format='banner',ad_type='image',image_url='https://billing.example.test/banner.png' where id=$1",[f.creative.id]);
       const [site] = await db.insert(schema.adsPromoterWebsites).values({promoterId:f.promoter.id,url:'https://billing.example.test',domain:'billing.example.test',verificationToken:randomUUID(),verificationMethod:'dns_txt',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'approved'}).returning();
       const [slot] = await db.insert(schema.adstationSlots).values({websiteId:site.id,promoterId:f.promoter.id,name:'Billing fixture',slotTagId:'cf-slot-plan0092-billing',slotType:'network',format:'banner',lifecycleStatus:'active',installationStatus:'verified',allowedAdTypes:'["text"]',isActive:true}).returning();
-      const opportunityId=randomUUID(), clearingPriceMicros=reservePriceMicrosForModel('cpc');
-      const priceNanos=eventPriceNanos('cpc',clearingPriceMicros).toString();
+      const opportunityId=randomUUID(), clearingPriceMicros=reservePriceMicrosForModel(model);
+      const priceNanos=eventPriceNanos(model,clearingPriceMicros).toString();
       const decision={requestId:opportunityId,winnerCampaignId:f.campaign.id,winnerCreativeId:f.creative.id,clearingPriceMicros,billingPriceNanos:priceNanos,policyVersion:'plan0092-fixture',bidderGroupingMode:'advertiser',tieSeed:'fixture',candidateCount:1,eligibleGroupCount:1,evaluatedCandidates:[],excludedCandidates:[]};
-      const paid={...body,serveBefore:new Date(Date.now()+9000).toISOString(),opportunityId,campaignId:f.campaign.id,creativeId:f.creative.id,submissionId:f.campaign.currentSubmissionId,contentRevision:f.campaign.contentRevision,promoterId:f.promoter.id,websiteId:site.id,slotId:slot.id,policyVersion:decision.policyVersion,priceNanos,clearingPriceMicros,decision};
+      process.env.ADS_IMPRESSION_SIGNING_KEY = 'plan0103-local-impression-signing-key';
+      const visitorIp = '192.0.2.10';
+      const tokens = new ImpressionTokenService();
+      const paid={...body,ipHash:tokens.hashIp(visitorIp),serveBefore:new Date(Date.now()+9000).toISOString(),opportunityId,campaignId:f.campaign.id,creativeId:f.creative.id,submissionId:f.campaign.currentSubmissionId,contentRevision:f.campaign.contentRevision,promoterId:f.promoter.id,websiteId:site.id,slotId:slot.id,policyVersion:decision.policyVersion,priceNanos,clearingPriceMicros,decision};
       const client = new OpportunityClient(new ConfigService({ BILLING_API_URL:origin, INTERNAL_ECOSYSTEM_KEY:key }));
       const ledgerBefore=(await pool.query('select count(*)::int n from billing_transactions')).rows[0].n;
       await pool.query("update users set status='SUSPENDED' where id=$1",[f.publisher]);
@@ -298,9 +302,60 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       const trace = await new AdsOperationsService(db).getAuctionDecision(opportunityId);
       expect(trace?.billingPriceNanos).toBe(priceNanos);
       expect(trace?.pricingBreakdown).toMatchObject({
-        billingUnit:'eligible click',reservedNanos:priceNanos,reservationState:'ISSUED',
+        billingUnit:model === 'cpc' ? 'eligible click' : 'eligible viewable impression',reservedNanos:priceNanos,reservationState:'ISSUED',
         clearingBasis:'single_group_reserve',pctrBasisPoints:'150',claimId:null,settledDebitCents:null,publisherEarningsCents:null,
       });
+      process.env.ADS_TRAFFIC_ASSESSMENT_POLICY_VERSION = 'plan0103-local-assessment';
+      const evidence = new EvidenceService(db, client);
+      const delivery = new DeliveryService(db, tokens, new AuctionEngineService(), new FraudRulesService(), client, evidence);
+      const token = tokens.generateToken({ servedId: result.serveId, placementId: HOUSE_PLACEMENT_UUID,
+        campaignId: f.campaign.id, creativeId: f.creative.id, promoterId: f.promoter.id, ipHash: paid.ipHash });
+      const settle = (requestId = randomUUID(), cutoff = new Date()) => f.svc.settle(f.campaign.id, requestId, cutoff);
+      expect((await settle()).billedUsdCents).toBe(0);
+      expect(await delivery.logInteraction({ impToken: token, type: 'click',
+        userAgent: 'Mozilla/5.0 Chrome/130' })).toBeUndefined();
+      await new Promise(resolve => setTimeout(resolve, 350));
+      const event = await delivery.logInteraction({ impToken: token, type: model === 'cpc' ? 'click' : 'viewable_impression',
+        userAgent: 'Mozilla/5.0 Chrome/130', clientIp: visitorIp, visibleRatio: 0.8, durationSeconds: 2 });
+      if (!event) throw new Error('Signed pricing event was not recorded');
+      expect(event).toMatchObject({isValid:true,verificationVersion:2,financialEligibility:'pending'});
+      const worker = new AdOpportunityWorker(db, new AdOpportunityService(db), f.svc, new CampaignEscrowService(db));
+      const workerWarning = jest.spyOn((worker as any).logger, 'warn');
+      await worker.tick();
+      expect(workerWarning).not.toHaveBeenCalled();
+      await client.claim(held.reservationId, event.id);
+      expect((await settle()).billedUsdCents).toBe(0);
+      const actor = randomUUID();
+      await pool.query("insert into users(id,email,status) values($1,'assessment@example.test','ACTIVE')",[actor]);
+      const assessment = { requestId: randomUUID(), outcome: 'eligible' as const,
+        policyVersion: process.env.ADS_TRAFFIC_ASSESSMENT_POLICY_VERSION, reasonCodes: ['VERIFIED_EVENT'] };
+      await expect(evidence.assess(event.id, owner, assessment)).rejects.toThrow('Owners cannot assess');
+      await evidence.assess(event.id, actor, assessment);
+      await pool.query("update adstation_slots set is_active=false where id=$1",[slot.id]);
+      expect((await settle()).billedUsdCents).toBe(0);
+      await pool.query("update adstation_slots set is_active=true where id=$1",[slot.id]);
+      if (model === 'cpc') {
+        await pool.query("update ads_campaigns set status='paused' where id=$1",[f.campaign.id]);
+        await pool.query("update ads_campaign_escrows set release_pending=true where campaign_id=$1",[f.campaign.id]);
+      }
+      const requestId = randomUUID(), cutoff = new Date();
+      const receipts = await Promise.all([settle(requestId, cutoff), settle(requestId, cutoff)]);
+      const cents = model === 'cpc' ? 10 : 0;
+      expect(receipts.map(receipt => receipt.billedUsdCents)).toEqual([cents, cents]);
+      expect(receipts.filter(receipt => receipt.replayed)).toHaveLength(1);
+      expect((await pool.query('select settled_at from ads_opportunity_reservations where id=$1',[held.reservationId])).rows[0].settled_at).toBeInstanceOf(Date);
+      expect((await pool.query("select amount_usd_cents,status from billing_transactions where type in ('ads_spend','ads_earning') order by type::text")).rows)
+        .toEqual(model === 'cpc' ? [{amount_usd_cents:5,status:'pending'},{amount_usd_cents:10,status:'completed'}] : []);
+      expect((await pool.query('select carry_nanos from ads_settlement_carries')).rows[0].carry_nanos)
+        .toBe(model === 'cpm' ? priceNanos : '0');
+      expect((await pool.query('select count(*)::int n from ads_settlement_claims where serve_id=$1',[result.serveId])).rows[0].n).toBe(1);
+      const settledTrace = await new AdsOperationsService(db).getAuctionDecision(opportunityId);
+      expect(settledTrace?.pricingBreakdown).toMatchObject({
+        claimId: expect.any(String), claimPriceNanos: priceNanos, batchStatus: 'completed',
+        settledDebitCents: model === 'cpc' ? '10' : null,
+        publisherEarningsCents: model === 'cpc' ? '5' : null,
+      });
+      expect((await settle()).billedUsdCents).toBe(0);
     } finally {
       await app.close();
       process.env = previousEnv;

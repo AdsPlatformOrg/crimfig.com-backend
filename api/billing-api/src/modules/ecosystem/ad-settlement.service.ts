@@ -1,8 +1,9 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { and, asc, eq, isNull, lt, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as s from '@crimfig/database/schema';
+import { adEventJournalMatches, validEvidenceSignature } from '@crimfig/shared';
 import { DATABASE_TOKEN } from '../database/database.module';
 
 const CENT = 10_000_000n, MAX = 2147483647;
@@ -35,12 +36,14 @@ export class AdSettlementService {
       }
       const [campaign] = await tx.select().from(s.adsCampaigns).where(eq(s.adsCampaigns.id, campaignId)).for('update');
       if (!campaign) throw new NotFoundException('Campaign not found');
-      if (campaign.pricingVersion !== 2 || campaign.status !== 'active' || campaign.moderationStatus !== 'approved') {
+      // A stop blocks new serves, but still permits already funded and assessed network events to close.
+      const stopped = campaign.status === 'paused' || campaign.status === 'trash';
+      if (campaign.pricingVersion !== 2 || (!stopped && (campaign.status !== 'active' || campaign.moderationStatus !== 'approved'))) {
         throw new ConflictException('Campaign must have reviewed versioned pricing and active approval');
       }
       const escrows = await tx.select().from(s.adsCampaignEscrows).where(eq(s.adsCampaignEscrows.campaignId, campaignId)).for('update');
       const escrow = escrows[0];
-      if (escrows.length !== 1 || escrow.userId !== campaign.advertiserId || escrow.status !== 'active' ||
+      if (escrows.length !== 1 || escrow.userId !== campaign.advertiserId || escrow.status !== 'active' || (stopped && !escrow.releasePending) ||
         [escrow.allocatedUsdCents, escrow.consumedUsdCents, escrow.refundedUsdCents].some(value => !Number.isSafeInteger(value) || value < 0) ||
         escrow.consumedUsdCents + escrow.refundedUsdCents > escrow.allocatedUsdCents) throw new ConflictException('Escrow requires reconciliation');
       const [reservation] = await tx.select().from(s.billingTransactions).where(eq(s.billingTransactions.idempotencyKey,
@@ -61,19 +64,43 @@ export class AdSettlementService {
       const [advertiser] = await tx.select({ status: s.users.status }).from(s.users).where(eq(s.users.id, campaign.advertiserId)).for('share');
       if (!wallet || advertiser?.status !== 'ACTIVE') throw new ConflictException('Advertiser funds unavailable');
       // Claims are selected from persisted server provenance, never caller-supplied amounts or owners.
+      const opportunity = s.adsOpportunityReservations;
+      const exposure = await tx.execute<{ outstanding: string; carry: string }>(sql`
+        SELECT (SELECT COALESCE(SUM(reserved_nanos), 0)::text FROM ads_opportunity_reservations
+          WHERE escrow_id = ${escrow.id} AND escrow_allocated_usd_cents = ${escrow.allocatedUsdCents}
+            AND NOT is_simulated AND settled_at IS NULL AND state IN ('HELD','ISSUED','CLAIMED')) AS outstanding,
+          (SELECT COALESCE(SUM(carry_nanos), 0)::text FROM ads_settlement_carries
+          WHERE escrow_id = ${escrow.id} AND allocated_usd_cents = ${escrow.allocatedUsdCents}) AS carry
+      `);
+      let outstanding = BigInt(exposure.rows[0].outstanding);
+      let totalCarry = BigInt(exposure.rows[0].carry);
+      const fundedCapacity = BigInt(Math.min(wallet.lockedUsdCents, campaign.remainingBudgetUsdCents,
+        escrow.allocatedUsdCents - escrow.consumedUsdCents - escrow.refundedUsdCents)) * CENT;
       const candidates = await tx.select({ event: s.adsInteractions, serve: s.adsServes, promoter: s.adsPromoters, placement: s.adsPlacements,
-        ownerStatus: s.users.status }).from(s.adsInteractions)
+        opportunity, ownerStatus: s.users.status }).from(s.adsInteractions)
         .innerJoin(s.adsServes, eq(s.adsServes.id, s.adsInteractions.serveId))
         .innerJoin(s.adsPromoters, eq(s.adsPromoters.id, s.adsServes.promoterId))
-        .innerJoin(s.adsPlacements, eq(s.adsPlacements.id, s.adsServes.placementId))
+        .leftJoin(s.adsPlacements, eq(s.adsPlacements.id, s.adsServes.placementId))
+        .leftJoin(opportunity, eq(opportunity.id, s.adsServes.opportunityReservationId))
         .innerJoin(s.adsCreatives, eq(s.adsCreatives.id, s.adsServes.creativeId))
         .innerJoin(s.users, eq(s.users.id, s.adsPromoters.userId))
-        .leftJoin(s.adsPromoterWebsites, eq(s.adsPromoterWebsites.id, s.adsPlacements.websiteId))
+        .leftJoin(s.adsPromoterWebsites, eq(s.adsPromoterWebsites.id, sql`coalesce(${s.adsServes.websiteId}, ${s.adsPlacements.websiteId})`))
         .leftJoin(s.adsSettlementClaims, eq(s.adsSettlementClaims.serveId, s.adsServes.id))
         .where(and(eq(s.adsServes.campaignId, campaignId), eq(s.adsServes.pricingVersion, 2),
           eq(s.adsInteractions.verificationVersion, 2), eq(s.adsInteractions.isValid, true),
-          eq(s.adsInteractions.placementId, s.adsServes.placementId), eq(s.adsInteractions.promoterId, s.adsServes.promoterId),
-          eq(s.adsPlacements.promoterId, s.adsPromoters.id), eq(s.adsPlacements.status, 'active'),
+          eq(s.adsInteractions.promoterId, s.adsServes.promoterId),
+          eq(s.adsServes.inventoryClass, 'paid'), eq(s.adsServes.deliveryMode, 'normal'),
+          or(
+            and(sql`${!stopped}::boolean`, isNull(s.adsServes.opportunityReservationId), eq(s.adsInteractions.placementId, s.adsServes.placementId),
+              eq(s.adsPlacements.promoterId, s.adsPromoters.id), eq(s.adsPlacements.campaignId, campaignId),
+              eq(s.adsPlacements.creativeId, s.adsServes.creativeId), eq(s.adsPlacements.status, 'active')),
+            and(isNull(s.adsServes.placementId), isNull(s.adsInteractions.placementId),
+              eq(opportunity.state, 'CLAIMED'), eq(opportunity.isSimulated, false), isNull(opportunity.settledAt),
+              eq(opportunity.claimEventId, s.adsInteractions.id), eq(opportunity.serveId, s.adsServes.id),
+              eq(opportunity.escrowId, escrow.id), eq(opportunity.escrowAllocatedUsdCents, escrow.allocatedUsdCents),
+              sql`(SELECT outcome FROM ads_event_assessments WHERE event_id = ${s.adsInteractions.id}
+                ORDER BY created_at DESC, id DESC LIMIT 1) = 'eligible'`),
+          ),
           eq(s.adsCreatives.campaignId, s.adsServes.campaignId), eq(s.adsCreatives.status, 'active'), eq(s.adsCreatives.reviewStatus, 'approved'),
           eq(s.adsPromoters.isActive, true), eq(s.adsPromoters.isSuspended, false), eq(s.users.status, 'ACTIVE'), ne(s.adsPromoters.userId, campaign.advertiserId),
           sql`not exists (select 1 from billing_provider_events review where review.provider = 'paystack' and review.event_type = 'internal.ad.rejection' and review.error_message is distinct from 'review_dismissed' and review.reference like ${`internal.ad.rejection:${escrow.id}:`} || ${s.adsPromoters.id}::text || ':%')`,
@@ -93,19 +120,51 @@ export class AdSettlementService {
       let total = 0, publisherTotal = 0, impressions = 0, clicks = 0;
       const seen = new Set<string>();
       for (const candidate of candidates) {
-        const { event, serve, promoter, placement, ownerStatus } = candidate;
+        const { event, serve, promoter, placement, opportunity: funded, ownerStatus } = candidate;
         if (seen.has(serve.id)) continue;
-        if (event.placementId !== serve.placementId || event.promoterId !== serve.promoterId || placement.promoterId !== promoter.id ||
+        if (event.placementId !== serve.placementId || event.promoterId !== serve.promoterId ||
           promoter.userId === campaign.advertiserId || !promoter.isActive || promoter.isSuspended || ownerStatus !== 'ACTIVE' ||
-          placement.status !== 'active' || promoter.type === 'MOBILE_APP' ||
+          promoter.type === 'MOBILE_APP' ||
           event.createdAt < serve.servedAt || event.createdAt.getTime() - serve.servedAt.getTime() > 900_000 ||
           serve.servedAt < reservation.createdAt || serve.billingPriceNanos <= 0n ||
           !((serve.pricingModel === 'cpm' && event.type === 'viewable_impression') || (serve.pricingModel === 'cpc' && event.type === 'click'))) continue;
-        if (promoter.type === 'WEBSITE') {
-          if (!placement.websiteId) continue;
+        if (funded) {
+          if (funded.campaignId !== campaignId || funded.creativeId !== serve.creativeId ||
+            funded.promoterId !== promoter.id || funded.websiteId !== serve.websiteId || funded.websiteId !== event.websiteId ||
+            funded.slotId !== serve.slotId || funded.slotId !== event.slotId || funded.submissionId !== serve.submissionId ||
+            funded.contentRevision !== serve.contentRevision || funded.policyVersion !== serve.policyVersion ||
+            funded.opportunityId !== serve.requestId || funded.pricingModel !== serve.pricingModel ||
+            funded.reservedNanos !== serve.billingPriceNanos || event.createdAt < funded.createdAt ||
+            !funded.eventDeadline || event.createdAt > funded.eventDeadline ||
+            event.financialEligibility !== 'pending' || event.assessmentStatus === 'invalidated' ||
+            !funded.websiteId || !funded.slotId) continue;
+          const [supply] = await tx.select({ site: s.adsPromoterWebsites, slot: s.adstationSlots })
+            .from(s.adstationSlots).innerJoin(s.adsPromoterWebsites, eq(s.adstationSlots.websiteId, s.adsPromoterWebsites.id))
+            .where(and(eq(s.adstationSlots.id, funded.slotId), eq(s.adsPromoterWebsites.id, funded.websiteId))).for('share');
+          if (!supply || supply.site.promoterId !== promoter.id || supply.slot.promoterId !== promoter.id ||
+            !supply.slot.isActive || supply.slot.lifecycleStatus !== 'active' || supply.slot.installationStatus !== 'verified' ||
+            !['network', 'hybrid'].includes(supply.slot.slotType) || !supply.site.isActive || supply.site.isSuspended ||
+            supply.site.policyStatus !== 'approved' || supply.site.verificationStatus !== 'verified' ||
+            !supply.site.verificationExpiresAt || supply.site.verificationExpiresAt <= new Date()) continue;
+          const [assessment] = await tx.select().from(s.adsEventAssessments)
+            .where(eq(s.adsEventAssessments.eventId, event.id))
+            .orderBy(desc(s.adsEventAssessments.createdAt), desc(s.adsEventAssessments.id)).limit(1);
+          if (!assessment || assessment.campaignId !== campaignId || assessment.outcome !== 'eligible' ||
+            assessment.actorId === campaign.advertiserId || assessment.actorId === promoter.userId) continue;
+          const { recordHash, createdAt: assessedAt, ...signed } = assessment;
+          if (!validEvidenceSignature(signed, recordHash)) continue;
+          const [journal] = await tx.select().from(s.adsEvidenceRecords)
+            .where(eq(s.adsEvidenceRecords.eventId, event.id)).limit(1);
+          if (!journal || !adEventJournalMatches(event, journal) ||
+            !validEvidenceSignature({ eventId: journal.eventId, partition: journal.partition, previousHash: journal.previousHash,
+              payload: journal.payload, keyId: journal.keyId }, journal.recordHash)) continue;
+        } else if (promoter.type === 'WEBSITE') {
+          if (!placement?.websiteId) continue;
           const [site] = await tx.select().from(s.adsPromoterWebsites).where(eq(s.adsPromoterWebsites.id, placement.websiteId)).for('share');
           if (!site || site.promoterId !== promoter.id || site.verificationStatus !== 'verified' || !site.isActive || site.isSuspended) continue;
         }
+        const releasedExposure = funded?.reservedNanos ?? 0n;
+        if (outstanding + totalCarry + BigInt(total) * CENT + serve.billingPriceNanos - releasedExposure > fundedCapacity) continue;
         const carryFilter = and(eq(s.adsSettlementCarries.escrowId, escrow.id), eq(s.adsSettlementCarries.allocatedUsdCents, escrow.allocatedUsdCents), eq(s.adsSettlementCarries.promoterId, promoter.id));
         await tx.insert(s.adsSettlementCarries).values({ escrowId: escrow.id, allocatedUsdCents: escrow.allocatedUsdCents, promoterId: promoter.id }).onConflictDoNothing();
         const [carry] = await tx.select().from(s.adsSettlementCarries).where(carryFilter).for('update');
@@ -122,6 +181,11 @@ export class AdSettlementService {
         if (earned < 0 || pool < 0 || earned > cents || pool > cents) throw new ConflictException('Settlement distribution requires reconciliation');
         await tx.insert(s.adsSettlementClaims).values({ interactionId: event.id, serveId: serve.id, escrowId: escrow.id,
           allocatedUsdCents: escrow.allocatedUsdCents, promoterId: promoter.id, batchId, priceNanos: serve.billingPriceNanos });
+        if (funded) {
+          await tx.update(opportunity).set({ settledAt: now, updatedAt: now }).where(eq(opportunity.id, funded.id));
+          outstanding -= releasedExposure;
+        }
+        totalCarry += nanos % CENT - carry.carryNanos;
         seen.add(serve.id);
         await tx.update(s.adsSettlementCarries).set({ carryNanos: nanos % CENT, billedUsdCents: billed,
           publisherUsdCents: publisher, commissionPoolUsdCents: commission, updatedAt: now }).where(eq(s.adsSettlementCarries.id, carry.id));
@@ -133,7 +197,7 @@ export class AdSettlementService {
             idempotencyKey: `ads-earning:v3:${itemId}`, reference: `ads-earning-v3-${itemId}`,
             metadata: JSON.stringify({ version: 3, kind: 'funded_ad_earning', campaignId, escrowId: escrow.id, batchId, itemId,
               promoterId: promoter.id, commissionPoolUsdCents: pool, baseRevenueUsdCents: cents - earned - pool, settlementClaimId: event.id }) });
-          await tx.insert(s.adsPromoterSettlementItems).values({ id: itemId, batchId, promoterId: promoter.id, placementId: placement.id,
+          await tx.insert(s.adsPromoterSettlementItems).values({ id: itemId, batchId, promoterId: promoter.id, placementId: placement?.id ?? null,
             campaignId, earnedUsdCents: earned, billedUsdCents: cents, billingTransactionId: receiptId, idempotencyKey: `ads-item:v3:${event.id}`,
             impressionsCount: event.type === 'viewable_impression' ? 1 : 0, clicksCount: event.type === 'click' ? 1 : 0,
             status: 'pending', clearanceStatus: 'pending', holdExpiresAt: new Date(now.getTime() + 72 * 3600_000) });
