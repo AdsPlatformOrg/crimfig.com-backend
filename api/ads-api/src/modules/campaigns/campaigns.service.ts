@@ -1,3 +1,4 @@
+import { eventCampaignId } from '../analytics/event-attribution';
 import { readinessReport } from '../delivery/readiness-report';
 import { paidDeliveryReadiness } from '../delivery/paid-delivery-policy';
 import { CampaignWorkflow, campaignCapabilities, assertEditableCampaign, currentApproval, controlRequired, fingerprint, type MutationControl } from './campaign-workflow';
@@ -1253,16 +1254,17 @@ export class CampaignsService {
       const performanceCounts = rowIds.length > 0
         ? await tx
             .select({
-              campaignId: adsPlacements.campaignId,
+              campaignId: eventCampaignId,
               impressionsCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'impression')::int`,
               clicksCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'click')::int`,
               hoversCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'hover')::int`,
               touchesCount: sql<number>`count(*) filter (where ${adsInteractions.type} = 'touch')::int`,
             })
             .from(adsInteractions)
-            .innerJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
-            .where(and(inArray(adsPlacements.campaignId, rowIds), eq(adsInteractions.isValid, true)))
-            .groupBy(adsPlacements.campaignId)
+            .leftJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+            .leftJoin(schema.adsServes, eq(adsInteractions.serveId, schema.adsServes.id))
+            .where(and(inArray(eventCampaignId, rowIds), eq(adsInteractions.isValid, true)))
+            .groupBy(eventCampaignId)
         : [];
       const performanceMap = new Map(performanceCounts.map((metrics) => [metrics.campaignId, metrics]));
 

@@ -1994,18 +1994,8 @@ export class DeliveryService {
       throw new NotFoundException('Campaign inactive or budget exhausted');
     }
 
-    // Run anti-fraud GIVT/SIVT evaluation on click
-    const validation = this.fraudRules.validateClick({
-      placementId,
-      serveId,
-      clientIp,
-      userAgent,
-      referrer,
-      tokenTimestampMs: tokenPayload ? tokenPayload.timestamp : undefined,
-    });
-
-    const { keyedIpHash, keyId } = this.fraudRules.computeKeyedIpHash(clientIp);
-
+    // logInteraction owns the stateful fraud assessment. Running validateClick here
+    // first consumes the dedupe key and rejects the very same click as DUP_CLICK.
     // Record click interaction telemetry with validation & GIVT/SIVT status for batch settlement
     if(!tokenPayload)throw new NotFoundException('Signed click attribution is required');
     const interaction=tokenPayload?await this.logInteraction({impToken:token,type:'click',source:'share_link',clientIp,userAgent,referrer}):undefined;

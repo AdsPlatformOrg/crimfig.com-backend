@@ -19,6 +19,7 @@ describe('Ads Platform Error Hardening & Resilience Invariants (PLAN-0026)', () 
         from: jest.fn(() => queryChain),
         where: jest.fn(() => queryChain),
         innerJoin: jest.fn(() => queryChain),
+        leftJoin: jest.fn(() => queryChain),
         groupBy: jest.fn(() => Promise.resolve(mockInteractions)),
         orderBy: jest.fn(() => queryChain),
         limit: jest.fn(() => Promise.resolve(mockCampaigns)),
@@ -34,17 +35,7 @@ describe('Ads Platform Error Hardening & Resilience Invariants (PLAN-0026)', () 
               })),
             };
           }
-          if (fields?.type) {
-            return {
-              from: jest.fn(() => ({
-                innerJoin: jest.fn(() => ({
-                  where: jest.fn(() => ({
-                    groupBy: jest.fn(() => Promise.resolve(mockInteractions)),
-                  })),
-                })),
-              })),
-            };
-          }
+          if (fields?.type) return queryChain;
           // Default select() without fields
           return {
             from: jest.fn((table) => {

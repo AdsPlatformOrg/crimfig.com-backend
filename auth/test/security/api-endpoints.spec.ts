@@ -17,6 +17,7 @@ describe('Comprehensive API Endpoint Unit Tests (PLAN-0027)', () => {
         from: jest.fn(() => queryChain),
         where: jest.fn(() => queryChain),
         innerJoin: jest.fn(() => queryChain),
+        leftJoin: jest.fn(() => queryChain),
         groupBy: jest.fn(() => Promise.resolve([])),
         orderBy: jest.fn(() => queryChain),
         limit: jest.fn((n?: number) => Promise.resolve(savedRows.slice(0, n || 1))),

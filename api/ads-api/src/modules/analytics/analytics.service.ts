@@ -1,3 +1,4 @@
+import { eventCampaignId } from './event-attribution';
 import { Injectable, Inject } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -6,6 +7,8 @@ import {
   adsInteractions,
   adsPromoterEarnings,
   adsPlacements,
+  adsServes,
+  billingTransactions,
   adsCampaigns,
   adsCreatives,
   adsMetricsHourly,
@@ -106,10 +109,11 @@ export class AnalyticsService {
           count: sql<number>`count(*) filter (where ${adsInteractions.isValid} = true)`,
         })
         .from(adsInteractions)
-        .innerJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+        .leftJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+        .leftJoin(adsServes, eq(adsInteractions.serveId, adsServes.id))
         .where(
           and(
-            sql`${adsPlacements.campaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
+            sql`${eventCampaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
             eq(adsInteractions.isValid, true),
           ),
         )
@@ -194,12 +198,14 @@ export class AnalyticsService {
           count: sql<number>`count(*) filter (where ${adsInteractions.isValid} = true)`,
         })
         .from(adsInteractions)
-        .innerJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+        .leftJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+        .leftJoin(adsServes, eq(adsInteractions.serveId, adsServes.id))
         .where(
           and(
-            sql`${adsPlacements.campaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
+            sql`${eventCampaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
             eq(adsInteractions.isValid, true),
             gte(adsInteractions.createdAt, startDate),
+            lte(adsInteractions.createdAt, now),
           ),
         )
         .groupBy(adsInteractions.type);
@@ -303,11 +309,14 @@ export class AnalyticsService {
         count: sql<number>`count(*)`,
       })
       .from(adsInteractions)
-      .innerJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+      .leftJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+      .leftJoin(adsServes, eq(adsInteractions.serveId, adsServes.id))
       .where(
         and(
-          sql`${adsPlacements.campaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
+          sql`${eventCampaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
+          eq(adsInteractions.isValid, true),
           gte(adsInteractions.createdAt, startDate),
+          lte(adsInteractions.createdAt, now),
         ),
       )
       .groupBy(sql`TO_CHAR(${adsInteractions.createdAt}, 'YYYY-MM-DD')`, adsInteractions.type);
@@ -321,15 +330,28 @@ export class AnalyticsService {
       const count = Number(row.count || 0);
       if (row.type === 'impression') {
         item.impressions += count;
-        item.spend += (count * 1) / 100; // $0.01 per impression estimate
       } else if (row.type === 'click') {
         item.clicks += count;
-        item.spend += (count * 10) / 100; // $0.10 per click estimate
       } else if (row.type === 'hover') {
         item.hovers += count;
       } else if (row.type === 'touch') {
         item.touches += count;
       }
+    }
+
+    const dailySpend = await this.db.select({
+      day: sql<string>`TO_CHAR(${billingTransactions.createdAt}, 'YYYY-MM-DD')`,
+      cents: sql<number>`COALESCE(SUM(${billingTransactions.amountUsdCents}), 0)`,
+    }).from(billingTransactions).where(and(
+      eq(billingTransactions.userId, advertiserId), eq(billingTransactions.type, 'ads_spend'),
+      eq(billingTransactions.status, 'completed'), eq(billingTransactions.provider, 'internal'),
+      gte(billingTransactions.createdAt, startDate), lte(billingTransactions.createdAt, now),
+      sql`(${billingTransactions.metadata}::jsonb)->>'campaignId' IN (${sql.join(campaignIds.map(id => sql`${id}`), sql`, `)})`,
+    )).groupBy(sql`TO_CHAR(${billingTransactions.createdAt}, 'YYYY-MM-DD')`);
+    for (const row of dailySpend) {
+      const item = lookupMap.get(row.day) ?? { impressions: 0, clicks: 0, hovers: 0, touches: 0, spend: 0 };
+      item.spend = Number(row.cents) / 100;
+      lookupMap.set(row.day, item);
     }
 
     return result.map((r) => {
@@ -367,16 +389,22 @@ export class AnalyticsService {
 
     const campaignIds = campaigns.map((c) => c.id);
 
+    const now = new Date();
+    const startDate = new Date(now);
+    startDate.setDate(now.getDate() - (period === '7d' ? 7 : period === '90d' ? 90 : 30));
+    const channelSource = sql<string>`CASE WHEN ${adsServes.websiteId} IS NOT NULL THEN 'embed' ELSE ${adsInteractions.source} END`;
     const sourceStats = await this.db
       .select({
-        source: adsInteractions.source,
+        source: channelSource,
         type: adsInteractions.type,
         count: sql<number>`count(*)`,
       })
       .from(adsInteractions)
-      .innerJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
-      .where(sql`${adsPlacements.campaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`)
-      .groupBy(adsInteractions.source, adsInteractions.type);
+      .leftJoin(adsPlacements, eq(adsInteractions.placementId, adsPlacements.id))
+      .leftJoin(adsServes, eq(adsInteractions.serveId, adsServes.id))
+      .where(and(sql`${eventCampaignId} IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
+        eq(adsInteractions.isValid, true), gte(adsInteractions.createdAt, startDate), lte(adsInteractions.createdAt, now)))
+      .groupBy(channelSource, adsInteractions.type);
 
     let webImp = 0;
     let webClk = 0;
@@ -405,19 +433,19 @@ export class AnalyticsService {
         channel: 'Websites',
         impressions: webImp,
         clicks: webClk,
-        percentage: totalImp > 0 ? parseFloat(((webImp / totalImp) * 100).toFixed(1)) : 33.3,
+        percentage: totalImp > 0 ? parseFloat(((webImp / totalImp) * 100).toFixed(1)) : 0,
       },
       {
         channel: 'Mobile Apps',
         impressions: appImp,
         clicks: appClk,
-        percentage: totalImp > 0 ? parseFloat(((appImp / totalImp) * 100).toFixed(1)) : 33.3,
+        percentage: totalImp > 0 ? parseFloat(((appImp / totalImp) * 100).toFixed(1)) : 0,
       },
       {
         channel: 'Reels & Social Links',
         impressions: socialImp,
         clicks: socialClk,
-        percentage: totalImp > 0 ? parseFloat(((socialImp / totalImp) * 100).toFixed(1)) : 33.4,
+        percentage: totalImp > 0 ? parseFloat(((socialImp / totalImp) * 100).toFixed(1)) : 0,
       },
     ];
   }

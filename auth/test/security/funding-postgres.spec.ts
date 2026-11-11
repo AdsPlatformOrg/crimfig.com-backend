@@ -1,6 +1,8 @@
+import { AnalyticsController } from '../../../api/ads-api/src/modules/analytics/analytics.controller';
+import { AnalyticsService } from '../../../api/ads-api/src/modules/analytics/analytics.service';
 import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
 import { DeliveryController } from '../../../api/ads-api/src/modules/delivery/delivery.controller';
-import { DeliveryService } from '../../../api/ads-api/src/modules/delivery/delivery.service';
+import { DeliveryService, HOUSE_PLACEMENT_UUID } from '../../../api/ads-api/src/modules/delivery/delivery.service';
 import { AuctionEngineService } from '../../../api/ads-api/src/modules/delivery/auction-engine.service';
 import { ImpressionTokenService } from '../../../api/ads-api/src/modules/delivery/impression-token.service';
 import { FraudRulesService } from '../../../api/ads-api/src/modules/verification/fraud-rules.service';
@@ -739,6 +741,101 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     };
     return {campaign,publisher,promoter,creative,placement,add,svc:new AdSettlementService(db)};
   }
+  test('PLAN0103 network and legacy attribution survives real HTTP without cross-owner or invalid metrics', async () => {
+    const f = await settlementFixture(100_000_000n, 'cpc', false);
+    const foreign = randomUUID();
+    await pool.query("insert into users(id,email,status) values($1,'foreign@example.test','ACTIVE')", [foreign]);
+    const [other] = await db.insert(schema.adsCampaigns).values({advertiserId:foreign,title:'Other',budgetUsdCents:1000,remainingBudgetUsdCents:1000}).returning();
+    const makeServe = async (values: any = {}) => (await db.insert(schema.adsServes).values({campaignId:f.campaign.id,creativeId:f.creative.id,promoterId:f.promoter.id,slotHandle:'network',...values}).returning())[0];
+    const event = async (serve: any, values: any = {}) => db.insert(schema.adsInteractions).values({promoterId:f.promoter.id,serveId:serve.id,type:'impression',source:'embed',isValid:true,...values});
+    // Rejected attribution paths first: no fallback from an unknown or non-paid serve.
+    await event({id:randomUUID()}, {placementId:f.placement.id});
+    await event(await makeServe({inventoryClass:'house'}), {placementId:f.placement.id});
+    await event(await makeServe({inventoryClass:'shadow',deliveryMode:'shadow'}));
+    await event(await makeServe({campaignId:other.id}), {placementId:f.placement.id});
+    await event(await makeServe(), {isValid:false});
+    await event(await makeServe(), {createdAt:new Date(Date.now()-100*86400000)});
+    await event(await makeServe(), {createdAt:new Date(Date.now()+86400000)});
+    // Valid network events plus legacy placement-only events, without counting render/viewability twice.
+    const network = await makeServe();
+    for (const type of ['impression','click','hover','touch','render','viewable_impression']) await event(network,{type});
+    await db.insert(schema.adsInteractions).values({placementId:f.placement.id,promoterId:f.promoter.id,type:'impression',source:'embed',isValid:true});
+    await event(await makeServe({campaignId:other.id}));
+    @Module({controllers:[AnalyticsController,CampaignsController],providers:[
+      {provide:AnalyticsService,useValue:new AnalyticsService(db)}, {provide:PromotersService,useValue:{}},
+      {provide:CampaignsService,useValue:new CampaignsService(db,{} as any,{} as any)},
+    ]}) class MetricsFixture {}
+    const jwt = new JwtService({secret:'plan0103-isolated-signing-key'});
+    const app = await NestFactory.create(MetricsFixture,{logger:false});
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalGuards(new AdsAccessGuard(jwt,new Reflector(),db,{rolesFor:()=>[]} as any));
+    await app.listen(0,'127.0.0.1');
+    const get = async (route:string,actor=owner,auth=true) => {
+      const token=jwt.sign({sub:actor,email:'fixture@example.test',type:'access'},{expiresIn:'2m'});
+      const response=await fetch((await app.getUrl())+'/api/v1/'+route,{headers:auth?{Authorization:'Bearer '+token}:{},signal:AbortSignal.timeout(5000)});
+      return {status:response.status,body:await response.json() as any};
+    };
+    try {
+      expect((await get('analytics/dashboard/summary',owner,false)).status).toBe(401);
+      const summary=await get('analytics/dashboard/summary?period=30d');
+      expect(summary.status).toBe(200);
+      expect(summary.body.data.performance).toMatchObject({impressions:2,clicks:1,hovers:1,touches:1});
+      const timeseries=(await get('analytics/dashboard/timeseries?period=30d')).body.data;
+      expect(timeseries.reduce((sum:number,r:any)=>sum+r.impressions,0)).toBe(2);
+      expect(timeseries.reduce((sum:number,r:any)=>sum+r.spendUsd,0)).toBe(0);
+      const channels=(await get('analytics/dashboard/channel-breakdown?period=30d')).body.data;
+      expect(channels[0]).toMatchObject({impressions:2,clicks:1,percentage:100});
+      expect(channels[1].percentage).toBe(0);
+      const campaigns=(await get('campaigns/page')).body.data.items;
+      // Lifetime campaign list includes the old and future records; dashboard is period-bound.
+      expect(campaigns[0]).toMatchObject({id:f.campaign.id,impressionsCount:4,clicksCount:1,hoversCount:1,touchesCount:1});
+      const ts = require('typescript');
+      const exports: any = {};
+      const consumerSource = readFileSync(resolve(__dirname,'../../../../frontend/web/ads/src/lib/campaigns-api.ts'),'utf8');
+      require('vm').runInNewContext(ts.transpileModule(consumerSource,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,{exports,require:()=>({})});
+      expect(exports.campaignView(campaigns[0])).toMatchObject({metricsLoaded:true,impressions:4,clicks:1,hovers:1,touches:1});
+      const outsider=(await get('analytics/dashboard/summary',foreign)).body.data;
+      expect(outsider.performance.impressions).toBe(1);
+      expect((await get('campaigns/page',foreign)).body.data.items[0]).toMatchObject({id:other.id,impressionsCount:1});
+      // A real completed internal debit determines spend; failed/foreign receipts do not.
+      await db.insert(schema.billingTransactions).values([
+        {userId:owner,type:'ads_spend',provider:'internal',status:'completed',reference:randomUUID(),amountUsdCents:10,metadata:JSON.stringify({campaignId:f.campaign.id})},
+        {userId:owner,type:'ads_spend',provider:'internal',status:'failed',reference:randomUUID(),amountUsdCents:99,metadata:JSON.stringify({campaignId:f.campaign.id})},
+        {userId:foreign,type:'ads_spend',provider:'internal',status:'completed',reference:randomUUID(),amountUsdCents:99,metadata:JSON.stringify({campaignId:other.id})},
+      ]);
+      const billed=(await get('analytics/dashboard/timeseries')).body.data;
+      expect(billed.reduce((sum:number,r:any)=>sum+r.spendUsd,0)).toBe(0.1);
+      expect((await pool.query('select count(*)::int n from ads_settlement_claims')).rows[0].n).toBe(0);
+    } finally {await app.close();}
+  },30000);
+
+  test('PLAN0103 real signed click persists valid once and rejects repeat without settlement', async () => {
+    const prior={...process.env};
+    Object.assign(process.env,{ADS_IMPRESSION_SIGNING_KEY:'plan0103-local-signing-secret-32-bytes',ADS_EVIDENCE_HASH_SECRET:'plan0103-local-evidence-secret-32-bytes'});
+    try {
+      const f=await settlementFixture(100_000_000n,'cpc',false);
+      const tokens=new ImpressionTokenService(); const fraud=new FraudRulesService();
+      const validate=jest.spyOn(fraud,'validateClick');
+      const servedAt=new Date(Date.now()-1000);
+      const [serve]=await db.insert(schema.adsServes).values({campaignId:f.campaign.id,creativeId:f.creative.id,promoterId:f.promoter.id,
+        placementId:null,slotId:randomUUID(),slotHandle:'network',ipHash:'unknown',servedAt,contentSnapshot:{destinationUrl:'https://example.test'}}).returning();
+      // Signed network tokens use the sentinel only in transport; storage retains null placement.
+      const token=tokens.generateToken({servedId:serve.id,placementId:HOUSE_PLACEMENT_UUID,campaignId:f.campaign.id,creativeId:f.creative.id,promoterId:f.promoter.id,ipHash:'unknown'});
+      const delivery=new DeliveryService(db,tokens,new AuctionEngineService(),fraud,undefined,new EvidenceService(db, {} as any));
+      await expect(delivery.handleClick('imp_invalid.a',undefined,'Mozilla/5.0 Chrome/130')).rejects.toThrow('invalid or expired');
+      expect(validate).not.toHaveBeenCalled();
+      await new Promise(resolve => setTimeout(resolve, 350));
+      expect(await delivery.handleClick(token,undefined,'Mozilla/5.0 Chrome/130')).toMatch(/^https:\/\/example.test\?cf_click=/);
+      expect(validate).toHaveBeenCalledTimes(1);
+      await delivery.handleClick(token,undefined,'Mozilla/5.0 Chrome/130');
+      expect(validate).toHaveBeenCalledTimes(2);
+      const rows=(await pool.query("select is_valid,invalid_reason,verification_version from ads_interactions where type='click' order by created_at")).rows;
+      expect(rows).toEqual([{is_valid:true,invalid_reason:null,verification_version:2},{is_valid:false,invalid_reason:'DUP_CLICK',verification_version:0}]);
+      expect((await pool.query('select count(*)::int n from ads_evidence_records')).rows[0].n).toBe(2);
+      expect((await pool.query('select count(*)::int n from ads_settlement_claims')).rows[0].n).toBe(0);
+    } finally {process.env=prior;}
+  },30000);
+
   test('PLAN0101 advertiser campaign metrics are owner-scoped and returned over HTTP', async () => {
     const own = await settlementFixture(100_000_000n, 'cpc', false);
     await db.insert(schema.adsInteractions).values([
