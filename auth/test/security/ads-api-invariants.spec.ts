@@ -27,6 +27,7 @@ describe('Ads Platform Error Hardening & Resilience Invariants (PLAN-0026)', () 
       };
 
       mockDb = {
+        execute: jest.fn(async () => ({ rows: [] })),
         select: jest.fn((fields) => {
           if (fields?.status) {
             return {
