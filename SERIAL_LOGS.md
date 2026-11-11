@@ -12,3 +12,7 @@ Read-only staging audit confirmed 24 paid CPC serves, 20 valid impressions, 18 v
 ## 2026-11-11 - PLAN-0103 network settlement
 
 Added funded network settlement with signed event and assessment checks, exact carry accounting, atomic reservation closure, and worker enum fixes. Six selected disposable PostgreSQL regressions passed. Railway confirmed reporting revision 2e15b0b on Ads and Billing staging. Both worker flags are off. Settlement deployment and funded staging acceptance remain pending. Evidence: docs/reviews/plan-0103.
+
+## 2026-11-11 - PLAN-0102 daily Ads reports
+
+Added owner-scoped daily CPC and CPM reports with exact event nanos, separate ledger postings, and promoter receipt and recovery states. Three units and two isolated HTTP/PostgreSQL and consumer contract cases passed. Ads API typecheck passed. Browser and staging acceptance pending.

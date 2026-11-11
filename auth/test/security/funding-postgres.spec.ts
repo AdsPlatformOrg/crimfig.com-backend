@@ -1,3 +1,5 @@
+import { ReportsController } from '../../../api/ads-api/src/modules/analytics/reports.controller';
+import { ReportsService } from '../../../api/ads-api/src/modules/analytics/reports.service';
 import { AdOpportunityWorker } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.worker';
 import { AnalyticsController } from '../../../api/ads-api/src/modules/analytics/analytics.controller';
 import { AnalyticsService } from '../../../api/ads-api/src/modules/analytics/analytics.service';
@@ -889,6 +891,78 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect((await pool.query('select count(*)::int n from ads_evidence_records')).rows[0].n).toBe(2);
       expect((await pool.query('select count(*)::int n from ads_settlement_claims')).rows[0].n).toBe(0);
     } finally {process.env=prior;}
+  },30000);
+
+  test.each(['cpm', 'cpc'] as const)('PLAN0102 daily reports reconcile %s expense, receipts and ownership over HTTP', async model => {
+    const cpm = model === 'cpm';
+    const price = cpm ? 6_000_000n : 100_000_000n;
+    const f = await settlementFixture(price, model);
+    @Module({controllers:[ReportsController],providers:[{provide:ReportsService,useValue:new ReportsService(db)}]})
+    class ReportsFixture {}
+    const jwt = new JwtService({secret:'plan0102-report-isolation-key'});
+    const app = await NestFactory.create(ReportsFixture,{logger:false});
+    app.setGlobalPrefix('api/v1');
+    app.useGlobalGuards(new AdsAccessGuard(jwt,new Reflector(),db,{rolesFor:()=>[]} as any));
+    await app.listen(0,'127.0.0.1');
+    const get = async (query:string, actor?:string) => {
+      const token=actor && jwt.sign({sub:actor,email:'fixture@example.test',type:'access'},{expiresIn:'2m'});
+      const response=await fetch((await app.getUrl())+'/api/v1/reports/daily?'+query,{
+        headers:token?{Authorization:'Bearer '+token}:{},signal:AbortSignal.timeout(5000),
+      });
+      return {status:response.status,body:await response.json() as any};
+    };
+    const today = new Intl.DateTimeFormat('en-CA',{timeZone:'Africa/Lagos',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    const range = 'from='+today+'&to='+today+'&compare=true';
+    try {
+      expect((await get(range)).status).toBe(401);
+      expect((await get('from=2026-02-30',owner)).status).toBe(400);
+      expect((await get('role=admin',owner)).status).toBe(400);
+      expect((await get('compare=yes',owner)).status).toBe(400);
+      await f.add();
+      await f.svc.settle(f.campaign.id,randomUUID(),new Date());
+      const fractional=(await get(range,owner)).body.data;
+      expect(fractional.totals).toMatchObject({spend:price.toString(),posted:cpm?'0':'100000000',
+        billableImpressions:cpm?'1':'0',billableClicks:cpm?'0':'1'});
+      await f.add();
+      await f.svc.settle(f.campaign.id,randomUUID(),new Date());
+      if (!cpm) {
+        const [item] = await db.select().from(schema.adsPromoterSettlementItems).limit(1);
+        // Fixture states reflect a cleared receipt, an audited advertiser rebate,
+        // and a recovery posted against the promoter's cleared earnings.
+        await pool.query("update billing_transactions set status='completed' where id=$1",[item.billingTransactionId]);
+        await db.insert(schema.billingTransactions).values([
+          {userId:owner,type:'internal_credit',provider:'internal',status:'completed',reference:randomUUID(),
+            idempotencyKey:'ads-rejection:v1:'+randomUUID(),amountUsdCents:3,metadata:JSON.stringify({campaignId:f.campaign.id})},
+          {userId:f.publisher,type:'internal_debit',provider:'internal',status:'completed',reference:randomUUID(),
+            idempotencyKey:'ads-recovery:v1:'+randomUUID(),amountUsdCents:1,metadata:JSON.stringify({itemId:item.id})},
+        ]);
+      }
+      const advertiser=await get(range,owner);
+      expect(advertiser.status).toBe(200);
+      const spend = (price * 2n).toString();
+      expect(advertiser.body.data.totals).toMatchObject({spend,posted:cpm?'10000000':'200000000',credits:cpm?'0':'30000000',
+        billableImpressions:cpm?'2':'0',billableClicks:cpm?'0':'2'});
+      expect(advertiser.body.data.daily[0]).toMatchObject({date:today,incomplete:true,spend});
+      expect(advertiser.body.data.comparison.totals.spend).toBe('0');
+      expect(advertiser.body.data.breakdown.some((row:any)=>row.creativeId===f.creative.id && row.spend===spend)).toBe(true);
+      expect((await get(range,f.publisher)).body.data.totals.spend).toBe('0');
+      const earnings=(await get(range+'&role=promoter',f.publisher)).body.data;
+      expect(earnings.totals).toMatchObject({billableImpressions:cpm?'2':'0',billableClicks:cpm?'0':'2',spend:'0',
+        adjustments:cpm?'0':'-10000000'});
+      if (!cpm) {
+        expect(BigInt(earnings.totals.confirmed)).toBeGreaterThan(0n);
+        expect(BigInt(earnings.totals.pending) + BigInt(earnings.totals.confirmed)).toBe(110000000n);
+      }
+      const unrelated = (await get(range+'&role=promoter',owner)).body.data.totals;
+      expect(unrelated).toMatchObject({billableImpressions:'0',billableClicks:'0',pending:'0',confirmed:'0'});
+      const ts = require('typescript');
+      const consumer: any = {};
+      const source = readFileSync(resolve(__dirname,'../../../../frontend/web/ads/src/lib/daily-reports.ts'),'utf8');
+      require('vm').runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020}}).outputText,{
+        exports:consumer, URLSearchParams, require:()=>({apiData:async()=>advertiser.body.data}),
+      });
+      expect((await consumer.readDailyReport('advertiser',range,new AbortController().signal)).totals.spend).toBe(spend);
+    } finally {await app.close();}
   },30000);
 
   test('PLAN0101 advertiser campaign metrics are owner-scoped and returned over HTTP', async () => {
