@@ -39,7 +39,7 @@ export async function runControlledClickSettlement() {
     const config = { get: (name: string) => process.env[name] };
     const evidence = new EvidenceService(db, new OpportunityClient(config as never));
     process.env.ADS_TRAFFIC_ASSESSMENT_POLICY_VERSION = policy;
-    const candidates = await db.execute<{id: string; created_at: Date; prior_request: string | null}>(sql`
+    const candidates = await db.execute<{id: string; created_at: Date | string; prior_request: string | null}>(sql`
       select i.id, i.created_at, assessment.request_id as prior_request
       from ads_opportunity_reservations r
       join ads_serves s on s.id = r.serve_id and s.opportunity_reservation_id = r.id
@@ -92,7 +92,7 @@ export async function runControlledClickSettlement() {
       });
     }
     const requestId = requestIdentity('settlement', event.id);
-    const periodEnd = new Date(event.created_at.getTime()+1).toISOString();
+    const periodEnd = new Date(new Date(event.created_at).getTime() + 1).toISOString();
     const settlementKey = 'ads-settlement:v3:'+campaign+':'+requestId;
     const response = await fetch(billing.origin+'/api/v1/ecosystem/campaigns/'+campaign+'/settlements', {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(8000),
