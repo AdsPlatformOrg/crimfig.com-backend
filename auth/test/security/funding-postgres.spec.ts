@@ -342,7 +342,10 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
         await pool.query("update ads_campaign_escrows set release_pending=true where campaign_id=$1",[f.campaign.id]);
       }
       const requestId = randomUUID(), cutoff = new Date();
-      const receipts = await Promise.all([settle(requestId, cutoff), settle(requestId, cutoff)]);
+      const settleTarget = (eventId: string) => f.svc.settle(f.campaign.id, requestId, cutoff, eventId);
+      await expect(f.svc.settle(f.campaign.id, randomUUID(), cutoff, randomUUID())).rejects.toThrow('not ready to settle');
+      const receipts = await Promise.all([settleTarget(event.id), settleTarget(event.id)]);
+      await expect(settleTarget(randomUUID())).rejects.toThrow('Settlement request is bound');
       const cents = model === 'cpc' ? 10 : 0;
       expect(receipts.map(receipt => receipt.billedUsdCents)).toEqual([cents, cents]);
       expect(receipts.filter(receipt => receipt.replayed)).toHaveLength(1);

@@ -14,7 +14,7 @@ import {
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { CampaignEscrowService } from './campaign-escrow.service';
 import { WalletService } from '../wallet/wallet.service';
-import { IsNumber, IsString, Min, IsIn, IsUUID, IsISO8601 } from 'class-validator';
+import { IsNumber, IsString, Min, IsIn, IsUUID, IsISO8601, IsOptional } from 'class-validator';
 import { AdSettlementService } from './ad-settlement.service';
 import { Public, FinancialOperation } from '@crimfig/shared';
 import { timingSafeEqual } from 'crypto';
@@ -64,6 +64,10 @@ export class FundedSettlementDto {
 
   @IsISO8601({ strict: true })
   periodEnd: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  eventId?: string;
 }
 
 @ApiTags('Internal Ecosystem')
@@ -112,7 +116,7 @@ export class EcosystemController {
     @Headers('x-internal-key') key: string, @Body() dto: FundedSettlementDto) {
     this.verifyInternalKey(key);
     if (!this.settlement) throw new ServiceUnavailableException('Funded settlement unavailable');
-    return { status: 'success', data: await this.settlement.settle(campaignId, dto.requestId, new Date(dto.periodEnd)) };
+    return { status: 'success', data: await this.settlement.settle(campaignId, dto.requestId, new Date(dto.periodEnd), dto.eventId) };
   }
 
   private verifyInternalKey(providedKey: string) {

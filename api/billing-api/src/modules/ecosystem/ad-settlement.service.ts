@@ -16,13 +16,14 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{1
 export class AdSettlementService {
   constructor(@Inject(DATABASE_TOKEN) private readonly db: NodePgDatabase<typeof s>) {}
 
-  async settle(campaignId: string, requestId: string, periodEnd: Date) {
-    if (!uuid.test(campaignId) || !uuid.test(requestId) || !Number.isFinite(periodEnd.getTime()) || periodEnd > new Date()) {
+  async settle(campaignId: string, requestId: string, periodEnd: Date, eventId?: string) {
+    if (!uuid.test(campaignId) || !uuid.test(requestId) || (eventId !== undefined && !uuid.test(eventId)) || !Number.isFinite(periodEnd.getTime()) || periodEnd > new Date()) {
       throw new BadRequestException('A campaign, unique settlement request and closed period are required');
     }
     // PostgreSQL UUID equality is case-insensitive; lock and receipt keys must be too.
     campaignId = campaignId.toLowerCase();
     requestId = requestId.toLowerCase();
+    eventId = eventId?.toLowerCase();
     const key = `ads-settlement:v3:${campaignId}:${requestId}`;
     return this.db.transaction(async tx => {
       await tx.execute(sql`set local lock_timeout = '5s'`);
@@ -31,7 +32,7 @@ export class AdSettlementService {
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ads-escrow:${campaignId}`}, 0))`);
       const [prior] = await tx.select().from(s.adsSettlementBatches).where(eq(s.adsSettlementBatches.idempotencyKey, key));
       if (prior) {
-        if (prior.periodEnd.getTime() !== periodEnd.getTime()) throw new ConflictException('Settlement request is bound to another period');
+        if (prior.periodEnd.getTime() !== periodEnd.getTime() || (JSON.parse(prior.notes || "{}").eventId ?? undefined) !== eventId) throw new ConflictException('Settlement request is bound to another period');
         return { batchId: prior.id, status: prior.status, billedUsdCents: prior.totalDebitedUsdCents, replayed: true };
       }
       const [campaign] = await tx.select().from(s.adsCampaigns).where(eq(s.adsCampaigns.id, campaignId)).for('update');
@@ -110,13 +111,14 @@ export class AdSettlementService {
             and(eq(s.adsServes.pricingModel, 'cpc'), eq(s.adsInteractions.type, 'click'))),
           sql`${s.adsInteractions.createdAt} >= ${s.adsServes.servedAt} and ${s.adsInteractions.createdAt} <= ${s.adsServes.servedAt} + interval '15 minutes'`,
           sql`${s.adsServes.servedAt} >= ${reservation.createdAt} and ${s.adsServes.billingPriceNanos} > 0`,
-          lt(s.adsInteractions.createdAt, periodEnd), isNull(s.adsSettlementClaims.id)))
+          lt(s.adsInteractions.createdAt, periodEnd), isNull(s.adsSettlementClaims.id),
+          eventId ? and(eq(s.adsInteractions.id, eventId), eq(opportunity.claimEventId, eventId)) : undefined))
         .orderBy(asc(s.adsInteractions.createdAt), asc(s.adsInteractions.id)).limit(100);
       const now = new Date(), batchId = randomUUID();
       await tx.insert(s.adsSettlementBatches).values({ id: batchId, batchNumber: `V3-${campaignId}-${requestId}`, idempotencyKey: key,
         periodStart: candidates[0]?.event.createdAt || periodEnd, periodEnd, status: 'processing',
         notes: JSON.stringify({ version: 3, campaignId, escrowId: escrow.id, allocatedUsdCents: escrow.allocatedUsdCents,
-          pricingVersion: 2, publisherPolicy: '55/30/15', commissionPaid: 0, fractionalPolicy: 'carry-within-funded-generation' }) });
+          eventId, pricingVersion: 2, publisherPolicy: '55/30/15', commissionPaid: 0, fractionalPolicy: 'carry-within-funded-generation' }) });
       let total = 0, publisherTotal = 0, impressions = 0, clicks = 0;
       const seen = new Set<string>();
       for (const candidate of candidates) {
@@ -204,6 +206,7 @@ export class AdSettlementService {
           total += cents; publisherTotal += earned;
         }
       }
+      if (eventId && !seen.size) throw new ConflictException('The requested event is not ready to settle');
       if (total > 0) {
         await tx.update(s.billingWallets).set({ lockedUsdCents: wallet.lockedUsdCents - total, version: sql`${s.billingWallets.version} + 1`, updatedAt: now }).where(eq(s.billingWallets.id, wallet.id));
         await tx.update(s.adsCampaignEscrows).set({ consumedUsdCents: escrow.consumedUsdCents + total, lastSettledAt: now, updatedAt: now,
