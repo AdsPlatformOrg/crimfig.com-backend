@@ -122,8 +122,12 @@ export async function runControlledClickSettlement() {
 }
 
 if (require.main === module) {
-  runControlledClickSettlement().then(result => console.log(JSON.stringify(result))).catch(() => {
+  runControlledClickSettlement().then(result => console.log(JSON.stringify(result))).catch((error: unknown) => {
     console.error('Controlled click settlement did not complete. Reconcile the staging claim and settlement receipt.');
+    const cause = error as { name?: string; code?: string; cause?: { code?: string }; message?: string };
+    const safe = /^(Controlled |Staging |Click evidence |Assessment identity |Billing (did not|acknowledgement))/.test(cause.message ?? '')
+      ? cause.message : undefined;
+    console.error(JSON.stringify({ error: cause.name, code: cause.code ?? cause.cause?.code, detail: safe }));
     process.exitCode = 1;
   });
 }
