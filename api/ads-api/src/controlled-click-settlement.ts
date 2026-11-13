@@ -18,10 +18,15 @@ function requestIdentity(kind: string, eventId: string) {
 export async function runControlledClickSettlement() {
   const campaign = process.env.ADS_CONTROLLED_CPC_CAMPAIGN ?? '';
   const receiptId = process.env.ADS_CONTROLLED_CPC_RECEIPT ?? '';
+  const queueEnabled = process.env.ADS_CONTROLLED_CPC_QUEUE === 'true';
   const start = new Date(process.env.ADS_CONTROLLED_CPC_START ?? '');
+  const end = new Date(process.env.ADS_CONTROLLED_CPC_END ?? '');
   if (process.env.RAILWAY_ENVIRONMENT_ID !== stagingEnvironment ||
-      process.env.RAILWAY_ENVIRONMENT_NAME !== 'staging' || !uuid.test(campaign) || !/^clk_[a-z0-9]+_[0-9a-f]+$/.test(receiptId) ||
-      !Number.isFinite(start.getTime()) || start >= new Date()) {
+      process.env.RAILWAY_ENVIRONMENT_NAME !== 'staging' || !uuid.test(campaign) ||
+      (queueEnabled ? receiptId.length > 0 : !/^clk_[a-z0-9]+_[0-9a-f]+$/.test(receiptId)) ||
+      !Number.isFinite(start.getTime()) || start >= new Date() ||
+      (queueEnabled && (!Number.isFinite(end.getTime()) || end <= start || end >= new Date() ||
+        end.getTime() - start.getTime() > 15000))) {
     throw new Error('Controlled settlement requires an explicit staging campaign and start time');
   }
   const database = new URL(process.env.DATABASE_URL ?? '');
@@ -58,6 +63,7 @@ export async function runControlledClickSettlement() {
         and i.assessment_status = 'validated' and i.financial_eligibility = 'pending'
         and i.created_at >= ${start.toISOString()} and i.created_at >= s.served_at
         and i.created_at <= r.event_deadline
+        ${queueEnabled ? sql`and i.created_at < ${end.toISOString()}` : sql``}
         and i.promoter_id = s.promoter_id and s.promoter_id = r.promoter_id
         and i.website_id = s.website_id and s.website_id = r.website_id
         and i.slot_id = s.slot_id and s.slot_id = r.slot_id
@@ -65,7 +71,8 @@ export async function runControlledClickSettlement() {
         and s.content_revision = r.content_revision and s.policy_version = r.policy_version
         and s.request_id = r.opportunity_id
         and exists (select 1 from ads_clicks receipt where receipt.interaction_id = i.id
-          and receipt.serve_id = s.id and receipt.campaign_id = r.campaign_id and receipt.click_id = ${receiptId})
+          and receipt.serve_id = s.id and receipt.campaign_id = r.campaign_id
+          ${queueEnabled ? sql`` : sql`and receipt.click_id = ${receiptId}`})
         and (assessment.request_id is null or
           (assessment.outcome = 'eligible' and assessment.policy_version = ${policy}))
         and not exists (select 1 from ads_interactions duplicate
@@ -77,8 +84,9 @@ export async function runControlledClickSettlement() {
             and other.serve_id <> s.id and repeat.type = 'click' and repeat.is_valid
             and repeat.created_at between i.created_at - interval '30 seconds' and i.created_at + interval '30 seconds')
       order by i.created_at, i.id
-      limit 1
+      limit 2
     `);
+    if (candidates.rows.length > 1) throw new Error('Controlled window contains multiple eligible clicks');
     const event = candidates.rows[0];
     if (!event) return {status: 'idle'};
     const analysis = await evidence.analyze(event.id);
@@ -98,6 +106,12 @@ export async function runControlledClickSettlement() {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(8000),
       headers: {'content-type':'application/json', 'x-internal-key':internalKey},
       body: JSON.stringify({requestId, periodEnd, eventId: event.id}),
+    }).then(async response => {
+      if (process.env.ADS_CONTROLLED_CPC_DROP_ACK === 'true' && response.ok) {
+        await response.body?.cancel();
+        throw new Error('Controlled acknowledgement deliberately dropped');
+      }
+      return response;
     }).catch(async () => {
       const receipt = await db.execute<{id: string}>(sql`
         select b.id from ads_settlement_batches b
