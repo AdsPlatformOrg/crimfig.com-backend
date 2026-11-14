@@ -34,13 +34,14 @@ function assessmentId(eventId: string) {
 export async function processScheduledClicks() {
   const start = process.env.ADS_CPC_PROCESSOR_START ?? '';
   const actor = process.env.ADS_CPC_PROCESSOR_ACTOR ?? '';
-  const campaigns = (process.env.ADS_CPC_PROCESSOR_CAMPAIGNS ?? '').split(',').map(id => id.trim());
+  const rawCampaigns = (process.env.ADS_CPC_PROCESSOR_CAMPAIGNS ?? '').trim();
+  const campaigns = rawCampaigns ? rawCampaigns.split(',').map(id => id.trim()).filter(Boolean) : [];
   const database = new URL(process.env.DATABASE_URL ?? '');
   if (process.env.RAILWAY_ENVIRONMENT_ID !== stagingId ||
       process.env.RAILWAY_ENVIRONMENT_NAME !== 'staging' ||
       process.env.ADS_OPPORTUNITY_WORKER_ENABLED === 'true' ||
       !database.hostname.endsWith('.railway.internal') || !uuid.test(actor) ||
-      campaigns.length > 50 || !campaigns.every(id => uuid.test(id)) ||
+      campaigns.length > 50 || (campaigns.length > 0 && !campaigns.every(id => uuid.test(id))) ||
       !Number.isFinite(Date.parse(start)) || Date.parse(start) > Date.now() ||
       process.env.ADS_TRAFFIC_ASSESSMENT_POLICY_VERSION !== policy) {
     throw new Error('A controlled staging scope and the CPC assessment policy are required');
@@ -55,7 +56,17 @@ export async function processScheduledClicks() {
     const db = drizzle(pool, { schema });
     const actorRow = await db.execute(sql`select 1 from users where id = ${actor} and status = 'ACTIVE'`);
     if (!actorRow.rows.length) throw new Error('The CPC processor actor must be active');
-    const scope = sql.join(campaigns.map(id => sql`${id}::uuid`), sql`, `);
+    let targetCampaigns = campaigns;
+    if (targetCampaigns.length === 0) {
+      const dynamicRows = await db.execute(sql`
+        select id from ads_campaigns
+        where pricing_model = 'cpc' and pricing_version = 2 and status in ('active', 'paused')
+        order by updated_at desc limit 200
+      `);
+      targetCampaigns = (dynamicRows.rows ?? []).map((r: any) => String(r.id)).filter(id => uuid.test(id));
+      if (targetCampaigns.length === 0) return { status: 'idle', campaigns: 0 };
+    }
+    const scope = sql.join(targetCampaigns.map(id => sql`${id}::uuid`), sql`, `);
     const opportunities = new OpportunityClient(new ConfigService());
     const evidence = new EvidenceService(db, opportunities);
     const delivery = new DeliveryService(db, new ImpressionTokenService(), new AuctionEngineService(),
