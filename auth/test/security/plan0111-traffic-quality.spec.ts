@@ -1,3 +1,5 @@
+import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { TrafficQualityController } from '../../../api/ads-api/src/modules/delivery/traffic-quality.controller';
 import {
   assessPublisherTrafficQuality,
   buildThreeReferrerSignals,
@@ -91,6 +93,28 @@ describe('PLAN-0111 Publisher Traffic Quality & Coordinated Click Fraud Detectio
     const enforced = assessPublisherTrafficQuality(coordinated, 'enforced');
     expect(enforced.disposition).toBe('quarantined');
     expect(enforced.clickToVisitRatio).toBeCloseTo(0.9, 5);
+  });
+
+  it('rejects invalid quarantine decisions and foreign-promoter appeals', async () => {
+    const db = {
+      execute: jest.fn(async () => ({ rows: [] })),
+    };
+    const controller = new TrafficQualityController(db);
+
+    await expect(
+      controller.resolveQuarantine('cohort-1', { decision: 'invalid' as any }, { user: { id: 'admin-1' } }),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      controller.createAppeal({ promoterId: 'prom-1', explanation: 'too short' }, { user: { id: 'user-1' } }),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      controller.createAppeal(
+        { promoterId: 'prom-1', explanation: 'Legitimate WhatsApp article share from our community.' },
+        { user: { id: 'foreign-user' } },
+      ),
+    ).rejects.toThrow(ForbiddenException);
   });
 });
 

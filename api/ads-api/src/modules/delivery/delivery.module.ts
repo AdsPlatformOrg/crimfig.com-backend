@@ -10,13 +10,14 @@ import { Module } from '@nestjs/common';
 import { DeliveryService } from './delivery.service';
 import { DeliveryController } from './delivery.controller';
 import { AdminHouseAdsController } from './admin-house-ads.controller';
+import { TrafficQualityController } from './traffic-quality.controller';
 import { ImpressionTokenService } from './impression-token.service';
 import { AuctionEngineService } from './auction-engine.service';
 import { VerificationModule } from '../verification/verification.module';
 
 @Module({
   imports: [VerificationModule, BillingModule],
-  controllers: [PromoterCfigController, AdminCfigController, AdminPerformanceController, DeliveryController, EvidenceController, AdminHouseAdsController],
+  controllers: [PromoterCfigController, AdminCfigController, AdminPerformanceController, DeliveryController, EvidenceController, AdminHouseAdsController, TrafficQualityController],
   providers: [AdsStaffGrants, CfigWorker, CfigService, EvidenceService, DeliveryService, ImpressionTokenService, AuctionEngineService],
   exports: [DeliveryService, ImpressionTokenService, AuctionEngineService],
 })

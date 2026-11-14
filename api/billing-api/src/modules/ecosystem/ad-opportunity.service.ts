@@ -1,6 +1,7 @@
 import { selectGeneralSlotImage } from '../../../../ads-api/src/modules/uploads/image-ad-presets';
 import { resolveGeneralSlotCreativeTypes, resolveSlotCreativeTypes } from './creative-slot-policy';
 import type { OpportunityCapacityDetails, OpportunityConflictCode } from './ad-opportunity-conflict-codes';
+import { computeEffectiveHourlyAllowanceNanos } from './adaptive-pacing';
 import {BadRequestException,ConflictException,Inject,Injectable,NotFoundException,ServiceUnavailableException} from '@nestjs/common';
 import {randomUUID} from 'crypto';
 import {and,eq,sql} from 'drizzle-orm';
@@ -135,8 +136,13 @@ export class AdOpportunityService {
           });
         }
       }
-      if (c.hourlyPacingUsdCents != null) {
-        const hourlyAllowanceNanos = BigInt(c.hourlyPacingUsdCents) * NANO_CENT;
+      const hourlyAllowanceNanos = computeEffectiveHourlyAllowanceNanos({
+        dailyBudgetUsdCents: c.dailyBudgetUsdCents,
+        hourlyPacingUsdCents: c.hourlyPacingUsdCents,
+        dailyUsedNanos: BigInt(u.daily),
+        hourlyUsedNanos: BigInt(u.hourly),
+      });
+      if (hourlyAllowanceNanos != null) {
         const hourlyUsedNanos = BigInt(u.hourly);
         if (hourlyUsedNanos + price > hourlyAllowanceNanos) {
           const availableNanos = hourlyAllowanceNanos > hourlyUsedNanos ? hourlyAllowanceNanos - hourlyUsedNanos : 0n;
