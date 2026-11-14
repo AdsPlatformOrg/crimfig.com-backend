@@ -154,7 +154,7 @@ export async function processScheduledClicks() {
     const houseReconciliation = await reconcileHouseCfigCorrections(db, window);
     const points = await recordPaidPointsCorrectionObservations(db, window);
     const house = await houseCfigCorrectionPreview(db, window);
-    const trafficQuality = await recordPublisherTrafficQualityObservations(db, { endAt: new Date(window.upper) });
+    const trafficQuality = await recordPublisherTrafficQualityObservations(db.$client, { endAt: new Date(window.upper) });
     return {
       status: 'processed',
       candidates: candidates.rows.length,
