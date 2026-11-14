@@ -73,7 +73,7 @@ export async function runClickAuditWindows(db: NodePgDatabase<typeof schema>, st
       const samples = state.samples ?? (state.samples = []);
       for (const event of events.rows) {
         if (samples.length < 50) {
-          const reasons = [];
+          const reasons: string[] = [];
           if (event.duplicate) reasons.push('SAME_SERVE_REPEAT');
           if (event.frequency) reasons.push('PRIOR_PAID_CPC_WITHIN_90_DAYS');
           if (event.unassessed) reasons.push('ASSESSMENT_MISSING');
