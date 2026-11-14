@@ -6,6 +6,7 @@ import { AdminPerformanceController } from './admin-performance.controller';
 import { EvidenceService } from './evidence.service';
 import { EvidenceController } from './evidence.controller';
 import { BillingModule } from '../billing/billing.module';
+import { DashboardAuthModule } from '@crimfig/shared';
 import { Module } from '@nestjs/common';
 import { DeliveryService } from './delivery.service';
 import { DeliveryController } from './delivery.controller';
@@ -16,7 +17,7 @@ import { AuctionEngineService } from './auction-engine.service';
 import { VerificationModule } from '../verification/verification.module';
 
 @Module({
-  imports: [VerificationModule, BillingModule],
+  imports: [DashboardAuthModule, VerificationModule, BillingModule],
   controllers: [PromoterCfigController, AdminCfigController, AdminPerformanceController, DeliveryController, EvidenceController, AdminHouseAdsController, TrafficQualityController],
   providers: [AdsStaffGrants, CfigWorker, CfigService, EvidenceService, DeliveryService, ImpressionTokenService, AuctionEngineService],
   exports: [DeliveryService, ImpressionTokenService, AuctionEngineService],
