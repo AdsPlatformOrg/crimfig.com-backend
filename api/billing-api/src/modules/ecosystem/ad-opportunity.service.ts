@@ -15,7 +15,7 @@ const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}
 export interface OpportunityInput {
   serveBefore:string;opportunityId:string;campaignId:string;creativeId:string;submissionId:string;contentRevision:number;
   promoterId:string;websiteId:string;slotId:string;policyVersion:string;priceNanos:string;clearingPriceMicros:number;
-  visitorKey:string;ipHash:string;selectedImageUrl?:string;decision:Record<string,any>;
+  visitorKey:string;cpcVisitorKey?:string;ipHash:string;selectedImageUrl?:string;decision:Record<string,any>;
 }
 
 /** Shared-DB financial authority. Never debits a wallet at serve time. All states
@@ -110,7 +110,7 @@ export class AdOpportunityService {
       const [row]=await tx.insert(s.adsOpportunityReservations).values({opportunityId:input.opportunityId,campaignId:c.id,escrowId:escrow.id,escrowAllocatedUsdCents:escrow.allocatedUsdCents,
         creativeId:creative.id,submissionId:input.submissionId,contentRevision:c.contentRevision,promoterId:input.promoterId,websiteId:input.websiteId,slotId:input.slotId,
         bindingFingerprint:binding,reservedNanos:price,reservedUsdCentsCeiling:Number((price+NANO_CENT-1n)/NANO_CENT),pricingModel:c.pricingModel,visitorKey:input.visitorKey,
-        policyVersion:policy.version,policySnapshot:{policy,slotPolicyRevision:supply.slot.policyRevision,serveBefore:input.serveBefore,ipHash:input.ipHash,decision:input.decision,render:{...creative,imageUrl:artwork},slotTagId:supply.slot.slotTagId},
+        policyVersion:policy.version,policySnapshot:{policy,slotPolicyRevision:supply.slot.policyRevision,serveBefore:input.serveBefore,ipHash:input.ipHash,cpcVisitorKey:input.cpcVisitorKey,decision:input.decision,render:{...creative,imageUrl:artwork},slotTagId:supply.slot.slotTagId},
         state:'HELD',eventDeadline,ingestDeadline,expiresAt:new Date(now.getTime()+30000),isSimulated:false}).returning();return this.receipt(row);
     });
   }
@@ -137,9 +137,10 @@ export class AdOpportunityService {
       billingPriceNanos:row.reservedNanos,opportunityReservationId:row.id,recordHash:adDigest({bindingFingerprint,row:stableAdValue(row),decision})}).returning();
     await tx.insert(s.adsServes).values({id:serveId,requestId:row.opportunityId,campaignId:c.id,creativeId:row.creativeId,promoterId:row.promoterId,websiteId:row.websiteId,slotId:row.slotId,placementId:null,
       slotHandle:snapshot.slotTagId,inventoryClass:'paid',deliveryMode:'normal',trafficRiskStatus:'normal',financialEligibility:'pending',auctionDecisionId:audit.id,policyVersion:row.policyVersion,
-      opportunityReservationId:row.id,submissionId:row.submissionId,contentRevision:row.contentRevision,contentSnapshot:snapshot.render,pricingVersion:2,ipHash:snapshot.ipHash,pricingModel:row.pricingModel,billingPriceNanos:row.reservedNanos,clearingPriceMicros:decision.clearingPriceMicros});
+      opportunityReservationId:row.id,submissionId:row.submissionId,contentRevision:row.contentRevision,contentSnapshot:snapshot.render,pricingVersion:2,ipHash:snapshot.ipHash,cpcVisitorKey:row.pricingModel==='cpc' ? snapshot.cpcVisitorKey : undefined,pricingModel:row.pricingModel,billingPriceNanos:row.reservedNanos,clearingPriceMicros:decision.clearingPriceMicros});
     await appendAdEvidence(tx,row.opportunityId,{version:1,stage:'issued',opportunityId:row.opportunityId,serveId,reservationId:row.id,bindingFingerprint:row.bindingFingerprint,decision,render:snapshot.render,policy:snapshot.policy});
-    const [issued]=await tx.update(s.adsOpportunityReservations).set({state:'ISSUED',serveId,eventDeadline:new Date(Date.now()+EVENT_WINDOW_MS),ingestDeadline:new Date(Date.now()+EVENT_WINDOW_MS+INGEST_TOLERANCE_MS),expiresAt:new Date(Date.now()+EVENT_WINDOW_MS+INGEST_TOLERANCE_MS),updatedAt:new Date()}).where(eq(s.adsOpportunityReservations.id,id)).returning();
+    const { cpcVisitorKey: _continuity, ...issuedSnapshot } = snapshot;
+    const [issued]=await tx.update(s.adsOpportunityReservations).set({state:'ISSUED',policySnapshot:issuedSnapshot,serveId,eventDeadline:new Date(Date.now()+EVENT_WINDOW_MS),ingestDeadline:new Date(Date.now()+EVENT_WINDOW_MS+INGEST_TOLERANCE_MS),expiresAt:new Date(Date.now()+EVENT_WINDOW_MS+INGEST_TOLERANCE_MS),updatedAt:new Date()}).where(eq(s.adsOpportunityReservations.id,id)).returning();
     if(Date.parse(snapshot.serveBefore)<=Date.now())throw new ConflictException('Opportunity deadline has closed');
     return {receipt:this.receipt(issued),serveId,render:snapshot.render};
   });}

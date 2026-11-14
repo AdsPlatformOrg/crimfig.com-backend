@@ -792,9 +792,9 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     const [stack]=await db.insert(schema.adsCreativeStacks).values({campaignId:campaign.id,name:'Ad Stack #1',position:1}).returning();
     const [creative]=await db.insert(schema.adsCreatives).values({campaignId:campaign.id,adStackId:stack.id,headline:'Reviewed',destinationUrl:'https://example.test',status:'active',reviewStatus:'approved'}).returning();
     const [placement]=await db.insert(schema.adsPlacements).values({campaignId:campaign.id,creativeId:creative.id,promoterId:promoter.id,placementToken:randomUUID()}).returning();
-    const add=async(version=2)=>{
+    const add=async(version=2, cpcVisitorKey?: string)=>{
       const [serve]=await db.insert(schema.adsServes).values({campaignId:campaign.id,creativeId:creative.id,promoterId:promoter.id,
-        placementId:placement.id,slotHandle:'fixture',pricingModel:model,pricingVersion:2,billingPriceNanos:price}).returning();
+        placementId:placement.id,slotHandle:'fixture',pricingModel:model,pricingVersion:2,billingPriceNanos:price,cpcVisitorKey}).returning();
       const [event]=await db.insert(schema.adsInteractions).values({placementId:placement.id,promoterId:promoter.id,serveId:serve.id,
         type:model==='cpm'?'viewable_impression':'click',verificationVersion:version,isValid:true}).returning();
       await pool.query('select pg_sleep(0.01)'); // Closed test period, avoiding JS millisecond/PG microsecond boundary ambiguity.
@@ -1298,6 +1298,37 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     expect(await svc.read(actors[1], escrow.id, f.promoter.id)).toHaveLength(2);
     expect((await pool.query('select count(*)::int count from ads_settlement_rebates')).rows[0].count).toBe(0);
   });
+  test('PLAN0104 CPC continuity prevents cross-serve debits and allows unknown history', async () => {
+    const f = await settlementFixture();
+    const key = 'a'.repeat(64);
+    const first = await f.add(2, key);
+    const repeat = await f.add(2, key);
+    const unknown = await f.add();
+    const invalidUnknown = await f.add(0);
+    const otherVisitor = await f.add(2, 'b'.repeat(64));
+    const end = new Date();
+    const requests = await Promise.all([
+      f.svc.settle(f.campaign.id, randomUUID(), end),
+      f.svc.settle(f.campaign.id, randomUUID(), end),
+    ]);
+    expect(requests.reduce((total, result) => total + result.billedUsdCents, 0)).toBe(30);
+    const claims = await pool.query('select interaction_id from ads_settlement_claims');
+    expect(claims.rows.map(row => row.interaction_id).sort())
+      .toEqual([first.event.id, unknown.event.id, otherVisitor.event.id].sort());
+    expect(claims.rows.map(row => row.interaction_id)).not.toContain(repeat.event.id);
+    expect(claims.rows.map(row => row.interaction_id)).not.toContain(invalidUnknown.event.id);
+
+    const anchor = '2026-01-01T00:00:00Z';
+    await pool.query('update ads_interactions set created_at=$1 where id=$2', [anchor, first.event.id]);
+    await pool.query('update ads_interactions set created_at=$1::timestamptz + interval \'2160 hours\' where id=$2',
+      [anchor, repeat.event.id]);
+    await pool.query('update ads_serves set served_at=$1::timestamptz + interval \'2160 hours\' where id=$2',
+      [anchor, repeat.serve.id]);
+    await pool.query("update billing_transactions set created_at=$1 where type='internal_debit'", [anchor]);
+    const boundary = await f.svc.settle(f.campaign.id, randomUUID(), new Date());
+    expect(boundary.billedUsdCents).toBe(10);
+  });
+
   test('funded settlement races claim a serve once and hold publisher earnings outside available balance',async()=>{
     const f=await settlementFixture();const {serve}=await f.add();
     await db.insert(schema.adsInteractions).values({placementId:f.placement.id,promoterId:f.promoter.id,serveId:serve.id,type:'click',verificationVersion:2,isValid:true});

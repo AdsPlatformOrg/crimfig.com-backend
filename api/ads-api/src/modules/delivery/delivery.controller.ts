@@ -179,6 +179,7 @@ export class DeliveryController {
 
   @Public()
   @Get('ad/:placementToken')
+  @Header('Cache-Control', 'private, no-store')
   @ApiOperation({ summary: 'Fetch ad creative for placement and log impression' })
   async getAd(
     @Param('placementToken') token: string,
@@ -202,6 +203,8 @@ export class DeliveryController {
       req
         ? {
             measurementConsent: consent === 'granted',
+            privacyControl: req.headers['sec-gpc'] === '1',
+            continuityProof: typeof req.headers['x-cf-cpc-consent'] === 'string' ? req.headers['x-cf-cpc-consent'] : undefined,
             consentState: consent === 'granted' || consent === 'denied' ? consent : 'unknown',
             transportRequestId: 'requestId' in req && typeof req.requestId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(req.requestId)
               ? req.requestId : undefined,

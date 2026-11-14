@@ -1,5 +1,5 @@
 import {Body,Controller,Get,Post,Param,Headers,UnauthorizedException,ParseUUIDPipe} from '@nestjs/common';
-import {IsISO8601,IsUUID,IsString,IsInt,IsObject,IsOptional,Min,MaxLength} from 'class-validator';
+import {IsISO8601,IsUUID,IsString,IsInt,IsObject,IsOptional,Min,MaxLength,Matches} from 'class-validator';
 import {timingSafeEqual} from 'crypto';
 import {Public,FinancialOperation} from '@crimfig/shared';
 import {AdOpportunityService} from './ad-opportunity.service';
@@ -8,6 +8,7 @@ class ReserveDto {
   @IsUUID('4') opportunityId:string;@IsUUID('4') campaignId:string;@IsUUID('4') creativeId:string;@IsUUID('4') submissionId:string;
   @IsInt() @Min(1) contentRevision:number;@IsUUID('4') promoterId:string;@IsUUID('4') websiteId:string;@IsUUID('4') slotId:string;
   @IsString() @MaxLength(64) policyVersion:string;@IsString() @MaxLength(24) priceNanos:string;@IsInt() @Min(1) clearingPriceMicros:number;
+  @IsOptional() @Matches(/^[a-f0-9]{64}$/) cpcVisitorKey?:string;
   @IsString() @MaxLength(64) visitorKey:string;@IsString() @MaxLength(16) ipHash:string;@IsObject() decision:Record<string,unknown>;@IsOptional() @IsString() @MaxLength(2048) selectedImageUrl?:string;
 }
 class IssueDto {@IsString() @MaxLength(64) bindingFingerprint:string;}

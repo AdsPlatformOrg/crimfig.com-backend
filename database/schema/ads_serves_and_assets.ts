@@ -140,6 +140,9 @@ export const adsServes = pgTable(
       .notNull()
       .default("cpm"),
 
+    // Server-issued continuity evidence scoped to this campaign. Null means unknown.
+    cpcVisitorKey: varchar("cpc_visitor_key", { length: 64 }),
+
     // Anonymized/hashed client identifiers for fraud prevention
     ipHash: varchar("ip_hash", { length: 64 }),
     userAgentHash: varchar("ua_hash", { length: 64 }),
@@ -183,6 +186,8 @@ export const adsServes = pgTable(
   (t) => [
     uniqueIndex('ads_serve_reservation_uq').on(t.opportunityReservationId).where(sql`${t.opportunityReservationId} IS NOT NULL`),
     index("ads_serves_campaign_id_idx").on(t.campaignId),
+    index("ads_serves_cpc_visitor_idx").on(t.campaignId, t.cpcVisitorKey)
+      .where(sql`${t.cpcVisitorKey} IS NOT NULL AND ${t.pricingModel} = 'cpc'`),
     index("ads_serves_placement_id_idx").on(t.placementId),
     index("ads_serves_promoter_id_idx").on(t.promoterId),
     index("ads_serves_served_at_idx").on(t.servedAt),

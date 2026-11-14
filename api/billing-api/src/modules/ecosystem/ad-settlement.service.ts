@@ -78,7 +78,7 @@ export class AdSettlementService {
       const fundedCapacity = BigInt(Math.min(wallet.lockedUsdCents, campaign.remainingBudgetUsdCents,
         escrow.allocatedUsdCents - escrow.consumedUsdCents - escrow.refundedUsdCents)) * CENT;
       const candidates = await tx.select({ event: s.adsInteractions, serve: s.adsServes, promoter: s.adsPromoters, placement: s.adsPlacements,
-        opportunity, ownerStatus: s.users.status }).from(s.adsInteractions)
+        opportunity, ownerStatus: s.users.status, cpcVisitorKey: sql<string | null>`"ads_serves"."cpc_visitor_key"` }).from(s.adsInteractions)
         .innerJoin(s.adsServes, eq(s.adsServes.id, s.adsInteractions.serveId))
         .innerJoin(s.adsPromoters, eq(s.adsPromoters.id, s.adsServes.promoterId))
         .leftJoin(s.adsPlacements, eq(s.adsPlacements.id, s.adsServes.placementId))
@@ -121,8 +121,9 @@ export class AdSettlementService {
           eventId, pricingVersion: 2, publisherPolicy: '55/30/15', commissionPaid: 0, fractionalPolicy: 'carry-within-funded-generation' }) });
       let total = 0, publisherTotal = 0, impressions = 0, clicks = 0;
       const seen = new Set<string>();
+      let frequencyExcluded = false;
       for (const candidate of candidates) {
-        const { event, serve, promoter, placement, opportunity: funded, ownerStatus } = candidate;
+        const { event, serve, promoter, placement, opportunity: funded, ownerStatus, cpcVisitorKey } = candidate;
         if (seen.has(serve.id)) continue;
         if (event.placementId !== serve.placementId || event.promoterId !== serve.promoterId ||
           promoter.userId === campaign.advertiserId || !promoter.isActive || promoter.isSuspended || ownerStatus !== 'ACTIVE' ||
@@ -165,6 +166,31 @@ export class AdSettlementService {
           const [site] = await tx.select().from(s.adsPromoterWebsites).where(eq(s.adsPromoterWebsites.id, placement.websiteId)).for('share');
           if (!site || site.promoterId !== promoter.id || site.verificationStatus !== 'verified' || !site.isActive || site.isSuspended) continue;
         }
+        if (event.type === 'click' && cpcVisitorKey !== null) {
+          // The campaign lock serializes this check with claims from other workers.
+          // Check both directions in event time because older events can settle late.
+          const { rows } = await tx.execute(sql`
+            SELECT 1 FROM ads_serves prior
+            JOIN ads_settlement_claims claim ON claim.serve_id = prior.id
+            JOIN ads_interactions click ON click.id = claim.interaction_id
+            JOIN ads_interactions candidate ON candidate.id = ${event.id}
+            WHERE prior.campaign_id = ${campaignId}
+              AND prior.pricing_model = 'cpc' AND prior.cpc_visitor_key = ${cpcVisitorKey}
+              AND click.created_at > candidate.created_at - interval '2160 hours'
+              AND click.created_at < candidate.created_at + interval '2160 hours'
+            LIMIT 1
+          `);
+          if (rows.length) {
+            frequencyExcluded = true;
+            if (funded) {
+              await tx.update(opportunity).set({
+                state: 'RELEASED', releaseReason: 'CPC_VISITOR_90_DAY_LIMIT', releasedAt: now, updatedAt: now,
+              }).where(eq(opportunity.id, funded.id));
+              outstanding -= funded.reservedNanos;
+            }
+            continue;
+          }
+        }
         const releasedExposure = funded?.reservedNanos ?? 0n;
         if (outstanding + totalCarry + BigInt(total) * CENT + serve.billingPriceNanos - releasedExposure > fundedCapacity) continue;
         const carryFilter = and(eq(s.adsSettlementCarries.escrowId, escrow.id), eq(s.adsSettlementCarries.allocatedUsdCents, escrow.allocatedUsdCents), eq(s.adsSettlementCarries.promoterId, promoter.id));
@@ -206,7 +232,7 @@ export class AdSettlementService {
           total += cents; publisherTotal += earned;
         }
       }
-      if (eventId && !seen.size) throw new ConflictException('The requested event is not ready to settle');
+      if (eventId && !seen.size && !frequencyExcluded) throw new ConflictException('The requested event is not ready to settle');
       if (total > 0) {
         await tx.update(s.billingWallets).set({ lockedUsdCents: wallet.lockedUsdCents - total, version: sql`${s.billingWallets.version} + 1`, updatedAt: now }).where(eq(s.billingWallets.id, wallet.id));
         await tx.update(s.adsCampaignEscrows).set({ consumedUsdCents: escrow.consumedUsdCents + total, lastSettledAt: now, updatedAt: now,

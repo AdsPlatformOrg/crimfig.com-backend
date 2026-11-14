@@ -1,4 +1,5 @@
 import { resolveGeneralSlotCreativeTypes, resolveSlotCreativeTypes } from '../../../../billing-api/src/modules/ecosystem/creative-slot-policy';
+import { cpcVisitorContinuity } from './cpc-visitor-continuity';
 import { matchesDeviceTarget } from './device-targeting';
 import { responsiveImageBounds } from './image-sizing';
 import { APPROVED_IMAGE_AD_PRESETS, selectGeneralSlotImage } from '../uploads/image-ad-presets';
@@ -377,8 +378,20 @@ export class DeliveryService {
       element.setAttribute('data-cf-state','unavailable');
     }
     state.timer=setTimeout(function(){state.closed=true;state.controller.abort();collapseSlot();},15000);
+    var headers={Accept:'application/json'};
+    if(consent!=='denied'&&navigator.globalPrivacyControl!==true&&typeof window.crimfigCpcConsent==='function'){
+      try{
+        var permission=window.crimfigCpcConsent();
+        if(permission&&permission.state==='granted'&&typeof permission.proof==='string'&&permission.proof.length===111
+          &&new URL(base,window.location.href).origin===new URL(apiBase,window.location.href).origin){
+          consent='granted';
+          headers['X-CF-CPC-Consent']=permission.proof;
+        }
+      }catch(error){/* Optional continuity is unavailable. */}
+    }
     var query='?domain='+encodeURIComponent(window.location.hostname)+'&consent='+(consent==='granted'||consent==='denied'?consent:'unknown');
-    fetch(base+'/api/v1/delivery/ad/'+encodeURIComponent(token)+query,{credentials:'omit',signal:state.controller.signal,headers:{Accept:'application/json'}})
+    fetch(base+'/api/v1/delivery/ad/'+encodeURIComponent(token)+query,{credentials:'omit',signal:state.controller.signal,headers:headers,
+      redirect:headers['X-CF-CPC-Consent']?'error':'follow',cache:headers['X-CF-CPC-Consent']?'no-store':'default'})
       .then(function(res){if(!res.ok)throw new Error('Ad unavailable');return res.json();})
       .then(function(data){if(state.closed||instances.get(element)!==state||!element.isConnected)return;
         if(!data||!data.data){state.closed=true;clearTimeout(state.timer);collapseSlot();return;}
@@ -1147,7 +1160,7 @@ export class DeliveryService {
       city?: string;
       device?: string;
     },
-    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean; consentState?: 'granted' | 'denied' | 'unknown'; transportRequestId?: string },
+    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean; consentState?: 'granted' | 'denied' | 'unknown'; transportRequestId?: string; privacyControl?: boolean; continuityProof?: string },
   ) {
     this.tokenService.assertConfigured();
     const requestId = crypto.randomUUID();
@@ -1750,13 +1763,22 @@ export class DeliveryService {
     let reserveAttempted = false;
     let reserveConfirmedAt: number | undefined;
     try {
+      const cpcVisitorKey = auctionResult.winner.pricingModel === 'cpc' && requestHeaders?.origin
+        && requestHeaders.origin.startsWith('https://')
+        && domainMatchesRegisteredSite(canonicalWebsite.domain, extractHostnameFromHeader(requestHeaders.origin) || '')
+        ? cpcVisitorContinuity(requestHeaders, requestHeaders.origin, finalCampaignId, {
+            origin: process.env.ADS_CPC_CONTINUITY_PUBLISHER_ORIGIN,
+            issuerSecret: process.env.ADS_CPC_CONTINUITY_ISSUER_SECRET,
+            continuitySecret: process.env.ADS_CPC_CONTINUITY_HASH_SECRET,
+          })
+        : undefined;
       const viewer=this.fraudRules.computeKeyedIpHash(clientIp).keyedIpHash;
       requireDeliveryTime(serverDeadline,'reserve');
       reserveAttempted = true;
       const receipt=await this.opportunities.reserve({serveBefore:new Date(serverDeadline).toISOString(),opportunityId:requestId,campaignId:finalCampaignId,creativeId:finalCreativeId,
         submissionId:(winningCreative as any).currentSubmissionId,contentRevision:(winningCreative as any).contentRevision,
         promoterId,websiteId:canonicalWebsite.id,slotId:canonicalSlot.id,policyVersion:approvedAdPolicy()!.version,
-        priceNanos:billingPriceNanos.toString(),clearingPriceMicros,visitorKey:viewer,ipHash,selectedImageUrl:winningCreative.imageUrl??undefined,
+        priceNanos:billingPriceNanos.toString(),clearingPriceMicros,visitorKey:viewer,cpcVisitorKey,ipHash,selectedImageUrl:winningCreative.imageUrl??undefined,
         decision:stableAdValue({...auctionResult.decisionSnapshot,consentState:requestHeaders?.consentState??"unknown"})});
       billingStage = 'billing_issue';
       reserveConfirmedAt = Date.now();

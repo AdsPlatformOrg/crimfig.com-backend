@@ -50,7 +50,10 @@ export class ClickAuditController {
         select click.id, click.at, click.receipt_id, click.event_id, click.serve_id,
           click.campaign_id, click.website_id, click.slot_id, click.valid, click.reason, click.billed,
           campaign.title as campaign, website.domain, slot.name as slot, s.request_id,
-          r.state as reservation_state, r.event_deadline, r.claim_event_id, r.settled_at,
+          r.state as reservation_state, r.release_reason, r.event_deadline, r.claim_event_id, r.settled_at,
+          case when s.pricing_model = 'cpc' then
+            case when s.cpc_visitor_key is null then 'unknown' else 'established' end
+          end as visitor_history,
           claim.id as settlement_claim_id, debit.id as debit_id, debit.cents as billed_usd_cents,
           assessment.outcome as assessment,
           assessment.reason_codes as assessment_reasons,
