@@ -7,7 +7,7 @@ describe('PLAN0103 click redirect assessment ownership (mocked persistence)', ()
     const chain: any = { from: () => chain, where: () => chain, limit: async () => [{
       status: 'active', contentSnapshot: { destinationUrl: 'https://example.test/landing' },
     }] };
-    const db: any = { select: () => chain, insert: jest.fn(() => ({ values: jest.fn(async () => undefined) })) };
+    const db: any = { select: () => chain, update: jest.fn(() => ({ set: () => ({ where: async () => undefined }) })), insert: jest.fn(() => ({ values: jest.fn(async () => undefined) })) };
     const fraud = new FraudRulesService();
     const validate = jest.spyOn(fraud, 'validateClick');
     const delivery = new DeliveryService(db, { verifyToken: () => claims } as any, {} as any, fraud);
@@ -26,10 +26,10 @@ describe('PLAN0103 click redirect assessment ownership (mocked persistence)', ()
     expect(f.validate).not.toHaveBeenCalled(); expect(f.log).not.toHaveBeenCalled(); expect(f.db.insert).not.toHaveBeenCalled();
   });
 
-  test('event ingestion failure never produces a conversion click record', async () => {
+  test('event ingestion failure preserves a receipt and allows navigation', async () => {
     const f = fixture(); f.log.mockRejectedValue(new Error('storage unavailable'));
-    await expect(f.delivery.handleClick('signed')).rejects.toThrow('storage unavailable');
-    expect(f.validate).not.toHaveBeenCalled(); expect(f.db.insert).not.toHaveBeenCalled();
+    await expect(f.delivery.handleClick('signed')).resolves.toContain('cf_click=');
+    expect(f.validate).not.toHaveBeenCalled(); expect(f.db.insert).toHaveBeenCalledTimes(1); expect(f.db.update).not.toHaveBeenCalled();
   });
 
   test('redirect assesses the first click once; a subsequent click remains a duplicate', async () => {

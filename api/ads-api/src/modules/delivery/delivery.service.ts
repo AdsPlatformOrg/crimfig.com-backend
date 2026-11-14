@@ -1999,30 +1999,33 @@ export class DeliveryService {
     // first consumes the dedupe key and rejects the very same click as DUP_CLICK.
     // Record click interaction telemetry with validation & GIVT/SIVT status for batch settlement
     if(!tokenPayload)throw new NotFoundException('Signed click attribution is required');
-    const interaction = strictTokenPayload
-      ? await this.logInteraction({ impToken: token, type: 'click', source: 'share_link', clientIp, userAgent, referrer })
-      : undefined;
-    const recordingReason = interaction ? null : strictTokenPayload ? 'EVENT_NOT_RECORDED' : 'IP_BINDING_MISMATCH';
-
-    const clickId = `clk_${Date.now().toString(36)}_${crypto.randomBytes(8).toString('hex')}`;
+    const attemptId = crypto.randomUUID();
+    const clickId = 'clk_' + Date.now().toString(36) + '_' + attemptId.replace(/-/g, '');
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     try {
       await this.db.insert(schema.adsClicks).values({
+        id: attemptId,
         clickId,
         serveId,
-        interactionId: interaction?.id ?? null,
-        recordingReason,
+        recordingReason: strictTokenPayload ? 'RECORDING_UNCONFIRMED' : 'IP_BINDING_MISMATCH',
         campaignId,
         promoterId: promoterId || null,
-        actorIp: null,
-        userAgent: userAgent?.slice(0,512) || null,
         expiresAt,
       });
-    } catch (clickErr: any) {
-      this.logger.warn(
-        `Failed to insert ads_clicks entry: ${clickErr.message}`,
-      );
+
+      if (strictTokenPayload) {
+        const interaction = await this.logInteraction({
+          eventId: attemptId, impToken: token, type: 'click', source: 'share_link',
+          clientIp, userAgent, referrer,
+        });
+        await this.db.update(schema.adsClicks).set({
+          interactionId: interaction?.id ?? null,
+          recordingReason: interaction ? null : 'EVENT_NOT_RECORDED',
+        }).where(eq(schema.adsClicks.id, attemptId));
+      }
+    } catch {
+      this.logger.warn('Click recording or receipt linkage could not be confirmed');
     }
 
     const separator = destinationUrl.includes('?') ? '&' : '?';
@@ -2304,6 +2307,18 @@ export class DeliveryService {
          const [stage]=await tx.select().from(adsInteractions).where(and(eq(adsInteractions.serveId,serveId),eq(adsInteractions.type,params.type as any))).limit(1);
          if(stage)return stage;
        }
+      if (serveId && signedPayload && !isHouseOrShadowServe && params.type === 'click' && isValid) {
+        const [prior] = await tx.select({id: adsInteractions.id}).from(adsInteractions)
+          .where(and(eq(adsInteractions.serveId, serveId), eq(adsInteractions.type, 'click'),
+            eq(adsInteractions.verificationVersion, 2), eq(adsInteractions.isValid, true))).limit(1);
+        if (prior) {
+          isValid = false;
+          invalidReason = 'DUP_CLICK';
+          ivtCategory = 'GIVT';
+          assessmentStatus = 'invalidated';
+          financialEligibility = 'invalid';
+        }
+      }
       const claims = params.claims ?? {};
       const [event]=await tx.insert(adsInteractions).values({
         id:rawId,eventId:clientEventId,createdAt:new Date(),

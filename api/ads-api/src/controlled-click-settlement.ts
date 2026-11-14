@@ -70,7 +70,8 @@ export async function runControlledClickSettlement() {
         and s.creative_id = r.creative_id and s.submission_id = r.submission_id
         and s.content_revision = r.content_revision and s.policy_version = r.policy_version
         and s.request_id = r.opportunity_id
-        and exists (select 1 from ads_clicks receipt where receipt.interaction_id = i.id
+        and exists (select 1 from ads_clicks receipt where (receipt.interaction_id = i.id or (receipt.interaction_id is null
+          and receipt.recording_reason = 'RECORDING_UNCONFIRMED' and receipt.id = i.event_id))
           and receipt.serve_id = s.id and receipt.campaign_id = r.campaign_id
           ${queueEnabled ? sql`` : sql`and receipt.click_id = ${receiptId}`})
         and (assessment.request_id is null or

@@ -36,7 +36,7 @@ export function reportRange(from: string | undefined, to: string | undefined, no
 
 export const reportMetrics = [
   'spend', 'cpmSpend', 'cpcSpend', 'posted', 'credits', 'confirmed', 'pending', 'adjustments',
-  'billableImpressions', 'billableClicks', 'impressions', 'clicks',
+  'billableImpressions', 'billableClicks', 'impressions', 'clicks', 'validClicks', 'billedClicks',
 ] as const;
 export type ReportMetrics = Record<(typeof reportMetrics)[number], string>;
 

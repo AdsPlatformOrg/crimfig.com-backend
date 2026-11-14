@@ -17,11 +17,12 @@ export function observedClickRows({ campaign, from, to }: ClickScope = {}) {
   `;
   return sql`
     select r.id, r.id as receipt_id, r.clicked_at as at, r.campaign_id, r.serve_id,
-      i.id as event_id, i.is_valid as valid, coalesce(i.invalid_reason, r.recording_reason) as reason,
+      i.id as event_id, i.is_valid as valid, case when i.id is null then r.recording_reason else i.invalid_reason end as reason,
       s.website_id, s.slot_id, coalesce(case when s.website_id is not null then 'embed' end, i.source, 'share_link') as source
     from ads_clicks r
     left join ads_serves s on s.id = r.serve_id
-    left join ads_interactions i on i.id = r.interaction_id and i.type = 'click'
+    left join ads_interactions i on (i.id = r.interaction_id or (r.interaction_id is null
+      and r.recording_reason = 'RECORDING_UNCONFIRMED' and i.event_id = r.id)) and i.type = 'click'
       and i.serve_id is not distinct from r.serve_id and i.promoter_id = r.promoter_id
       and ((s.id is not null and (i.placement_id is null or i.placement_id = s.placement_id))
         or (r.serve_id is null and exists (
@@ -42,7 +43,8 @@ export function observedClickRows({ campaign, from, to }: ClickScope = {}) {
     where ads_interactions.type = 'click' and ${eventCampaignId} is not null
       ${eventScope} ${period(sql`ads_interactions.created_at`)}
       and not exists (
-        select 1 from ads_clicks r where r.interaction_id = ads_interactions.id
+        select 1 from ads_clicks r where (r.interaction_id = ads_interactions.id or (r.interaction_id is null
+          and r.recording_reason = 'RECORDING_UNCONFIRMED' and r.id = ads_interactions.event_id))
           and r.campaign_id = ${eventCampaignId} and r.serve_id is not distinct from ads_interactions.serve_id
           and r.promoter_id = ads_interactions.promoter_id
       )

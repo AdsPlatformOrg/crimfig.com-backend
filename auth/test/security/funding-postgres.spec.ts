@@ -860,7 +860,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect((await get('campaigns/page',foreign)).body.data.items[0]).toMatchObject({id:other.id,impressionsCount:1});
       // A real completed internal debit determines spend; failed/foreign receipts do not.
       await db.insert(schema.billingTransactions).values([
-        {userId:owner,type:'ads_spend',provider:'internal',status:'completed',reference:randomUUID(),amountUsdCents:10,metadata:JSON.stringify({campaignId:f.campaign.id})},
+        {userId:owner,type:'ads_spend',provider:'internal',status:'completed',reference:randomUUID(),amountUsdCents:10,metadata:JSON.stringify({campaignId:f.campaign.id}),createdAt:new Date(Date.now()-1000)},
         {userId:owner,type:'ads_spend',provider:'internal',status:'failed',reference:randomUUID(),amountUsdCents:99,metadata:JSON.stringify({campaignId:f.campaign.id})},
         {userId:foreign,type:'ads_spend',provider:'internal',status:'completed',reference:randomUUID(),amountUsdCents:99,metadata:JSON.stringify({campaignId:other.id})},
       ]);
@@ -888,12 +888,16 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       await new Promise(resolve => setTimeout(resolve, 350));
       expect(await delivery.handleClick(token,undefined,'Mozilla/5.0 Chrome/130')).toMatch(/^https:\/\/example.test\?cf_click=/);
       expect(validate).toHaveBeenCalledTimes(1);
-      await delivery.handleClick(token,undefined,'Mozilla/5.0 Chrome/130');
-      expect(validate).toHaveBeenCalledTimes(2);
+      const restarted = new DeliveryService(db,tokens,new AuctionEngineService(),new FraudRulesService(),undefined,new EvidenceService(db, {} as any));
+      await restarted.handleClick(token,undefined,'Mozilla/5.0 Chrome/131');
+      expect(validate).toHaveBeenCalledTimes(1);
       await expect(delivery.handleClick(token,'192.0.2.11','Mozilla/5.0 Chrome/130')).resolves.toContain('cf_click=');
-      expect(validate).toHaveBeenCalledTimes(2);
+      expect(validate).toHaveBeenCalledTimes(1);
       const pending=(await pool.query("select interaction_id, recording_reason from ads_clicks where recording_reason is not null")).rows;
       expect(pending).toEqual([{interaction_id:null,recording_reason:'IP_BINDING_MISMATCH'}]);
+      // Reproduce the durable state when ingestion commits and the link write is lost.
+      const linkage = await pool.query("update ads_clicks r set interaction_id=null, recording_reason='RECORDING_UNCONFIRMED' from ads_interactions i where r.interaction_id=i.id and i.event_id=r.id and i.is_valid returning r.id");
+      expect(linkage.rowCount).toBe(1);
       // A historical unlinked receipt has no persisted reason.
       await db.insert(schema.adsClicks).values({clickId:'clk_fixture_historical',serveId:serve.id,
         campaignId:f.campaign.id,promoterId:f.promoter.id,expiresAt:new Date(Date.now()+3600000)});
@@ -974,9 +978,9 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
         await pool.query("update billing_transactions set status='completed' where id=$1",[item.billingTransactionId]);
         await db.insert(schema.billingTransactions).values([
           {userId:owner,type:'internal_credit',provider:'internal',status:'completed',reference:randomUUID(),
-            idempotencyKey:'ads-rejection:v1:'+randomUUID(),amountUsdCents:3,metadata:JSON.stringify({campaignId:f.campaign.id})},
+            idempotencyKey:'ads-rejection:v1:'+randomUUID(),amountUsdCents:3,createdAt:new Date(Date.now()-1000),metadata:JSON.stringify({campaignId:f.campaign.id})},
           {userId:f.publisher,type:'internal_debit',provider:'internal',status:'completed',reference:randomUUID(),
-            idempotencyKey:'ads-recovery:v1:'+randomUUID(),amountUsdCents:1,metadata:JSON.stringify({itemId:item.id})},
+            idempotencyKey:'ads-recovery:v1:'+randomUUID(),amountUsdCents:1,createdAt:new Date(Date.now()-1000),metadata:JSON.stringify({itemId:item.id})},
         ]);
       }
       const advertiser=await get(range,owner);
