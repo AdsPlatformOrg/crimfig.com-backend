@@ -1802,11 +1802,13 @@ export class DeliveryService {
       const rejection = upstreamStatus === null ? undefined : rejectionReasons[upstreamStatus];
       const reasonCode = error instanceof DeliveryDeadlineError ? 'DELIVERY_DEADLINE_EXCEEDED' :
         (error instanceof OpportunityConflictError ? error.reasonCode : undefined) ?? rejection ?? 'BILLING_OUTCOME_UNCONFIRMED';
+      const capacityDetails = error instanceof OpportunityConflictError ? error.capacityDetails : undefined;
       const attemptOutcome = rejection ? 'rejected' : 'unconfirmed';
       return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
         promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',
         candidateCount: auctionResult.decisionSnapshot.candidateCount,
         excludedCandidates: [{ reasonCode, stage: billingStage, campaignId: finalCampaignId, creativeId: finalCreativeId,
+          ...(capacityDetails ? { capacityDetails } : {}),
           deliveryEvaluation: auctionResult.decisionSnapshot.evaluatedCandidates?.[0]?.deliveryEvaluation ?? deliveryEvaluation,
           parentOpportunityId: requestId,
           transportRequestId: requestHeaders?.transportRequestId ?? null,

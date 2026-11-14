@@ -239,11 +239,19 @@ export class PaystackService {
         redirect: 'error', signal: AbortSignal.timeout(10000),
       });
       const json: any = await res.json();
-      if (!res.ok || json.status !== true || !Array.isArray(json.data)) throw new Error('Bank directory unavailable');
-      return json.data;
-    } catch (err: any) {
-      this.logger.error(`listBanks error: ${err.message}`);
-      throw new ServiceUnavailableException('Bank directory is temporarily unavailable');
+      if (!res.ok || json.status !== true || !Array.isArray(json.data) || !json.data.length || json.data.some((bank: any) =>
+        !bank || typeof bank.name !== 'string' || !bank.name.trim() || typeof bank.code !== 'string' || !bank.code.trim() ||
+        typeof bank.slug !== 'string' || !Number.isSafeInteger(bank.id))) throw new Error('Bank directory unavailable');
+      return json.data.map(({ name, code, slug, id }: { name: string; code: string; slug: string; id: number }) => ({ name, code, slug, id }));
+    } catch (err: unknown) {
+      const response = err instanceof ServiceUnavailableException ? err.getResponse() : null;
+      const upstreamCode = response && typeof response === 'object' && 'code' in response ? response.code : null;
+      const code = typeof upstreamCode === 'string' && [
+        'PROVIDER_GATEWAY_NOT_CONFIGURED', 'PROVIDER_WORKLOAD_NOT_CONFIGURED', 'PROVIDER_RECEIPT_KEYS_NOT_CONFIGURED',
+        'PROVIDER_GATEWAY_UNAVAILABLE', 'PROVIDER_GATEWAY_RECEIPT_UNCONFIRMED',
+      ].includes(upstreamCode) ? upstreamCode : 'BANK_DIRECTORY_UNAVAILABLE';
+      this.logger.warn(`Bank directory unavailable (${code})`);
+      throw new ServiceUnavailableException({ statusCode: 503, error: 'Service Unavailable', code, message: 'Bank directory is temporarily unavailable' });
     }
   }
 

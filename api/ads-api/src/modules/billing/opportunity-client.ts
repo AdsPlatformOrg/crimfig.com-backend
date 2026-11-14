@@ -2,7 +2,11 @@ import {Injectable,ServiceUnavailableException,ConflictException} from '@nestjs/
 import {ConfigService} from '@nestjs/config';
 import {AD_AUTHORITY_VERSION} from '@crimfig/shared';
 import type {OpportunityInput} from '../../../../billing-api/src/modules/ecosystem/ad-opportunity.service';
-import {opportunityConflictCodes, type OpportunityConflictCode} from '../../../../billing-api/src/modules/ecosystem/ad-opportunity-conflict-codes';
+import {
+  opportunityConflictCodes,
+  type OpportunityCapacityDetails,
+  type OpportunityConflictCode,
+} from '../../../../billing-api/src/modules/ecosystem/ad-opportunity-conflict-codes';
 export interface OpportunityReceipt {authorityVersion:string;reservationId:string;opportunityId:string;campaignId:string;escrowId:string;escrowAllocatedUsdCents:number;submissionId:string;contentRevision:number;creativeId:string;serveId:string|null;promoterId:string;websiteId:string;slotId:string;policyVersion:string;state:string;priceNanos:string;eventDeadline:string;ingestDeadline:string;expiresAt:string;bindingFingerprint:string;}
 export class OpportunityHttpError extends ServiceUnavailableException {
   constructor(readonly upstreamStatus: number) {
@@ -10,9 +14,37 @@ export class OpportunityHttpError extends ServiceUnavailableException {
   }
 }
 export class OpportunityConflictError extends ConflictException {
-  constructor(readonly reasonCode?: OpportunityConflictCode) {
+  constructor(
+    readonly reasonCode?: OpportunityConflictCode,
+    readonly capacityDetails?: OpportunityCapacityDetails,
+  ) {
     super('Opportunity eligibility or capacity changed');
   }
+}
+const CAPACITY_LIMIT_TYPES = new Set(['reservable_escrow', 'daily_budget', 'hourly_pacing', 'frequency_cap']);
+const CAPACITY_UNITS = new Set(['usd_nanos', 'impressions_per_day']);
+function parseCapacityDetails(value: unknown): OpportunityCapacityDetails | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.limitType !== 'string' || !CAPACITY_LIMIT_TYPES.has(raw.limitType)) return undefined;
+  if (typeof raw.unit !== 'string' || !CAPACITY_UNITS.has(raw.unit)) return undefined;
+  if (raw.decision !== 'rejected_house_fallback') return undefined;
+  return {
+    limitType: raw.limitType as OpportunityCapacityDetails['limitType'],
+    unit: raw.unit as OpportunityCapacityDetails['unit'],
+    allowanceNanos: typeof raw.allowanceNanos === 'string' && /^\d{1,24}$/.test(raw.allowanceNanos) ? raw.allowanceNanos : undefined,
+    usedOrReservedNanos: typeof raw.usedOrReservedNanos === 'string' && /^\d{1,24}$/.test(raw.usedOrReservedNanos) ? raw.usedOrReservedNanos : undefined,
+    requestedNanos: typeof raw.requestedNanos === 'string' && /^\d{1,24}$/.test(raw.requestedNanos) ? raw.requestedNanos : undefined,
+    availableNanos: typeof raw.availableNanos === 'string' && /^\d{1,24}$/.test(raw.availableNanos) ? raw.availableNanos : undefined,
+    outstandingReservedNanos: typeof raw.outstandingReservedNanos === 'string' && /^\d{1,24}$/.test(raw.outstandingReservedNanos) ? raw.outstandingReservedNanos : undefined,
+    carryNanos: typeof raw.carryNanos === 'string' && /^\d{1,24}$/.test(raw.carryNanos) ? raw.carryNanos : undefined,
+    remainingBudgetNanos: typeof raw.remainingBudgetNanos === 'string' && /^\d{1,24}$/.test(raw.remainingBudgetNanos) ? raw.remainingBudgetNanos : undefined,
+    allowanceCount: typeof raw.allowanceCount === 'number' && Number.isFinite(raw.allowanceCount) ? raw.allowanceCount : undefined,
+    usedCount: typeof raw.usedCount === 'number' && Number.isFinite(raw.usedCount) ? raw.usedCount : undefined,
+    requestedCount: typeof raw.requestedCount === 'number' && Number.isFinite(raw.requestedCount) ? raw.requestedCount : undefined,
+    availableCount: typeof raw.availableCount === 'number' && Number.isFinite(raw.availableCount) ? raw.availableCount : undefined,
+    decision: 'rejected_house_fallback',
+  };
 }
 @Injectable()
 export class OpportunityClient {
@@ -24,7 +56,10 @@ export class OpportunityClient {
       const payload: unknown = await response.json().catch(() => null);
       const code = payload && typeof payload === 'object' && 'code' in payload ? payload.code : undefined;
       const reason = opportunityConflictCodes.find(value => value === code);
-      throw new OpportunityConflictError(reason);
+      const capacityDetails = payload && typeof payload === 'object' && 'capacityDetails' in payload
+        ? parseCapacityDetails((payload as { capacityDetails?: unknown }).capacityDetails)
+        : undefined;
+      throw new OpportunityConflictError(reason, capacityDetails);
     }
     if(!response.ok)throw new OpportunityHttpError(response.status);
     const json:any=await response.json();if(json.status!=='success'||!json.data)throw new Error('Invalid acknowledgement');return json.data;

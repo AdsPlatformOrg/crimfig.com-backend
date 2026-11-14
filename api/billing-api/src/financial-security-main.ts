@@ -52,8 +52,14 @@ export async function startFinancialAuthority() {
     const approval = new ProviderApprovalGate(store, authKeys, () => executor.available());
     const server = createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'no-store'); res.setHeader('Content-Type', 'application/json');
+      if (req.method === 'GET' && req.url === '/api/v1/health') {
+        res.writeHead(200).end(JSON.stringify({ status: 'ok', service: 'financial-authority' })); return;
+      }
       const providerApproval = req.url === `/provider/paystack/${environment}/approval`;
-      if (req.method !== 'POST' || (!providerApproval && !req.url?.startsWith('/internal/v1/withdrawals/'))) { res.writeHead(404).end('{}'); return; }
+      const privateRoute = ['/internal/v1/withdrawals/prepare', '/internal/v1/withdrawals/authorize',
+        '/internal/v1/withdrawals/execute', '/internal/v1/withdrawals/review', '/internal/v1/withdrawals/availability',
+        '/internal/v1/withdrawals/challenge', '/internal/v1/provider/request', '/internal/v1/provider/webhook'].includes(req.url || '');
+      if (req.method !== 'POST' || (!providerApproval && !privateRoute)) { res.writeHead(404).end('{}'); return; }
       try {
         const chunks: Buffer[] = []; let size = 0;
         for await (const chunk of req) { const bytes = Buffer.from(chunk); size += bytes.length;
@@ -68,7 +74,7 @@ export async function startFinancialAuthority() {
       } catch { res.writeHead(403).end(JSON.stringify({ error: 'Financial authority request rejected or unavailable' })); }
     });
     server.requestTimeout = 10000; server.headersTimeout = 5000;
-    const port = Number(process.env.FINANCIAL_AUTHORITY_PORT || 4101);
+    const port = Number(process.env.FINANCIAL_AUTHORITY_PORT || process.env.PORT || 4101);
     if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid authority port');
     server.listen(port, process.env.FINANCIAL_AUTHORITY_BIND_ADDRESS || '127.0.0.1');
     server.on('close', () => { void authorityPool.end(); void sourcePool.end(); });

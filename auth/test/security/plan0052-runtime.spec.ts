@@ -44,4 +44,28 @@ describe('PLAN-0052 isolated runtime composition (no listener or database starte
     pools(); const server = await startFinancialAuthority(); expect(server.listen).toHaveBeenCalled();
     expect(createServer).toHaveBeenCalledTimes(1);
   });
+  test.each(['/internal/v1/provider/request', '/internal/v1/provider/webhook'])('provider route %s reaches authenticated API handling', async path => {
+    pools(); await startFinancialAuthority();
+    const handler = (createServer as jest.Mock).mock.calls[0][0];
+    const response: any = { setHeader: jest.fn(), writeHead: jest.fn().mockReturnThis(), end: jest.fn() };
+    const request = { method: 'POST', url: path, async *[Symbol.asyncIterator]() { yield Buffer.from('{}'); } };
+    await handler(request, response);
+    // Missing workload signatures are rejected by API handling, never hidden behind a route 404.
+    expect(response.writeHead).toHaveBeenCalledWith(403);
+  });
+  test('unknown routes remain inaccessible', async () => {
+    pools(); await startFinancialAuthority();
+    const handler = (createServer as jest.Mock).mock.calls[0][0];
+    const response: any = { setHeader: jest.fn(), writeHead: jest.fn().mockReturnThis(), end: jest.fn() };
+    await handler({ method: 'POST', url: '/internal/v1/provider/arbitrary' }, response);
+    expect(response.writeHead).toHaveBeenCalledWith(404);
+  });
+  test('health route returns service identity without operational secrets', async () => {
+    pools(); await startFinancialAuthority();
+    const handler = (createServer as jest.Mock).mock.calls[0][0];
+    const response: any = { setHeader: jest.fn(), writeHead: jest.fn().mockReturnThis(), end: jest.fn() };
+    await handler({ method: 'GET', url: '/api/v1/health' }, response);
+    expect(response.writeHead).toHaveBeenCalledWith(200);
+    expect(JSON.parse(response.end.mock.calls[0][0])).toEqual({ status: 'ok', service: 'financial-authority' });
+  });
 });

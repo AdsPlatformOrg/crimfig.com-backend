@@ -114,7 +114,9 @@ try {
       if (run.status !== 0) throw new Error(`Migration verification failed: ${run.stderr}`);
       if (args[0].includes('preflight')) {
         const line = run.stdout.split('\n').find(value => value.includes('Missing current columns:'));
-        if (!line || !line.endsWith('[]')) throw new Error('Registered migrations do not match application columns');
+        if (!line?.trimEnd().endsWith('[]')) {
+          throw new Error(line?.trim() || 'Migration preflight did not report application columns');
+        }
       }
     }
     const corrupt = `const {createRequire}=require('node:module');const load=createRequire(require('node:path').resolve('database/package.json'));
@@ -144,7 +146,7 @@ try {
   if (providerEnv && !providerEnv.startsWith(root + path.sep)) throw new Error('Provider configuration must be inside this backend workspace');
   if (process.argv.includes('--plan0099-sort')) fs.mkdirSync(path.resolve(root, '../docs/reviews/plan-0099'), { recursive: true });
   const result = spawnSync(process.execPath, ['node_modules/jest/bin/jest.js', '--config', 'auth/jest.config.js',
-    '--runInBand', '--runTestsByPath', ...(process.argv.includes('--plan0099-sort') ? ['auth/test/security/plan0099-sort-postgres.spec.ts','--json','--outputFile=../docs/reviews/plan-0099/backend-sort-integration-results.json'] : process.argv.includes('--moderation') ? ['auth/test/security/plan0077-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0077/backend-integration-results.json'] : ['auth/test/security/funding-postgres.spec.ts']),
+    '--runInBand', '--runTestsByPath', ...(process.argv.includes('--plan0099-sort') ? ['auth/test/security/plan0099-sort-postgres.spec.ts','--json','--outputFile=../docs/reviews/plan-0099/backend-sort-integration-results.json'] : process.argv.includes('--gateway') ? ['auth/test/security/plan0097-gateway-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0097/gateway-integration-results.json'] : process.argv.includes('--moderation') ? ['auth/test/security/plan0077-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0077/backend-integration-results.json'] : ['auth/test/security/funding-postgres.spec.ts']),
     ...(process.argv.includes('--delivery-readiness') ? ['--testNamePattern','PLAN0079 owner-scoped','--json','--outputFile=../docs/reviews/plan-0079/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0081-readiness') ? ['--testNamePattern','PLAN0081 readiness','--json','--outputFile=../docs/reviews/plan-0081/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0091') ? ['--testNamePattern','PLAN0079 owner-scoped|PLAN0080 website policy|funded settlement races|CPM fractions survive|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0091/backend-integration-results.json'] : []),
@@ -154,6 +156,7 @@ try {
     ...(process.argv.includes('--plan0095') ? ['--testNamePattern','PLAN0092 Billing|funded settlement races|CPM fractions survive|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0095/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0099') ? ['--testNamePattern','PLAN0099 Trash|PLAN0092 Billing HTTP'] : []),
     ...(process.argv.includes('--plan0096') ? ['--testNamePattern','PLAN0096 matched|PLAN0092 Billing HTTP','--json','--outputFile=../docs/reviews/plan-0096/backend-integration-results.json'] : []),
+    ...(process.argv.includes('--plan0097') ? ['--testNamePattern','PLAN0097 missing gateway|verified funding callback and webhook credit once','--json','--outputFile=../docs/reviews/plan-0097/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0104') ? ['--testNamePattern','PLAN0104|PLAN0102 daily reports|PLAN0103 network and legacy|PLAN0101 advertiser','--json','--outputFile=../docs/reviews/plan-0104/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0102-reports') ? ['--testNamePattern','PLAN0102 daily reports','--json','--outputFile=../docs/reviews/plan-0102/reports-integration-results.json'] : []),
     ...(process.argv.includes('--plan0103-settlement') ? ['--testNamePattern','PLAN0092 Billing|funded settlement races|unproven legacy events|CPM fractions survive','--json','--outputFile=../docs/reviews/plan-0103/settlement-integration-results.json'] : []),

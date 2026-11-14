@@ -18,6 +18,12 @@ export class PaystackProviderBroker {
     if(!allowed)throw new Error('Provider broker operation denied');
     const response=await this.request(`https://api.paystack.co${input.path}`,{method:input.method,redirect:'error',signal:AbortSignal.timeout(10000),
       headers:{Authorization:`Bearer ${this.secret}`,'Content-Type':'application/json'},...(input.method==='POST'?{body:JSON.stringify(input.body)}:{})});
-    return {status:response.status,body:await response.json()};
+    const body = await response.json();
+    if (input.path === '/bank?country=nigeria&perPage=100' && body && typeof body === 'object' && 'data' in body && Array.isArray(body.data)) {
+      return { status: response.status, body: { status: 'status' in body ? body.status : undefined, data: body.data.map((bank: any) => ({
+        name: bank?.name, code: bank?.code, slug: bank?.slug, id: bank?.id,
+      })) } };
+    }
+    return {status:response.status,body};
   }
 }

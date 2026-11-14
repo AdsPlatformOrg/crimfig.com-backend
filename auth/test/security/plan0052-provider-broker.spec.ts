@@ -17,4 +17,12 @@ describe('isolated provider credential broker',()=>{
     expect(request.mock.calls[0][0]).toBe('https://api.paystack.co/transaction/verify/reference');
     expect(request.mock.calls[0][1].headers.Authorization).toBe('Bearer '+secret);
   });
+  test('large bank directory projects public fields before receipt signing', async () => {
+    const banks = Array.from({ length: 300 }, (_, id) => ({ id, name: 'Fixture Bank', code: String(id), slug: 'fixture', providerMetadata: 'x'.repeat(500) }));
+    const request = jest.fn().mockResolvedValue({ status: 200, json: async () => ({ status: true, data: banks }) });
+    const result: any = await new PaystackProviderBroker(secret, request).call({ path: '/bank?country=nigeria&perPage=100', method: 'GET' });
+    expect(result.body.data).toHaveLength(300);
+    expect(result.body.data[0]).toEqual({ id: 0, name: 'Fixture Bank', code: '0', slug: 'fixture' });
+    expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(65536);
+  });
 });

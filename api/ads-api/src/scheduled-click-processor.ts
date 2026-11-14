@@ -17,6 +17,7 @@ import { AdSettlementService } from '../../billing-api/src/modules/ecosystem/ad-
 import { CampaignEscrowService } from '../../billing-api/src/modules/ecosystem/campaign-escrow.service';
 import { applyEventCashRebates, restoreOverturnedEventCash } from './event-cash-rebate-reconciliation';
 import { houseCfigCorrectionPreview, reconcileHouseCfigCorrections } from './house-cfig-correction-preview';
+import { recordPublisherTrafficQualityObservations } from './publisher-traffic-quality-observer';
 import { reconcilePaidPointsCorrections, recordPaidPointsCorrectionObservations } from './paid-points-correction-preview';
 import { runClickAuditWindows } from './scheduled-click-audits';
 
@@ -142,6 +143,7 @@ export async function processScheduledClicks() {
     const houseReconciliation = await reconcileHouseCfigCorrections(db, window);
     const points = await recordPaidPointsCorrectionObservations(db, window);
     const house = await houseCfigCorrectionPreview(db, window);
+    const trafficQuality = await recordPublisherTrafficQualityObservations(db, { endAt: new Date(window.upper) });
     return {
       status: 'processed',
       candidates: candidates.rows.length,
@@ -149,6 +151,7 @@ export async function processScheduledClicks() {
       cashRestores,
       pointsReconciliation,
       houseReconciliation,
+      trafficQuality,
       houseAwardsWithUnsupportedBalance: house.filter(award =>
         award.pendingMicroCfig !== '0' || award.availableMicroCfig !== '0' || award.convertedMicroCfig !== '0').length,
       pointsCohortsWithUnsupportedAwards: points.filter(cohort => cohort.unsupportedPoints !== '0').length,

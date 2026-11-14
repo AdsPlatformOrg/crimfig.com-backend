@@ -1,6 +1,6 @@
 import { selectGeneralSlotImage } from '../../../../ads-api/src/modules/uploads/image-ad-presets';
 import { resolveGeneralSlotCreativeTypes, resolveSlotCreativeTypes } from './creative-slot-policy';
-import type { OpportunityConflictCode } from './ad-opportunity-conflict-codes';
+import type { OpportunityCapacityDetails, OpportunityConflictCode } from './ad-opportunity-conflict-codes';
 import {BadRequestException,ConflictException,Inject,Injectable,NotFoundException,ServiceUnavailableException} from '@nestjs/common';
 import {randomUUID} from 'crypto';
 import {and,eq,sql} from 'drizzle-orm';
@@ -8,8 +8,14 @@ import * as s from '@crimfig/database/schema';
 import {adEventJournalMatches,adDigest,approvedAdPolicy,appendAdEvidence,AD_AUTHORITY_VERSION,EVENT_WINDOW_MS,INGEST_TOLERANCE_MS,NANO_CENT,stableAdValue,validEvidenceSignature} from '@crimfig/shared';
 import {currentApproval} from '../../../../ads-api/src/modules/campaigns/campaign-workflow';
 import {eventPriceNanos,reservePriceMicrosForModel,auctionScoreMicros} from '../../../../ads-api/src/modules/delivery/pricing-contract';
-function opportunityConflict(code: OpportunityConflictCode, message: string) {
-  return new ConflictException({ statusCode: 409, code, message });
+function opportunityConflict(
+  code: OpportunityConflictCode,
+  message: string,
+  capacityDetails?: OpportunityCapacityDetails,
+) {
+  return new ConflictException(
+    capacityDetails ? { statusCode: 409, code, message, capacityDetails } : { statusCode: 409, code, message },
+  );
 }
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export interface OpportunityInput {
@@ -95,8 +101,68 @@ export class AdOpportunityService {
       const u=(usage.rows??usage)[0];
       const carry=await tx.execute(sql`SELECT coalesce(sum(carry_nanos),0)::text AS nanos FROM ads_settlement_carries WHERE escrow_id=${escrow.id} AND allocated_usd_cents=${escrow.allocatedUsdCents}`);
       const remaining=BigInt(Math.min(c.remainingBudgetUsdCents,escrow.allocatedUsdCents-escrow.consumedUsdCents-escrow.refundedUsdCents))*NANO_CENT;
-      if(BigInt(u.outstanding)+BigInt((carry.rows??carry)[0].nanos)+price>remaining||c.dailyBudgetUsdCents!=null&&BigInt(u.daily)+price>BigInt(c.dailyBudgetUsdCents)*NANO_CENT||
-        c.hourlyPacingUsdCents!=null&&BigInt(u.hourly)+price>BigInt(c.hourlyPacingUsdCents)*NANO_CENT||u.frequency>=c.frequencyCapPerDay)throw opportunityConflict('BILLING_CAPACITY_UNAVAILABLE','Opportunity capacity is unavailable');
+      const outstandingNanos = BigInt(u.outstanding);
+      const carryNanos = BigInt((carry.rows ?? carry)[0].nanos);
+      const escrowUsedNanos = outstandingNanos + carryNanos;
+      if (escrowUsedNanos + price > remaining) {
+        const availableNanos = remaining > escrowUsedNanos ? remaining - escrowUsedNanos : 0n;
+        throw opportunityConflict('INSUFFICIENT_RESERVABLE_ESCROW', 'Insufficient reservable campaign escrow', {
+          limitType: 'reservable_escrow',
+          unit: 'usd_nanos',
+          allowanceNanos: remaining.toString(),
+          usedOrReservedNanos: escrowUsedNanos.toString(),
+          requestedNanos: price.toString(),
+          availableNanos: availableNanos.toString(),
+          outstandingReservedNanos: outstandingNanos.toString(),
+          carryNanos: carryNanos.toString(),
+          remainingBudgetNanos: remaining.toString(),
+          decision: 'rejected_house_fallback',
+        });
+      }
+      if (c.dailyBudgetUsdCents != null) {
+        const dailyAllowanceNanos = BigInt(c.dailyBudgetUsdCents) * NANO_CENT;
+        const dailyUsedNanos = BigInt(u.daily);
+        if (dailyUsedNanos + price > dailyAllowanceNanos) {
+          const availableNanos = dailyAllowanceNanos > dailyUsedNanos ? dailyAllowanceNanos - dailyUsedNanos : 0n;
+          throw opportunityConflict('DAILY_BUDGET_EXHAUSTED', 'Daily campaign budget exhausted', {
+            limitType: 'daily_budget',
+            unit: 'usd_nanos',
+            allowanceNanos: dailyAllowanceNanos.toString(),
+            usedOrReservedNanos: dailyUsedNanos.toString(),
+            requestedNanos: price.toString(),
+            availableNanos: availableNanos.toString(),
+            decision: 'rejected_house_fallback',
+          });
+        }
+      }
+      if (c.hourlyPacingUsdCents != null) {
+        const hourlyAllowanceNanos = BigInt(c.hourlyPacingUsdCents) * NANO_CENT;
+        const hourlyUsedNanos = BigInt(u.hourly);
+        if (hourlyUsedNanos + price > hourlyAllowanceNanos) {
+          const availableNanos = hourlyAllowanceNanos > hourlyUsedNanos ? hourlyAllowanceNanos - hourlyUsedNanos : 0n;
+          throw opportunityConflict('HOURLY_PACING_EXHAUSTED', 'Hourly campaign pacing exhausted', {
+            limitType: 'hourly_pacing',
+            unit: 'usd_nanos',
+            allowanceNanos: hourlyAllowanceNanos.toString(),
+            usedOrReservedNanos: hourlyUsedNanos.toString(),
+            requestedNanos: price.toString(),
+            availableNanos: availableNanos.toString(),
+            decision: 'rejected_house_fallback',
+          });
+        }
+      }
+      if (u.frequency >= c.frequencyCapPerDay) {
+        const availableCount = Math.max(0, c.frequencyCapPerDay - u.frequency);
+        throw opportunityConflict('FREQUENCY_CAP_REACHED', 'Visitor daily frequency cap reached', {
+          limitType: 'frequency_cap',
+          unit: 'impressions_per_day',
+          allowanceCount: c.frequencyCapPerDay,
+          usedCount: u.frequency,
+          requestedCount: 1,
+          availableCount,
+          decision: 'rejected_house_fallback',
+        });
+      }
       let artwork=creative.imageUrl;
       if (supply.slot.format === 'general' && creative.adType === 'image' && (!creative.mediaAssetId || !input.selectedImageUrl)) {
         throw opportunityConflict('BILLING_RENDITION_INVALID', 'General slots require a validated image rendition');
