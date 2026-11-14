@@ -113,7 +113,53 @@ export class AdClearanceService {
           // Keep PostgreSQL microsecond precision; a JS Date truncates this boundary.
           lte(s.adsSettlementClaims.createdAt, sql`(select created_at from ads_promoter_settlement_items where id = ${item.id})`)))
         .for('share', { of: s.adsInteractions });
-      if (!claims.length || claims.some(({ event }) => !event.isValid || event.verificationVersion !== 2)) throw new ConflictException('Claimed activity requires fraud reconciliation');
+      if (!claims.length || claims.some(({ event }) => event.verificationVersion !== 2)) {
+        throw new ConflictException('Claimed activity requires fraud reconciliation');
+      }
+      if (claims.some(({ event }) => !event.isValid && event.id === meta.settlementClaimId)) {
+        throw new ConflictException('Claimed activity requires fraud reconciliation');
+      }
+      const priorInvalidIds = claims
+        .filter(({ event }) => !event.isValid && event.id !== meta.settlementClaimId)
+        .map(({ event }) => event.id);
+      if (priorInvalidIds.length) {
+        const reconciledRows = await tx
+          .select({
+            eventId: sql<string>`(${s.billingProviderEvents.rawPayload}->>'eventId')`,
+            rebateCents: sql<number>`coalesce((${s.billingProviderEvents.rawPayload}->>'rebateUsdCents')::int, 0)`,
+            assessmentId: sql<string>`(${s.billingProviderEvents.rawPayload}->>'assessmentId')`,
+          })
+          .from(s.billingProviderEvents)
+          .where(
+            and(
+              eq(s.billingProviderEvents.provider, 'paystack'),
+              eq(s.billingProviderEvents.eventType, 'internal.ad.rejection'),
+              eq(s.billingProviderEvents.processed, true),
+              sql`${s.billingProviderEvents.reference} like ${'internal.ad.event_rejection:' + meta.escrowId + ':' + promoter.id + ':%'}`,
+              inArray(sql`(${s.billingProviderEvents.rawPayload}->>'eventId')`, priorInvalidIds),
+            ),
+          )
+          .orderBy(sql`${s.billingProviderEvents.createdAt} asc`, sql`${s.billingProviderEvents.id} asc`);
+        const reconciledByEvent = new Map(reconciledRows.map((row) => [row.eventId, row]));
+        for (const priorId of priorInvalidIds) {
+          const proofRow = reconciledByEvent.get(priorId);
+          if (!proofRow) throw new ConflictException('Claimed activity requires fraud reconciliation');
+          if ((proofRow.rebateCents ?? 0) > 0) {
+            const [creditTx] = await tx
+              .select({ id: s.billingTransactions.id })
+              .from(s.billingTransactions)
+              .where(
+                and(
+                  eq(s.billingTransactions.type, 'internal_credit'),
+                  eq(s.billingTransactions.status, 'completed'),
+                  eq(s.billingTransactions.idempotencyKey, `ads-rejection:v1:event:${priorId}:${proofRow.assessmentId}`),
+                ),
+              )
+              .limit(1);
+            if (!creditTx) throw new ConflictException('Claimed activity requires fraud reconciliation');
+          }
+        }
+      }
       await tx.insert(s.billingWallets).values({ userId: promoter.userId }).onConflictDoNothing({ target: s.billingWallets.userId });
       const [wallet] = await tx.select().from(s.billingWallets).where(eq(s.billingWallets.userId, promoter.userId)).for('update');
       const balance = wallet.balanceUsdCents + item.earnedUsdCents;
@@ -122,7 +168,8 @@ export class AdClearanceService {
       let finalBalance = balance, availableEarnings = item.earnedUsdCents;
       const offsets: { penaltyId: string; amountUsdCents: number }[] = [];
       const penalties = await tx.select().from(s.adsPromoterPenalties).where(and(
-        eq(s.adsPromoterPenalties.promoterId, promoter.id), eq(s.adsPromoterPenalties.reasonCode, 'funded_claim_chain_rejected'),
+        eq(s.adsPromoterPenalties.promoterId, promoter.id),
+        inArray(s.adsPromoterPenalties.reasonCode, ['funded_claim_chain_rejected', 'invalidated_click_event']),
         sql`${s.adsPromoterPenalties.status} in ('outstanding','partially_recovered')`))
         .orderBy(asc(s.adsPromoterPenalties.createdAt), asc(s.adsPromoterPenalties.id)).for('update');
       for (const penalty of penalties) {
@@ -147,7 +194,7 @@ export class AdClearanceService {
         await tx.update(s.adsPromoterPenalties).set({ recoveredAmountUsdCents: recovered,
           status: recovered === debt ? 'fully_recovered' : 'partially_recovered', updatedAt: now }).where(eq(s.adsPromoterPenalties.id, penalty.id));
         if (recovered === debt) {
-          const recoveredIds = evidence.snapshot.items.filter((row: any) => row.released).map((row: any) => row.id);
+          const recoveredIds = evidence.snapshot.items.filter((row: any) => row.released && typeof row.id === 'string').map((row: any) => row.id);
           if (recoveredIds.length) await tx.update(s.adsPromoterSettlementItems).set({ clearanceStatus: 'clawed_back' })
             .where(and(inArray(s.adsPromoterSettlementItems.id, recoveredIds), eq(s.adsPromoterSettlementItems.clearanceStatus, 'recovery_pending')));
         }

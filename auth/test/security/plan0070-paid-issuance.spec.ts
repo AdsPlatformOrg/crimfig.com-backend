@@ -166,6 +166,7 @@ describe("audited paid loop issuance and independent prestige", () => {
         rows = [
           {
             total: patch.prior ?? (r.pricing_model === "cpc" ? "99" : "19999"),
+            issued: patch.issued ?? "0",
           },
         ];
       return { rows };

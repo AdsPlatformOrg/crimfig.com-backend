@@ -10,25 +10,39 @@ export class AdOpportunityWorker implements OnModuleInit,OnModuleDestroy {
   constructor(@Inject('DATABASE_CONNECTION')private readonly db:any,private readonly authority:AdOpportunityService,private readonly settlement:AdSettlementService,private readonly escrows:CampaignEscrowService){}
   onModuleInit(){if(process.env.ADS_OPPORTUNITY_WORKER_ENABLED==='true'){this.timer=setInterval(()=>{void this.tick();},30000);this.timer.unref();}}
   onModuleDestroy(){if(this.timer)clearInterval(this.timer);}
-  async tick(){if(this.busy)return;this.busy=true;try{
-    await this.authority.reconcile();
+  async tick(scope?: { campaigns: string[]; start: string; deadline: number }) {
+    if (this.busy || (scope && !scope.campaigns.length)) return;
+    const campaigns = scope && sql.join(scope.campaigns.map(id => sql`${id}::uuid`), sql`, `);
+    const hasTime = () => !scope || Date.now() < scope.deadline;
+    this.busy = true;
+    try {
+    await this.authority.reconcile(scope?.campaigns);
     const events=await this.db.execute(sql`SELECT r.id,e.id AS event_id FROM ads_opportunity_reservations r JOIN ads_interactions e ON e.serve_id=r.serve_id
-      WHERE r.state='ISSUED' AND NOT r.is_simulated AND e.created_at<=r.event_deadline AND e.verification_version=2 AND e.financial_eligibility='pending'
+      WHERE r.state='ISSUED' AND NOT r.is_simulated
+      ${scope ? sql`AND r.campaign_id IN (${campaigns}) AND r.pricing_model = 'cpc' AND e.created_at >= ${scope.start}::timestamptz
+        AND (SELECT a.outcome FROM ads_event_assessments a WHERE a.event_id=e.id ORDER BY a.created_at DESC,a.id DESC LIMIT 1)='eligible'` : sql``} AND e.created_at<=r.event_deadline AND e.verification_version=2 AND e.financial_eligibility='pending'
       AND e.type=(CASE WHEN r.pricing_model='cpc' THEN 'click' ELSE 'viewable_impression' END)::ads_interaction_type ORDER BY e.created_at,e.id LIMIT 100`);
-    for(const e of events.rows)try{await this.authority.claim(e.id,e.event_id);}catch{/* Retained for assessment; never reports financial success. */}
+    for(const e of events.rows)if(hasTime())try{await this.authority.claim(e.id,e.event_id);}catch{/* Retained for assessment; never reports financial success. */}
     const rejected=await this.db.execute(sql`SELECT r.id,a.event_id FROM ads_opportunity_reservations r JOIN ads_interactions e ON e.serve_id=r.serve_id AND (r.claim_event_id IS NULL OR r.claim_event_id=e.id) JOIN LATERAL
       (SELECT * FROM ads_event_assessments a WHERE a.event_id=e.id ORDER BY a.created_at DESC,a.id DESC LIMIT 1)a ON true
-      WHERE r.state IN('ISSUED','CLAIMED') AND NOT r.is_simulated AND r.settled_at IS NULL AND a.outcome='invalid' AND e.type=(CASE WHEN r.pricing_model='cpc' THEN 'click' ELSE 'viewable_impression' END)::ads_interaction_type LIMIT 100`);
-    for(const r of rejected.rows)try{await this.authority.reject(r.id,r.event_id);}catch{/* Preserve funded exposure on ambiguous rejection. */}
-    const claims=await this.db.execute(sql`SELECT DISTINCT campaign_id FROM ads_opportunity_reservations r WHERE state='CLAIMED' AND settled_at IS NULL AND NOT is_simulated AND (SELECT a.outcome FROM ads_event_assessments a WHERE a.event_id=r.claim_event_id ORDER BY a.created_at DESC,a.id DESC LIMIT 1)='eligible' LIMIT 100`);
-    const periodEnd=new Date(Math.floor(Date.now()/60000)*60000);
-    for(const c of claims.rows){try{
-      const hex=createHash('sha256').update(`${c.campaign_id}:${periodEnd.toISOString()}`).digest('hex');const requestId=`${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-8${hex.slice(17,20)}-${hex.slice(20,32)}`;
-      await this.settlement.settle(c.campaign_id,requestId,periodEnd);
+      WHERE r.state IN('ISSUED','CLAIMED') AND NOT r.is_simulated AND r.settled_at IS NULL AND a.outcome='invalid'
+      ${scope ? sql`AND r.campaign_id IN (${campaigns}) AND r.pricing_model = 'cpc' AND e.created_at >= ${scope.start}::timestamptz` : sql``} AND e.type=(CASE WHEN r.pricing_model='cpc' THEN 'click' ELSE 'viewable_impression' END)::ads_interaction_type LIMIT 100`);
+    for(const r of rejected.rows)if(hasTime())try{await this.authority.reject(r.id,r.event_id);}catch{/* Preserve funded exposure on ambiguous rejection. */}
+    const periodEnd = new Date();
+    const claims=await this.db.execute(sql`SELECT r.campaign_id, e.id AS event_id, e.created_at::text AS event_at FROM ads_opportunity_reservations r JOIN ads_interactions e ON e.id=r.claim_event_id WHERE e.created_at < ${periodEnd.toISOString()}::timestamptz AND state='CLAIMED' AND settled_at IS NULL AND NOT is_simulated AND (SELECT a.outcome FROM ads_event_assessments a WHERE a.event_id=r.claim_event_id ORDER BY a.created_at DESC,a.id DESC LIMIT 1)='eligible'
+      ${scope ? sql`AND r.campaign_id IN (${campaigns}) AND r.pricing_model = 'cpc'
+        AND e.created_at >= ${scope.start}::timestamptz` : sql``}
+      ORDER BY e.created_at, e.id LIMIT 100`);
+    for(const c of claims.rows){if(!hasTime()) break; try{
+      const eventEnd = new Date(new Date(c.event_at).getTime() + 1);
+      if (eventEnd > periodEnd) continue;
+      const hex=createHash('sha256').update(`opportunity:v1:${c.event_id}`).digest('hex');const requestId=`${hex.slice(0,8)}-${hex.slice(8,12)}-4${hex.slice(13,16)}-8${hex.slice(17,20)}-${hex.slice(20,32)}`;
+      await this.settlement.settle(c.campaign_id,requestId,eventEnd,c.event_id);
     }catch{this.logger.warn('A funded claim remains pending reconciliation.');}}
     const stopped=await this.db.execute(sql`SELECT c.id,c.advertiser_id FROM ads_campaigns c JOIN ads_campaign_escrows e ON e.campaign_id=c.id WHERE c.status IN('paused','trash') AND c.submission_intent_id IS NULL AND e.status='active' AND e.release_pending=true
+      ${scope ? sql`AND c.id IN (${campaigns})` : sql``}
       AND NOT EXISTS(SELECT 1 FROM ads_opportunity_reservations r WHERE r.escrow_id=e.id AND r.escrow_allocated_usd_cents=e.allocated_usd_cents AND NOT r.is_simulated AND r.settled_at IS NULL AND r.state IN('HELD','ISSUED','CLAIMED'))
       AND EXISTS(SELECT 1 FROM ads_opportunity_reservations r WHERE r.escrow_id=e.id AND NOT r.is_simulated) LIMIT 100`);
-    for(const c of stopped.rows)try{await this.escrows.change(c.advertiser_id,c.id,'release');}catch{this.logger.warn('Stopped campaign funding remains retained for reconciliation.');}
-  }catch{this.logger.warn('Opportunity reconciliation did not complete.');}finally{this.busy=false;}}
+    for(const c of stopped.rows)if(hasTime())try{await this.escrows.change(c.advertiser_id,c.id,'release');}catch{this.logger.warn('Stopped campaign funding remains retained for reconciliation.');}
+  }catch(error){this.logger.warn('Opportunity reconciliation did not complete.');if(scope)throw error;}finally{this.busy=false;}}
 }

@@ -4,6 +4,7 @@
     "strictPropertyInitialization": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
+    "paths": { "@crimfig/database/schema": ["../database/schema/index.ts"], "@crimfig/shared": ["../shared/src/index.ts"] },
     "types": ["jest", "node", "multer"]
   },
   "include": ["src/**/*.ts", "test/**/*.ts"],

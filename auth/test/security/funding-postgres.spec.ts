@@ -1,3 +1,8 @@
+import { applyEventCashRebates, restoreOverturnedEventCash } from '../../../api/ads-api/src/event-cash-rebate-reconciliation';
+import { houseCfigCorrectionPreview, reconcileHouseCfigCorrections } from '../../../api/ads-api/src/house-cfig-correction-preview';
+import { paidPointsCorrectionPreview, reconcilePaidPointsCorrections, recordPaidPointsCorrectionObservations } from '../../../api/ads-api/src/paid-points-correction-preview';
+import { evidenceSignature } from '../../../shared/src/ad-authority-policy';
+import { runClickAuditWindows } from '../../../api/ads-api/src/scheduled-click-audits';
 import { ReportsController } from '../../../api/ads-api/src/modules/analytics/reports.controller';
 import { ReportsService } from '../../../api/ads-api/src/modules/analytics/reports.service';
 import { AdOpportunityWorker } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.worker';
@@ -886,7 +891,22 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       await expect(delivery.handleClick('imp_invalid.a',undefined,'Mozilla/5.0 Chrome/130')).rejects.toThrow('invalid or expired');
       expect(validate).not.toHaveBeenCalled();
       await new Promise(resolve => setTimeout(resolve, 350));
+      const failedWrite = jest.spyOn(delivery, 'logInteraction').mockRejectedValueOnce(new Error('injected write failure'));
       expect(await delivery.handleClick(token,undefined,'Mozilla/5.0 Chrome/130')).toMatch(/^https:\/\/example.test\?cf_click=/);
+      failedWrite.mockRestore();
+      const [pendingRecovery] = await db.select().from(schema.adsClicks);
+      expect(pendingRecovery).toMatchObject({ interactionId: null, recordingReason: 'RECORDING_UNCONFIRMED' });
+      const recoveryWorker = new DeliveryService(db, tokens, new AuctionEngineService(), new FraudRulesService(),
+        undefined, new EvidenceService(db, {} as any));
+      const results = await Promise.all([
+        recoveryWorker.recoverRedirectAttempt(pendingRecovery.id),
+        recoveryWorker.recoverRedirectAttempt(pendingRecovery.id),
+      ]);
+      expect(results).toContain(true);
+      expect(await recoveryWorker.recoverRedirectAttempt(pendingRecovery.id)).toBe(false);
+      expect((await db.select().from(schema.adsClicks))[0]).toMatchObject({
+        interactionId: expect.any(String), recovery: null, recordingReason: null,
+      });
       expect(validate).toHaveBeenCalledTimes(1);
       const restarted = new DeliveryService(db,tokens,new AuctionEngineService(),new FraudRulesService(),undefined,new EvidenceService(db, {} as any));
       await restarted.handleClick(token,undefined,'Mozilla/5.0 Chrome/131');
@@ -1298,6 +1318,49 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     expect(await svc.read(actors[1], escrow.id, f.promoter.id)).toHaveLength(2);
     expect((await pool.query('select count(*)::int count from ads_settlement_rebates')).rows[0].count).toBe(0);
   });
+  test('PLAN0104 points preview recomputes the cohort and leaves ledgers untouched', async () => {
+    const f = await settlementFixture();
+    const first = await f.add();
+    const contributing = await f.add();
+    await pool.query('create table reward_performance_receipts (event_id uuid primary key, user_id uuid, model text, payload jsonb)');
+    await pool.query('create table reward_program_issues (source_ref text primary key, kind text, user_id uuid, points integer)');
+    try {
+      const { version, cpc } = require('../../../shared/src/rewards-performance-policy').canonicalPaidRewardLoops();
+      await pool.query("update ads_interactions set is_valid=false where id=$1", [first.event.id]);
+      await pool.query("insert into reward_performance_receipts values ($1,$3,'cpc',$4),($2,$3,'cpc',$4)",
+        [first.event.id, contributing.event.id, f.publisher, {rateVersion: version}]);
+      await pool.query("insert into reward_program_issues values ($1,'paid_loop',$2,$3)",
+        ['paid-loop:' + contributing.event.id, f.publisher, cpc.points]);
+      const window = { lower: '2020-01-01T00:00:00Z', upper: '2099-01-01T00:00:00Z' };
+      const preview = await paidPointsCorrectionPreview(db, window);
+      expect(preview).toEqual([{ promoterUserId: f.publisher, model: 'cpc', eligibleEvents: '1',
+        issuedPoints: String(cpc.points), entitledPoints: '0', unsupportedPoints: String(cpc.points) }]);
+      await pool.query('create table reward_points_correction_observations (id uuid default gen_random_uuid(), user_id uuid, model text, rate_version text, eligible_events bigint, issued_points bigint, entitled_points bigint, unsupported_points bigint, created_at timestamptz default clock_timestamp())');
+      await Promise.all([
+        recordPaidPointsCorrectionObservations(db, window),
+        recordPaidPointsCorrectionObservations(db, window),
+      ]);
+      expect((await pool.query('select count(*)::int as count from reward_points_correction_observations')).rows[0].count).toBe(1);
+      expect((await pool.query('select count(*)::int as count from reward_program_issues')).rows[0].count).toBe(1);
+    } finally {
+      await pool.query('drop table if exists reward_points_correction_observations, reward_program_issues, reward_performance_receipts');
+    }
+  });
+
+  test('PLAN0104 audit windows checkpoint and catch up without financial writes', async () => {
+    const start = '2026-01-01T00:00:00Z';
+    const now = Date.parse('2026-01-01T12:00:00Z');
+    for (let run = 0; run < 3; run++) await runClickAuditWindows(db, start, now);
+    await runClickAuditWindows(db, start, now);
+    const result = await pool.query('select audit_level, status, notes from ads_deep_audit_runs order by run_number');
+    expect(result.rows).toHaveLength(9);
+    for (const row of result.rows) {
+      expect(row.status).toBe('completed');
+      expect(JSON.parse(row.notes).mode).toBe('report-only');
+    }
+    expect((await pool.query("select count(*)::int as count from billing_transactions where type='ads_spend'")).rows[0].count).toBe(0);
+  });
+
   test('PLAN0104 CPC continuity prevents cross-serve debits and allows unknown history', async () => {
     const f = await settlementFixture();
     const key = 'a'.repeat(64);
@@ -1772,6 +1835,668 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     const receipt=(await pool.query('select idempotency_key,status from billing_transactions')).rows[0];
     expect(receipt).toEqual({idempotency_key:'wallet-fund:v2:'+row.id,status:'completed'});
     expect((await pool.query('select count(*)::int n from billing_provider_events where processed')).rows[0].n).toBe(1);
+  });
+
+  test('PLAN0104 house CFIG preview and deterministic cohort replay under original caps', async () => {
+    const prevSecret = process.env.ADS_EVIDENCE_HASH_SECRET;
+    const prevKeyId = process.env.ADS_EVIDENCE_HASH_KEY_ID;
+    process.env.ADS_EVIDENCE_HASH_SECRET = 'plan0104-house-evidence-signing-secret-32b';
+    process.env.ADS_EVIDENCE_HASH_KEY_ID = 'evidence-v1';
+    const day = '2026-01-10';
+    const month = '2026-01';
+    await pool.query(`
+      create function reject_cfig_history_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'cfig ledger is append-only'; end; $$;
+      create table cfig_policies (
+        id uuid primary key, request_id uuid not null unique, fingerprint text not null,
+        terms jsonb not null, created_by uuid not null references users(id),
+        approved_by uuid references users(id), approval_request_id uuid unique, approval_reason text,
+        created_at timestamptz not null default now(), approved_at timestamptz
+      );
+      create table cfig_period_budgets (
+        month text primary key, policy_id uuid not null references cfig_policies(id),
+        snapshot jsonb not null, snapshot_hash text not null, created_at timestamptz not null default now()
+      );
+      create table cfig_finalizations (
+        day date primary key, request_id uuid not null unique, fingerprint text not null,
+        actor_id uuid not null references users(id), reason text not null,
+        snapshot jsonb not null, snapshot_hash text not null, created_at timestamptz not null default now()
+      );
+      create table cfig_event_reviews (
+        id uuid primary key, event_id uuid not null references ads_interactions(id),
+        request_id uuid not null unique, fingerprint text not null,
+        outcome text not null check (outcome in ('eligible', 'invalid')),
+        actor_id uuid not null references users(id), reason text not null,
+        payload jsonb not null, key_id text not null, record_hash text not null,
+        created_at timestamptz not null
+      );
+      create trigger cfig_reviews_immutable before update or delete on cfig_event_reviews
+        for each row execute function reject_cfig_history_mutation();
+      create table cfig_allocations (
+        event_id uuid primary key references ads_interactions(id),
+        day date not null references cfig_finalizations(day),
+        serve_id uuid not null references ads_serves(id),
+        promoter_id uuid not null references ads_promoters(id),
+        policy_id uuid references cfig_policies(id),
+        metric text not null, outcome text not null,
+        entitled bigint not null check (entitled >= 0),
+        allocated bigint not null check (allocated >= 0 and allocated <= entitled),
+        badge_eligible boolean not null, source_key text not null unique,
+        review_id uuid references cfig_event_reviews(id),
+        source_snapshot jsonb not null, created_at timestamptz not null default now()
+      );
+      create table cfig_ledger (
+        id uuid primary key default gen_random_uuid(),
+        request_id uuid not null unique, fingerprint text not null,
+        event_id uuid not null references ads_interactions(id),
+        promoter_id uuid not null references ads_promoters(id),
+        policy_id uuid not null references cfig_policies(id),
+        kind text not null,
+        pending_delta bigint not null, available_delta bigint not null,
+        converted_delta bigint not null default 0, invalid_delta bigint not null,
+        actor_id uuid not null references users(id),
+        reason text not null check (length(reason) between 3 and 500),
+        created_at timestamptz not null default now(),
+        constraint cfig_ledger_moves check (
+          (kind = 'accrue' and pending_delta > 0 and available_delta = 0 and invalid_delta = 0 and converted_delta = 0) or
+          (kind = 'clear' and pending_delta < 0 and available_delta = -pending_delta and invalid_delta = 0 and converted_delta = 0) or
+          (kind = 'invalidate' and pending_delta <= 0 and available_delta <= 0 and invalid_delta > 0 and invalid_delta = -(pending_delta + available_delta) and converted_delta = 0) or
+          (kind = 'convert' and pending_delta = 0 and available_delta < 0 and invalid_delta = 0 and converted_delta = -available_delta) or
+          (kind = 'restore' and converted_delta = 0 and (
+            (pending_delta >= 0 and available_delta >= 0 and (pending_delta + available_delta) > 0 and invalid_delta <= 0 and (invalid_delta = 0 or invalid_delta = -(pending_delta + available_delta))) or
+            (pending_delta <= 0 and available_delta <= 0 and (pending_delta + available_delta) < 0 and invalid_delta = 0)
+          ))
+        )
+      );
+      create unique index cfig_ledger_event_kind_uq on cfig_ledger (event_id, kind) where kind in ('accrue', 'clear');
+      create trigger cfig_ledger_immutable before update or delete on cfig_ledger
+        for each row execute function reject_cfig_history_mutation();
+    `);
+    try {
+      const reviewer = randomUUID();
+      const publisher = randomUUID();
+      await pool.query("insert into users(id,email,status) values ($1,'reviewer@example.test','ACTIVE'),($2,'housepub@example.test','ACTIVE')", [reviewer, publisher]);
+      const [campaign] = await db.insert(schema.adsCampaigns).values({ advertiserId: owner, title: 'House Campaign', budgetUsdCents: 0, remainingBudgetUsdCents: 0 }).returning();
+      const [promoter] = await db.insert(schema.adsPromoters).values({ userId: publisher, type: 'INDIVIDUAL' }).returning();
+      const [stack] = await db.insert(schema.adsCreativeStacks).values({ campaignId: campaign.id, name: 'House Stack', position: 1 }).returning();
+      const [creative] = await db.insert(schema.adsCreatives).values({ campaignId: campaign.id, adStackId: stack.id, headline: 'House', destinationUrl: 'https://example.test', status: 'active', reviewStatus: 'approved' }).returning();
+      const [placement] = await db.insert(schema.adsPlacements).values({ campaignId: campaign.id, creativeId: creative.id, promoterId: promoter.id, placementToken: randomUUID() }).returning();
+
+      const servedA = new Date('2026-01-10T01:00:00.000Z');
+      const servedB = new Date('2026-01-10T02:00:00.000Z');
+      const [serveA] = await db.insert(schema.adsServes).values({
+        campaignId: campaign.id, creativeId: creative.id, promoterId: promoter.id, placementId: placement.id,
+        slotHandle: 'house-a', inventoryClass: 'house', deliveryMode: 'normal', servedAt: servedA,
+      }).returning();
+      const [serveB] = await db.insert(schema.adsServes).values({
+        campaignId: campaign.id, creativeId: creative.id, promoterId: promoter.id, placementId: placement.id,
+        slotHandle: 'house-b', inventoryClass: 'house', deliveryMode: 'normal', servedAt: servedB,
+      }).returning();
+      const [eventA] = await db.insert(schema.adsInteractions).values({
+        placementId: placement.id, promoterId: promoter.id, serveId: serveA.id, type: 'click',
+        verificationVersion: 2, isValid: true, createdAt: servedA,
+      }).returning();
+      const [eventB] = await db.insert(schema.adsInteractions).values({
+        placementId: placement.id, promoterId: promoter.id, serveId: serveB.id, type: 'click',
+        verificationVersion: 2, isValid: true, createdAt: servedB,
+      }).returning();
+
+      const policyId = randomUUID();
+      // Daily cap = 1.0 CFIG (1_000_000 micro-CFIG); 10 clicks per CFIG => 100_000n? We want 600_000n per click => clicksPerCfig = 1? Wait: policy requires integer >= 1.
+      // With clicksPerCfig = 1 (1 CFIG = 1_000_000n per click) and dailyCapApprovedCfig = 1 -> daily cap = 1_000_000n:
+      // Actually dailyCap = 1.5 CFIG or dailyCap = 1 CFIG (so Click A = 1_000_000n, Click B = 0n initially, OR views/clicks: view = 100_000n, click = 600_000n? Let's check units: clicksPerCfig = 2 => 500_000n per click, dailyCap = 1 CFIG => Click A = 500_000n, Click B = 500_000n; OR clicksPerCfig = 1 => 1_000_000n/click, dailyCapApprovedCfig = 1 => A = 1_000_000n, B = 0n (DAILY_CAP)!).
+      const canonicalHouse = require('../../../api/ads-api/src/modules/cfig/cfig-allocation').canonicalHousePolicy();
+      const customHouse = {
+        ...canonicalHouse,
+        enabled: true,
+        impressionsPerCfig: 10,
+        clicksPerCfig: 1,
+        dailyCapApprovedCfig: 1,
+        monthlyCapPerPromoterCfig: 10,
+        monthlyBudgetUsdCents: 10000,
+        maxOutstandingUsdCents: 10000,
+        maxCandidatesPerDay: 5000,
+      };
+      const houseTerms = {
+        version: customHouse.policyVersion,
+        termsVersion: customHouse.policyVersion,
+        effectiveFrom: '2026-01-01T00:00:00.000Z',
+        houseRewards: customHouse,
+      };
+      await pool.query(
+        'insert into cfig_policies(id,request_id,fingerprint,terms,created_by,approved_by,approval_request_id,approval_reason,approved_at) values ($1,$2,$3,$4,$5,$6,$7,$8,now())',
+        [policyId, randomUUID(), 'pol-fp', houseTerms, owner, reviewer, randomUUID(), 'Approved house test policy'],
+      );
+      await pool.query(
+        'insert into cfig_period_budgets(month,policy_id,snapshot,snapshot_hash) values ($1,$2,$3,$4)',
+        [month, policyId, houseTerms.houseRewards, 'budget-hash'],
+      );
+      const finAt = new Date('2026-01-11T01:00:00.000Z');
+      await pool.query(
+        'insert into cfig_finalizations(day,request_id,fingerprint,actor_id,reason,snapshot,snapshot_hash,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8)',
+        [day, randomUUID(), 'fin-fp', owner, 'Finalize test day', { policyId, policy: houseTerms }, 'fin-hash', finAt],
+      );
+
+      const signReview = (id: string, evId: string, outcome: 'eligible' | 'invalid', at: Date) => {
+        const payload = { id, eventId: evId, outcome, actorId: reviewer, createdAt: at.toISOString(), reason: 'test review' };
+        return { payload, hash: evidenceSignature({ ...payload, keyId: 'evidence-v1' }) };
+      };
+
+      const revAId = randomUUID();
+      const revBId = randomUUID();
+      const revA = signReview(revAId, eventA.id, 'eligible', servedA);
+      const revB = signReview(revBId, eventB.id, 'eligible', servedB);
+      await pool.query(
+        'insert into cfig_event_reviews(id,event_id,request_id,fingerprint,outcome,actor_id,reason,payload,key_id,record_hash,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11),($12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)',
+        [
+          revAId, eventA.id, randomUUID(), 'fp-ra', 'eligible', reviewer, 'initial', revA.payload, 'evidence-v1', revA.hash, servedA,
+          revBId, eventB.id, randomUUID(), 'fp-rb', 'eligible', reviewer, 'initial', revB.payload, 'evidence-v1', revB.hash, servedB,
+        ],
+      );
+
+      const snapA = { eventId: eventA.id, serveId: serveA.id, promoterId: promoter.id, servedAt: servedA.toISOString(), receivedAt: servedA.toISOString(), validatedAt: servedA.toISOString(), metric: 'click', eligible: true, policyId };
+      const snapB = { eventId: eventB.id, serveId: serveB.id, promoterId: promoter.id, servedAt: servedB.toISOString(), receivedAt: servedB.toISOString(), validatedAt: servedB.toISOString(), metric: 'click', eligible: true, policyId, exclusion: undefined };
+      await pool.query(
+        `insert into cfig_allocations(event_id,day,serve_id,promoter_id,policy_id,metric,outcome,entitled,allocated,badge_eligible,source_key,review_id,source_snapshot,created_at)
+         values ($1,$2,$3,$4,$5,'click','ALLOCATED',1000000,1000000,true,$6,$7,$8,$9)`,
+        [eventA.id, day, serveA.id, promoter.id, policyId, `event:${eventA.id}`, revAId, snapA, finAt],
+      );
+      await pool.query(
+        `insert into cfig_allocations(event_id,day,serve_id,promoter_id,policy_id,metric,outcome,entitled,allocated,badge_eligible,source_key,review_id,source_snapshot,created_at)
+         values ($1,$2,$3,$4,$5,'click','DAILY_CAP',1000000,0,true,$6,$7,$8,$9)`,
+        [eventB.id, day, serveB.id, promoter.id, policyId, `event:${eventB.id}`, revBId, snapB, finAt],
+      );
+
+      await pool.query(
+        `insert into cfig_ledger(id,request_id,fingerprint,event_id,promoter_id,policy_id,kind,pending_delta,available_delta,converted_delta,invalid_delta,actor_id,reason,created_at)
+         values ($1,$2,'fp-l1',$3,$4,$5,'accrue',1000000,0,0,0,$6,'Initial accrual',$7)`,
+        [randomUUID(), randomUUID(), eventA.id, promoter.id, policyId, owner, finAt],
+      );
+
+      // 1. Negative case first: forged signature fails closed with zero ledger writes.
+      const forgedAt = new Date('2026-01-12T01:00:00.000Z');
+      const forgedRevId = randomUUID();
+      await pool.query(
+        'insert into cfig_event_reviews(id,event_id,request_id,fingerprint,outcome,actor_id,reason,payload,key_id,record_hash,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+        [forgedRevId, eventA.id, randomUUID(), 'fp-forged', 'invalid', reviewer, 'forged', { id: forgedRevId, eventId: eventA.id, outcome: 'invalid' }, 'evidence-v1', 'f'.repeat(64), forgedAt],
+      );
+      const previewWindow = { lower: '2026-01-01T00:00:00.000Z', upper: '2026-02-01T00:00:00.000Z' };
+      expect(await houseCfigCorrectionPreview(db, previewWindow)).toEqual([]);
+      await expect(reconcileHouseCfigCorrections(db, previewWindow)).rejects.toThrow(/Invalid CFIG review evidence signature/);
+      expect((await pool.query('select count(*)::int as c from cfig_ledger')).rows[0].c).toBe(1);
+
+      // 2. Valid signed invalidation for Click A -> preview detects, replay invalidates A and allocates freed cap to Click B!
+      const invAt = new Date('2026-01-12T02:00:00.000Z');
+      const invRevId = randomUUID();
+      const invRev = signReview(invRevId, eventA.id, 'invalid', invAt);
+      await pool.query(
+        'insert into cfig_event_reviews(id,event_id,request_id,fingerprint,outcome,actor_id,reason,payload,key_id,record_hash,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+        [invRevId, eventA.id, randomUUID(), 'fp-inv', 'invalid', reviewer, 'post_click_fraud', invRev.payload, 'evidence-v1', invRev.hash, invAt],
+      );
+      const beforePreview = await houseCfigCorrectionPreview(db, previewWindow);
+      expect(beforePreview).toEqual([{ eventId: eventA.id, pendingMicroCfig: '1000000', availableMicroCfig: '0', convertedMicroCfig: '0' }]);
+
+      const rec1 = await reconcileHouseCfigCorrections(db, previewWindow);
+      expect(rec1.invalidatedEvents).toBe(1);
+      expect(rec1.invalidatedMicroCfig).toBe('1000000');
+      expect(rec1.restoredEvents).toBe(1);
+      expect(rec1.restoredMicroCfig).toBe('1000000');
+      expect(await houseCfigCorrectionPreview(db, previewWindow)).toEqual([]);
+
+      const balAfterInv = await pool.query(
+        'select event_id, coalesce(sum(pending_delta),0)::text as pending, coalesce(sum(invalid_delta),0)::text as invalid from cfig_ledger group by event_id order by event_id',
+      );
+      const mapAfterInv = new Map(balAfterInv.rows.map((r: any) => [r.event_id, r]));
+      expect(mapAfterInv.get(eventA.id)).toEqual({ event_id: eventA.id, pending: '0', invalid: '1000000' });
+      expect(mapAfterInv.get(eventB.id)).toEqual({ event_id: eventB.id, pending: '1000000', invalid: '0' });
+
+      // Idempotent repeat run
+      const ledgerCountAfterInv = (await pool.query('select count(*)::int as c from cfig_ledger')).rows[0].c;
+      const recRepeat = await reconcileHouseCfigCorrections(db, previewWindow);
+      expect(recRepeat.invalidatedEvents).toBe(0);
+      expect(recRepeat.restoredEvents).toBe(0);
+      expect((await pool.query('select count(*)::int as c from cfig_ledger')).rows[0].c).toBe(ledgerCountAfterInv);
+
+      // 3. Overturn Click A back to eligible -> A restored and Click B reclaimed under original 1_000_000n daily cap!
+      const ovAt = new Date('2026-01-12T03:00:00.000Z');
+      const ovRevId = randomUUID();
+      const ovRev = signReview(ovRevId, eventA.id, 'eligible', ovAt);
+      await pool.query(
+        'insert into cfig_event_reviews(id,event_id,request_id,fingerprint,outcome,actor_id,reason,payload,key_id,record_hash,created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)',
+        [ovRevId, eventA.id, randomUUID(), 'fp-ov', 'eligible', reviewer, 'appeal_overturned', ovRev.payload, 'evidence-v1', ovRev.hash, ovAt],
+      );
+      const recOverturn = await reconcileHouseCfigCorrections(db, previewWindow);
+      expect(recOverturn.restoredEvents).toBe(1);
+      expect(recOverturn.restoredMicroCfig).toBe('1000000');
+      expect(recOverturn.reclaimedCapMicroCfig).toBe('1000000');
+
+      const balAfterOverturn = await pool.query(
+        'select event_id, coalesce(sum(pending_delta),0)::text as pending, coalesce(sum(invalid_delta),0)::text as invalid from cfig_ledger group by event_id',
+      );
+      const mapAfterOverturn = new Map(balAfterOverturn.rows.map((r: any) => [r.event_id, r]));
+      expect(mapAfterOverturn.get(eventA.id)).toEqual({ event_id: eventA.id, pending: '1000000', invalid: '0' });
+      expect(mapAfterOverturn.get(eventB.id)).toEqual({ event_id: eventB.id, pending: '0', invalid: '0' });
+    } finally {
+      if (prevSecret === undefined) delete process.env.ADS_EVIDENCE_HASH_SECRET;
+      else process.env.ADS_EVIDENCE_HASH_SECRET = prevSecret;
+      if (prevKeyId === undefined) delete process.env.ADS_EVIDENCE_HASH_KEY_ID;
+      else process.env.ADS_EVIDENCE_HASH_KEY_ID = prevKeyId;
+      await pool.query('drop table if exists cfig_ledger, cfig_allocations, cfig_event_reviews, cfig_finalizations, cfig_period_budgets, cfig_policies cascade');
+      await pool.query('drop function if exists reject_cfig_history_mutation() cascade');
+    }
+  });
+
+  test('PLAN0104 points reversal reconciles cohort entitlement, preserves Rewards Fund backing, records redeemed shortfall, and restores overturned invalidations', async () => {
+    const prevSecret = process.env.ADS_EVIDENCE_HASH_SECRET;
+    const prevKeyId = process.env.ADS_EVIDENCE_HASH_KEY_ID;
+    process.env.ADS_EVIDENCE_HASH_SECRET = 'plan0104-points-evidence-signing-secret-32';
+    process.env.ADS_EVIDENCE_HASH_KEY_ID = 'evidence-v1';
+    const { version, cpc } = require('../../../shared/src/rewards-performance-policy').canonicalPaidRewardLoops();
+    const loopPts = cpc.points; // 10 points per 2 CPC clicks
+    await pool.query(`
+      create function reject_cfig_history_mutation() returns trigger language plpgsql as $$
+      begin raise exception 'history is immutable'; end; $$;
+      create type rewards_fund_ledger_type as enum ('sweep_in', 'allocate', 'release', 'spend', 'adjust_in', 'adjust_out');
+      create type rewards_point_state as enum ('pending', 'available', 'redemption_reserved', 'redeemed', 'reversed', 'expired');
+      create table rewards_fund (
+        id uuid primary key default gen_random_uuid(),
+        currency varchar(10) not null default 'USD' unique,
+        cash_balance_usd_cents bigint not null default 0,
+        allocated_usd_cents bigint not null default 0,
+        available_usd_cents bigint not null default 0,
+        funded_pending_usd_cents bigint not null default 0,
+        spent_usd_cents bigint not null default 0,
+        version integer not null default 0,
+        updated_at timestamptz not null default now(),
+        created_at timestamptz not null default now()
+      );
+      create table rewards_fund_ledger (
+        id uuid primary key default gen_random_uuid(),
+        fund_id uuid not null references rewards_fund(id),
+        type rewards_fund_ledger_type not null,
+        amount_cents bigint not null,
+        from_bucket varchar(32) not null,
+        to_bucket varchar(32) not null,
+        cash_balance_after_cents bigint not null,
+        available_after_cents bigint not null,
+        allocated_after_cents bigint not null,
+        funded_pending_after_cents bigint not null,
+        source_ref varchar(128) not null,
+        description text,
+        actor_id uuid references users(id),
+        created_at timestamptz not null default now()
+      );
+      create table rewards_points_balances (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null unique references users(id) on delete cascade,
+        pending_points integer not null default 0,
+        available_points integer not null default 0,
+        reserved_points integer not null default 0,
+        lifetime_earned_points integer not null default 0,
+        lifetime_redeemed_points integer not null default 0,
+        version integer not null default 0,
+        updated_at timestamptz not null default now()
+      );
+      create table rewards_points_ledger (
+        id uuid primary key default gen_random_uuid(),
+        lot_id varchar(64) not null,
+        user_id uuid not null references users(id) on delete cascade,
+        delta_points integer not null,
+        state rewards_point_state not null,
+        activity_code varchar(64) not null,
+        source_ref varchar(128) not null,
+        idempotency_key varchar(128) not null unique,
+        valuation_microusd bigint not null,
+        rate_version integer not null default 1,
+        expires_at timestamptz,
+        cleared_at timestamptz,
+        earned_at timestamptz not null default now(),
+        created_at timestamptz not null default now()
+      );
+      create table reward_program_issues (
+        id uuid primary key default gen_random_uuid(),
+        request_id uuid not null unique,
+        fingerprint text not null,
+        user_id uuid not null references users(id),
+        kind text not null check (kind in ('paid_loop', 'cfig_conversion', 'legacy_clearance')),
+        points integer not null check (points > 0),
+        micro_cfig bigint not null default 0,
+        source_ref text not null unique,
+        payload jsonb not null default '{}'::jsonb,
+        created_at timestamptz not null default now()
+      );
+      create table reward_performance_receipts (
+        id uuid primary key default gen_random_uuid(),
+        event_id uuid not null unique references ads_interactions(id),
+        user_id uuid not null references users(id),
+        model text not null check (model in ('cpc', 'cpm')),
+        payload jsonb not null,
+        created_at timestamptz not null default now()
+      );
+      create table reward_recovery_cases (
+        id uuid primary key,
+        request_id uuid not null unique,
+        fingerprint text not null,
+        issue_id uuid not null references reward_program_issues(id),
+        evidence_id uuid not null references ads_event_assessments(id),
+        actor_id uuid not null references users(id),
+        reason text not null,
+        created_at timestamptz not null default now(),
+        unique (issue_id, evidence_id)
+      );
+      create table reward_points_correction_observations (
+        id uuid primary key default gen_random_uuid(),
+        user_id uuid not null references users(id),
+        model text not null check (model in ('cpc', 'cpm')),
+        rate_version text not null,
+        eligible_events bigint not null,
+        issued_points bigint not null,
+        entitled_points bigint not null,
+        unsupported_points bigint not null,
+        created_at timestamptz not null default clock_timestamp()
+      );
+    `);
+    try {
+      const f = await settlementFixture();
+      const reviewer = randomUUID();
+      await pool.query("insert into users(id,email,status) values ($1,'ptsrev@example.test','ACTIVE')", [reviewer]);
+
+      // 200 valid CPC events (2 * cpc.interval) => 2 loops => 20 pts total (10 pending, 10 available), 100c total fund cash (80 avail, 10 alloc, 10 funded_pending).
+      const totalClicks = cpc.interval * 2;
+      const batchRes = await pool.query(
+        `with seq as (select generate_series(1, $1) as idx),
+         new_serves as (
+           insert into ads_serves(id, campaign_id, creative_id, promoter_id, placement_id, slot_handle, pricing_model, pricing_version, billing_price_nanos)
+           select gen_random_uuid(), $2, $3, $4, $5, 'pts-loop-' || idx, 'cpc', 2, 100000000
+           from seq
+           returning id
+         ),
+         new_events as (
+           insert into ads_interactions(placement_id, promoter_id, serve_id, type, verification_version, is_valid)
+           select $5, $4, id, 'click', 2, true from new_serves
+           returning id
+         )
+         insert into reward_performance_receipts(event_id, user_id, model, payload)
+         select id, $6, 'cpc', $7::jsonb from new_events
+         returning event_id`,
+        [totalClicks, f.campaign.id, f.creative.id, f.promoter.id, f.placement.id, f.publisher, JSON.stringify({ rateVersion: version })],
+      );
+      const evIds: string[] = batchRes.rows.map((r: any) => r.event_id);
+      const e1 = { id: evIds[0] };
+      const e2 = { id: evIds[cpc.interval - 1] };
+      const e3 = { id: evIds[cpc.interval] };
+      const e4 = { id: evIds[totalClicks - 1] };
+
+      await pool.query(
+        `insert into rewards_fund(currency,cash_balance_usd_cents,available_usd_cents,allocated_usd_cents,funded_pending_usd_cents)
+         values ('USD', $1, $2, $3, $4)`,
+        [100, 100 - loopPts * 2, loopPts, loopPts],
+      );
+      await pool.query(
+        'insert into rewards_points_balances(user_id,pending_points,available_points,lifetime_earned_points) values ($1,$2,$3,$4)',
+        [f.publisher, loopPts, loopPts, loopPts * 2],
+      );
+      const issue1Id = randomUUID();
+      const issue2Id = randomUUID();
+      await pool.query(
+        `insert into reward_program_issues(id,request_id,fingerprint,user_id,kind,points,source_ref,payload)
+         values ($1,$2,'fp-i1',$3,'paid_loop',$4,$5,'{}'::jsonb),
+                ($6,$7,'fp-i2',$3,'paid_loop',$4,$8,'{}'::jsonb)`,
+        [issue1Id, randomUUID(), f.publisher, loopPts, `paid-loop:${e2.id}`, issue2Id, randomUUID(), `paid-loop:${e4.id}`],
+      );
+
+      const signAssessment = async (evId: string, outcome: 'eligible' | 'invalid', supersedesId: string | null, at: Date) => {
+        const id = randomUUID();
+        const requestId = randomUUID();
+        const signed = {
+          id,
+          eventId: evId,
+          campaignId: f.campaign.id,
+          requestId,
+          actorId: reviewer,
+          policyVersion: 'policy-v1',
+          outcome,
+          reasonCodes: outcome === 'invalid' ? ['post_click_fraud'] : ['overturned'],
+          features: { integrity: true },
+          supersedesId,
+          keyId: 'evidence-v1',
+        };
+        const recordHash = evidenceSignature(signed);
+        await pool.query(
+          `insert into ads_event_assessments(id,event_id,campaign_id,request_id,actor_id,policy_version,outcome,reason_codes,features,supersedes_id,record_hash,key_id,created_at)
+           values ($1,$2,$3,$4,$5,'policy-v1',$6,$7,$8,$9,$10,'evidence-v1',$11)`,
+          [id, evId, f.campaign.id, requestId, reviewer, outcome, JSON.stringify(signed.reasonCodes), JSON.stringify(signed.features), supersedesId, recordHash, at],
+        );
+        return id;
+      };
+
+      const window = { lower: '2020-01-01T00:00:00.000Z', upper: '2099-01-01T00:00:00.000Z' };
+
+      // 1. Negative case first: forged assessment signature rejects with zero mutations.
+      await pool.query(
+        `insert into ads_event_assessments(id,event_id,campaign_id,request_id,actor_id,policy_version,outcome,reason_codes,features,supersedes_id,record_hash,key_id,created_at)
+         values ($1,$2,$3,$4,$5,'policy-v1','invalid','["forged"]'::jsonb,'{}'::jsonb,null,$6,'evidence-v1',$7)`,
+        [randomUUID(), e1.id, f.campaign.id, randomUUID(), reviewer, 'e'.repeat(64), new Date('2026-01-05T01:00:00.000Z')],
+      );
+      await expect(reconcilePaidPointsCorrections(db, window)).rejects.toThrow(/Invalid assessment evidence signature/);
+      expect((await pool.query('select pending_points, available_points from rewards_points_balances where user_id=$1', [f.publisher])).rows[0])
+        .toEqual({ pending_points: loopPts, available_points: loopPts });
+
+      // 2. Valid signed invalidation for e1 -> 3 valid clicks => entitled = 10 pts => reverses 10 pending pts & releases 10c funded_pending -> available.
+      const inv1Id = await signAssessment(e1.id, 'invalid', null, new Date('2026-01-05T02:00:00.000Z'));
+      const res1 = await reconcilePaidPointsCorrections(db, window);
+      expect(res1.reversedCohorts).toBe(1);
+      expect(res1.reversedPoints).toBe(String(loopPts));
+
+      const bal1 = (await pool.query('select pending_points, available_points from rewards_points_balances where user_id=$1', [f.publisher])).rows[0];
+      expect(bal1).toEqual({ pending_points: 0, available_points: loopPts });
+      const fund1 = (await pool.query("select cash_balance_usd_cents,available_usd_cents,allocated_usd_cents,funded_pending_usd_cents from rewards_fund where currency='USD'")).rows[0];
+      expect(Number(fund1.cash_balance_usd_cents)).toBe(100);
+      expect(Number(fund1.available_usd_cents)).toBe(100 - loopPts);
+      expect(Number(fund1.allocated_usd_cents)).toBe(loopPts);
+      expect(Number(fund1.funded_pending_usd_cents)).toBe(0);
+
+      // Preview reflects the net ledger reversal cleanly (0 unsupported) and repeat reconcile is a no-op.
+      expect(await paidPointsCorrectionPreview(db, window)).toEqual([
+        { promoterUserId: f.publisher, model: 'cpc', eligibleEvents: String(totalClicks - 1), issuedPoints: String(loopPts), entitledPoints: String(loopPts), unsupportedPoints: '0' },
+      ]);
+      const resRepeat = await reconcilePaidPointsCorrections(db, window);
+      expect(resRepeat.reversedCohorts).toBe(0);
+      expect(resRepeat.reversedPoints).toBe('0');
+
+      // 3. Promoter redeems 7 of 10 remaining available pts (leaving 3 available, 3 allocated), then 100 more clicks (evIds[100..199]) are invalidated (leaving 99 valid < 100) -> reverses 3, clamps 0, records shortfall=7.
+      const redeemed = 7;
+      await pool.query('update rewards_points_balances set available_points = available_points - $1, lifetime_redeemed_points = $1 where user_id = $2', [redeemed, f.publisher]);
+      await pool.query("update rewards_fund set cash_balance_usd_cents = cash_balance_usd_cents - $1, allocated_usd_cents = allocated_usd_cents - $1, spent_usd_cents = $1 where currency='USD'", [redeemed]);
+
+      const invLoopIds: string[] = [];
+      for (let i = 0; i < cpc.interval; i++) {
+        const targetEv = evIds[cpc.interval + i];
+        invLoopIds.push(await signAssessment(targetEv, 'invalid', null, new Date(Date.parse('2026-01-05T03:00:00.000Z') + i * 1000)));
+      }
+      const inv3Id = invLoopIds[0];
+      const res2 = await reconcilePaidPointsCorrections(db, window);
+      expect(res2.reversedPoints).toBe(String(loopPts - redeemed));
+      expect(res2.recoveryCasesCreated).toBe(1);
+      expect(res2.shortfallPointsRecorded).toBe(String(redeemed));
+
+      const bal2 = (await pool.query('select pending_points, available_points from rewards_points_balances where user_id=$1', [f.publisher])).rows[0];
+      expect(bal2).toEqual({ pending_points: 0, available_points: 0 });
+      const recCase = (await pool.query('select issue_id, evidence_id, reason from reward_recovery_cases')).rows[0];
+      expect(recCase.reason).toContain(`shortfall=${redeemed}`);
+      expect([inv1Id, ...invLoopIds]).toContain(recCase.evidence_id);
+
+      // Repeat is idempotent (no second recovery case or negative points)
+      const res2Repeat = await reconcilePaidPointsCorrections(db, window);
+      expect(res2Repeat.recoveryCasesCreated).toBe(0);
+      expect((await pool.query('select count(*)::int as c from reward_recovery_cases')).rows[0].c).toBe(1);
+
+      // 4. Overturn e3 back to eligible (100 valid clicks => entitled = 10, maxCohort = 20 - 7 = 13 => desired 10, currentNet 0 => restores 10 pts using fund available backing).
+      await signAssessment(e3.id, 'eligible', inv3Id, new Date('2026-01-05T04:00:00.000Z'));
+      const resOverturn = await reconcilePaidPointsCorrections(db, window);
+      expect(resOverturn.restoredCohorts).toBe(1);
+      expect(resOverturn.restoredPoints).toBe(String(loopPts));
+
+      const bal3 = (await pool.query('select pending_points, available_points from rewards_points_balances where user_id=$1', [f.publisher])).rows[0];
+      expect(bal3).toEqual({ pending_points: 0, available_points: loopPts });
+      const fund3 = (await pool.query("select cash_balance_usd_cents,available_usd_cents,allocated_usd_cents,funded_pending_usd_cents from rewards_fund where currency='USD'")).rows[0];
+      expect(Number(fund3.available_usd_cents) + Number(fund3.allocated_usd_cents) + Number(fund3.funded_pending_usd_cents))
+        .toBe(Number(fund3.cash_balance_usd_cents));
+      expect(Number(fund3.allocated_usd_cents)).toBe(loopPts);
+
+      // Repeat restore is idempotent (restores only once)
+      const resOverturnRepeat = await reconcilePaidPointsCorrections(db, window);
+      expect(resOverturnRepeat.restoredCohorts).toBe(0);
+      expect(resOverturnRepeat.restoredPoints).toBe('0');
+    } finally {
+      if (prevSecret === undefined) delete process.env.ADS_EVIDENCE_HASH_SECRET;
+      else process.env.ADS_EVIDENCE_HASH_SECRET = prevSecret;
+      if (prevKeyId === undefined) delete process.env.ADS_EVIDENCE_HASH_KEY_ID;
+      else process.env.ADS_EVIDENCE_HASH_KEY_ID = prevKeyId;
+      await pool.query('drop table if exists reward_points_correction_observations, reward_recovery_cases, reward_performance_receipts, reward_program_issues, rewards_points_ledger, rewards_points_balances, rewards_fund_ledger, rewards_fund cascade');
+      await pool.query('drop type if exists rewards_point_state, rewards_fund_ledger_type cascade');
+      await pool.query('drop function if exists reject_cfig_history_mutation() cascade');
+    }
+  });
+
+  test('PLAN0104 event-specific cash rebates reverse only the invalidated click, reconcile 55/30/15 split and carries, recover released promoter earnings, and restore overturned events', async () => {
+    const prevSecret = process.env.ADS_EVIDENCE_HASH_SECRET;
+    const prevKeyId = process.env.ADS_EVIDENCE_HASH_KEY_ID;
+    process.env.ADS_EVIDENCE_HASH_SECRET = 'plan0104-cash-evidence-signing-secret-32b';
+    process.env.ADS_EVIDENCE_HASH_KEY_ID = 'evidence-v1';
+    try {
+      const f = await settlementFixture(2_000_000_000n, 'cpc', true); // 200 cents ($2.00) per click -> 55% = 110c publisher
+      const preparer = randomUUID();
+      const reviewer = randomUUID();
+      await pool.query(
+        "insert into users(id,email,status) values ($1,'prep104@example.test','ACTIVE'),($2,'rev104@example.test','ACTIVE')",
+        [preparer, reviewer],
+      );
+      const clearance = new AdClearanceService(db, { get: () => JSON.stringify([preparer, reviewer]) } as any);
+
+      const click1 = await f.add(2);
+      const click2 = await f.add(2);
+      await f.svc.settle(f.campaign.id, randomUUID(), new Date());
+      await pool.query("update ads_promoter_settlement_items set hold_expires_at=now()-interval '1 second'");
+
+      const itemsBefore = (await pool.query("select i.id, (bt.metadata::jsonb)->>'settlementClaimId' as event_id, i.earned_usd_cents, i.billed_usd_cents, i.clearance_status from ads_promoter_settlement_items i join billing_transactions bt on bt.id = i.billing_transaction_id")).rows;
+      expect(itemsBefore).toHaveLength(2);
+      const item1Id = itemsBefore.find((r: any) => r.event_id === click1.event.id).id;
+      const item2Id = itemsBefore.find((r: any) => r.event_id === click2.event.id).id;
+
+      // Clear click1 FIRST so publisher wallet holds 110c of released earnings.
+      const prep1 = await clearance.prepare(preparer, item1Id, 'ev-clear-1');
+      await clearance.approve(reviewer, item1Id, prep1.draftId);
+      const pubWalletAfterClear1 = (await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [f.publisher])).rows[0].balance_usd_cents;
+      expect(pubWalletAfterClear1).toBe(110);
+
+      const signCashAssessment = async (evId: string, outcome: 'eligible' | 'invalid', supersedesId: string | null, at: Date) => {
+        const id = randomUUID();
+        const requestId = randomUUID();
+        const signed = {
+          id,
+          eventId: evId,
+          campaignId: f.campaign.id,
+          requestId,
+          actorId: reviewer,
+          policyVersion: 'policy-v1',
+          outcome,
+          reasonCodes: outcome === 'invalid' ? ['cpc_redirect_mismatch'] : ['appeal_overturned'],
+          features: { integrity: true },
+          supersedesId,
+          keyId: 'evidence-v1',
+        };
+        const recordHash = evidenceSignature(signed);
+        await pool.query(
+          `insert into ads_event_assessments(id,event_id,campaign_id,request_id,actor_id,policy_version,outcome,reason_codes,features,supersedes_id,record_hash,key_id,created_at)
+           values ($1,$2,$3,$4,$5,'policy-v1',$6,$7,$8,$9,$10,'evidence-v1',$11)`,
+          [id, evId, f.campaign.id, requestId, reviewer, outcome, JSON.stringify(signed.reasonCodes), JSON.stringify(signed.features), supersedesId, recordHash, at],
+        );
+        return id;
+      };
+
+      const window = { lower: '2020-01-01T00:00:00.000Z', upper: '2099-01-01T00:00:00.000Z' };
+
+      // 1. Negative case first: forged assessment fails closed with zero wallet/rebate/penalty mutations.
+      await pool.query(
+        `insert into ads_event_assessments(id,event_id,campaign_id,request_id,actor_id,policy_version,outcome,reason_codes,features,supersedes_id,record_hash,key_id,created_at)
+         values ($1,$2,$3,$4,$5,'policy-v1','invalid','["forged"]'::jsonb,'{}'::jsonb,null,$6,'evidence-v1',$7)`,
+        [randomUUID(), click1.event.id, f.campaign.id, randomUUID(), reviewer, 'a'.repeat(64), new Date('2026-01-06T01:00:00.000Z')],
+      );
+      await expect(applyEventCashRebates(db, window)).rejects.toThrow(/Invalid assessment evidence signature/);
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(1000);
+      expect((await pool.query('select count(*)::int as c from ads_settlement_rebates')).rows[0].c).toBe(0);
+
+      // 2. Valid signed invalidation of click1 ONLY -> advertiser rebated 200c (wallet 1000 -> 1200), carry adjusted cleanly, penalty=110c created, click2 remains valid!
+      const invClick1Id = await signCashAssessment(click1.event.id, 'invalid', null, new Date('2026-01-06T02:00:00.000Z'));
+      const reb1 = await applyEventCashRebates(db, window);
+      expect(reb1.rebatesApplied).toBe(1);
+      expect(reb1.rebateUsdCents).toBe(200);
+      expect(reb1.penaltiesCreatedUsdCents).toBe(110);
+
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(1200);
+      expect(Number((await pool.query('select consumed_usd_cents from ads_campaign_escrows where campaign_id=$1', [f.campaign.id])).rows[0].consumed_usd_cents)).toBe(400);
+      const carryAfterReb = (await pool.query('select billed_usd_cents, publisher_usd_cents, commission_pool_usd_cents, carry_nanos from ads_settlement_carries')).rows[0];
+      expect({
+        billed: carryAfterReb.billed_usd_cents,
+        pub: carryAfterReb.publisher_usd_cents,
+        comm: carryAfterReb.commission_pool_usd_cents,
+        nanos: String(carryAfterReb.carry_nanos),
+      }).toEqual({ billed: 200, pub: 110, comm: 30, nanos: '0' });
+
+      const interactionStates = (await pool.query('select id, is_valid from ads_interactions')).rows;
+      const validById = new Map(interactionStates.map((r: any) => [r.id, r.is_valid]));
+      expect(validById.get(click1.event.id)).toBe(false);
+      expect(validById.get(click2.event.id)).toBe(true);
+
+      // Repeat rebate call is idempotent (still 1200c advertiser, 1 rebate row)
+      const rebRepeat = await applyEventCashRebates(db, window);
+      expect(rebRepeat.rebatesApplied).toBe(0);
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(1200);
+
+      // 3. Clearing valid sibling click2 succeeds despite click1's invalidation proof AND automatically recovers click1's 110c penalty!
+      const prep2 = await clearance.prepare(preparer, item2Id, 'ev-clear-2');
+      const clr2 = await clearance.approve(reviewer, item2Id, prep2.draftId);
+      expect(clr2.status).toBe('cleared');
+
+      const pubWalletAfterClear2 = (await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [f.publisher])).rows[0].balance_usd_cents;
+      expect(pubWalletAfterClear2).toBe(110); // 110 + 110 - 110 offset = 110c net!
+      const penaltyRow = (await pool.query("select status, recovered_amount_usd_cents, penalty_amount_usd_cents from ads_promoter_penalties where reason_code='invalidated_click_event'")).rows[0];
+      expect({ status: penaltyRow.status, recovered_amount_usd_cents: Number(penaltyRow.recovered_amount_usd_cents), penalty_amount_usd_cents: Number(penaltyRow.penalty_amount_usd_cents) }).toEqual({ status: 'fully_recovered', recovered_amount_usd_cents: 110, penalty_amount_usd_cents: 110 });
+
+      // 4. Overturn click1 back to eligible: first test fail-closed when advertiser wallet has < 200c.
+      await signCashAssessment(click1.event.id, 'eligible', invClick1Id, new Date('2026-01-06T03:00:00.000Z'));
+      await pool.query('update billing_wallets set balance_usd_cents = 50 where user_id = $1', [owner]);
+      const restDeferred = await restoreOverturnedEventCash(db, window);
+      expect(restDeferred.deferredInsufficientBalance).toBe(1);
+      expect(restDeferred.restoredCount).toBe(0);
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(50);
+
+      // Fund advertiser wallet (250c) and run restore: debits 200c, refunds promoter +110c recovered penalty, restores carry & interaction!
+      await pool.query('update billing_wallets set balance_usd_cents = 250 where user_id = $1', [owner]);
+      const restApplied = await restoreOverturnedEventCash(db, window);
+      expect(restApplied.restoredCount).toBe(1);
+      expect(restApplied.restoredDebitUsdCents).toBe(200);
+      expect(restApplied.promoterCreditedUsdCents).toBe(110);
+
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(50);
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [f.publisher])).rows[0].balance_usd_cents).toBe(220);
+      expect((await pool.query('select is_valid from ads_interactions where id=$1', [click1.event.id])).rows[0].is_valid).toBe(true);
+      const carryAfterRestore = (await pool.query('select billed_usd_cents, publisher_usd_cents, commission_pool_usd_cents from ads_settlement_carries')).rows[0];
+      expect(carryAfterRestore).toEqual({ billed_usd_cents: 400, publisher_usd_cents: 220, commission_pool_usd_cents: 60 });
+
+      // Subsequent click3 still settles cleanly through AdSettlementService!
+      const click3 = await f.add(2);
+      expect(click3.event.id).toBeDefined();
+      await f.svc.settle(f.campaign.id, randomUUID(), new Date());
+      const carryFinal = (await pool.query('select billed_usd_cents from ads_settlement_carries')).rows[0];
+      expect(carryFinal.billed_usd_cents).toBe(600);
+    } finally {
+      if (prevSecret === undefined) delete process.env.ADS_EVIDENCE_HASH_SECRET;
+      else process.env.ADS_EVIDENCE_HASH_SECRET = prevSecret;
+      if (prevKeyId === undefined) delete process.env.ADS_EVIDENCE_HASH_KEY_ID;
+      else process.env.ADS_EVIDENCE_HASH_KEY_ID = prevKeyId;
+    }
   });
 
 });

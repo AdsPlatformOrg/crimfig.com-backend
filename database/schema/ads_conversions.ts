@@ -1,5 +1,5 @@
 import {
-  pgTable,
+  pgTable, jsonb,
   uuid,
   varchar,
   text,
@@ -29,6 +29,7 @@ export const adsClicks = pgTable(
     serveId: uuid('serve_id'),
     interactionId: uuid('interaction_id'),
     recordingReason: varchar('recording_reason', { length: 40 }),
+    recovery: jsonb('recovery'),
     campaignId: uuid('campaign_id').notNull().references(() => adsCampaigns.id, { onDelete: 'cascade' }),
     promoterId: uuid('promoter_id').references(() => adsPromoters.id, { onDelete: 'set null' }),
 

@@ -740,7 +740,14 @@ export class RewardProgramService {
       const version = a.policy_snapshot.paidLoops.version;
       const [count] = rows(
         await tx.execute(
-          sql`SELECT count(*)::text AS total FROM reward_performance_receipts WHERE user_id=${p.user_id} AND model=${r.pricing_model} AND payload->>'rateVersion'=${version}`,
+          sql`SELECT (count(*) FILTER (WHERE event.is_valid))::text AS total,
+            coalesce(sum(issue.points), 0)::text AS issued
+          FROM reward_performance_receipts receipt
+          JOIN ads_interactions event ON event.id = receipt.event_id
+          LEFT JOIN reward_program_issues issue ON issue.source_ref = 'paid-loop:' || receipt.event_id::text
+            AND issue.kind = 'paid_loop' AND issue.user_id = receipt.user_id
+          WHERE receipt.user_id=${p.user_id} AND receipt.model=${r.pricing_model}
+            AND receipt.payload->>'rateVersion'=${version}`,
         ),
       );
       const delta = earnedLoopDelta(
@@ -748,7 +755,10 @@ export class RewardProgramService {
           BigInt(count.total),
           BigInt(count.total) + 1n,
         ),
-        points = BigInt(delta.potentialPoints);
+        entitlement = BigInt(earnedLoopDelta(r.pricing_model, 0n, BigInt(count.total) + 1n).potentialPoints),
+        remaining = entitlement - BigInt(count.issued),
+        nextAward = BigInt(delta.potentialPoints),
+        points = remaining <= 0n ? 0n : remaining < nextAward ? remaining : nextAward;
       let issued = "0";
       let fundingStatus = points ? "funded" : "below_threshold";
       if (points) {

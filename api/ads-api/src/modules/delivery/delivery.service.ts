@@ -152,6 +152,13 @@ export function domainMatchesRegisteredSite(
   return host === reg || host.endsWith(`.${reg}`);
 }
 
+type RedirectEvidence = {
+  binding: ImpressionTokenPayload;
+  receivedAt: string;
+  validation: ReturnType<FraudRulesService['validateClick']>;
+  network: ReturnType<FraudRulesService['computeKeyedIpHash']>;
+};
+
 @Injectable()
 export class DeliveryService {
   private readonly logger = new Logger(DeliveryService.name);
@@ -2023,7 +2030,17 @@ export class DeliveryService {
     if(!tokenPayload)throw new NotFoundException('Signed click attribution is required');
     const attemptId = crypto.randomUUID();
     const clickId = 'clk_' + Date.now().toString(36) + '_' + attemptId.replace(/-/g, '');
-    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const receivedAt = new Date();
+    const expiresAt = new Date(receivedAt.getTime() + 30 * 24 * 60 * 60 * 1000);
+    const recovery: RedirectEvidence | undefined = strictTokenPayload ? {
+      binding: strictTokenPayload,
+      receivedAt: receivedAt.toISOString(),
+      validation: this.fraudRules.validateClick({
+        placementId: strictTokenPayload.placementId, serveId, clientIp, userAgent,
+        tokenTimestampMs: strictTokenPayload.timestamp,
+      }),
+      network: this.fraudRules.computeKeyedIpHash(clientIp),
+    } : undefined;
 
     try {
       await this.db.insert(schema.adsClicks).values({
@@ -2033,6 +2050,8 @@ export class DeliveryService {
         recordingReason: strictTokenPayload ? 'RECORDING_UNCONFIRMED' : 'IP_BINDING_MISMATCH',
         campaignId,
         promoterId: promoterId || null,
+        clickedAt: receivedAt,
+        recovery,
         expiresAt,
       });
 
@@ -2040,10 +2059,11 @@ export class DeliveryService {
         const interaction = await this.logInteraction({
           eventId: attemptId, impToken: token, type: 'click', source: 'share_link',
           clientIp, userAgent, referrer,
-        });
+        }, recovery);
         await this.db.update(schema.adsClicks).set({
           interactionId: interaction?.id ?? null,
           recordingReason: interaction ? null : 'EVENT_NOT_RECORDED',
+          recovery: null,
         }).where(eq(schema.adsClicks.id, attemptId));
       }
     } catch {
@@ -2110,6 +2130,23 @@ export class DeliveryService {
    * Persists `visibleRatio`, `durationMs`, `assessmentStatus`, `ivtCategory`, `financialEligibility`,
    * and keyed IP hash while enforcing zero financial eligibility on House/Shadow serves.
    */
+  // Recovery consumes server-side evidence saved only after strict token verification.
+  async recoverRedirectAttempt(attemptId: string) {
+    const [receipt] = await this.db.select().from(schema.adsClicks)
+      .where(eq(schema.adsClicks.id, attemptId)).limit(1);
+    if (!receipt?.recovery || receipt.interactionId || receipt.recordingReason !== 'RECORDING_UNCONFIRMED') return false;
+    const recovery = receipt.recovery as RedirectEvidence;
+    if (receipt.expiresAt <= new Date() || recovery.receivedAt !== receipt.clickedAt.toISOString() ||
+        recovery.binding.servedId !== receipt.serveId || recovery.binding.campaignId !== receipt.campaignId ||
+        recovery.binding.promoterId !== receipt.promoterId) return false;
+    const event = await this.logInteraction({ type: 'click', source: 'share_link', eventId: attemptId }, recovery);
+    await this.db.update(schema.adsClicks).set({
+      interactionId: event?.id ?? null, recovery: null,
+      recordingReason: event ? null : 'EVENT_NOT_RECORDED',
+    }).where(eq(schema.adsClicks.id, attemptId));
+    return Boolean(event);
+  }
+
   async logInteraction(params: {
     placementToken?: string;
     impToken?: string;
@@ -2134,7 +2171,7 @@ export class DeliveryService {
     visibleRatio?: number;
     durationSeconds?: number;
     eventId?:string;occurredAt?:string;
-  }) {
+  }, recovery?: RedirectEvidence) {
     let placementId: string | undefined;
     let promoterId: string | undefined;
     let serveId: string | undefined;
@@ -2144,9 +2181,9 @@ export class DeliveryService {
     let signedPayload: ImpressionTokenPayload | undefined;
 
     // 1. If signed impToken is provided, decode cryptographic payload
-    if (params.impToken) {
-      const payload = this.tokenService.verifyToken(
-        params.impToken,
+    if (params.impToken || recovery) {
+      const payload = recovery?.binding ?? this.tokenService.verifyToken(
+        params.impToken!,
         params.clientIp,
       );
       if (!payload) return;
@@ -2262,7 +2299,7 @@ export class DeliveryService {
         financialEligibility = validation.financialEligibility;
       }
     } else if (params.type === 'click') {
-      const validation = this.fraudRules.validateClick({
+      const validation = recovery?.validation ?? this.fraudRules.validateClick({
         placementId,
         serveId,
         clientIp: params.clientIp,
@@ -2281,7 +2318,7 @@ export class DeliveryService {
       financialEligibility = 'invalid';
     }
 
-    const { keyedIpHash, keyId } = this.fraudRules.computeKeyedIpHash(
+    const { keyedIpHash, keyId } = recovery?.network ?? this.fraudRules.computeKeyedIpHash(
       params.clientIp,
     );
     const durationMs =
@@ -2343,7 +2380,7 @@ export class DeliveryService {
       }
       const claims = params.claims ?? {};
       const [event]=await tx.insert(adsInteractions).values({
-        id:rawId,eventId:clientEventId,createdAt:new Date(),
+        id:rawId,eventId:clientEventId,createdAt:recovery ? new Date(recovery.receivedAt) : new Date(),
         placementId:placementId===HOUSE_PLACEMENT_UUID?null:placementId,
         promoterId: promoterId || placementId,
         serveId,

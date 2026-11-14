@@ -181,6 +181,9 @@ export class AdOpportunityService {
     if(row.state==='RELEASED')return this.receipt(row);
     const [released]=await tx.update(s.adsOpportunityReservations).set({state:'RELEASED',releaseReason:'FINAL_INVALID_ASSESSMENT',releasedAt:new Date(),updatedAt:new Date()}).where(eq(s.adsOpportunityReservations.id,id)).returning();return this.receipt(released);
   });}
-  async reconcile(){const due=await this.db.execute(sql`SELECT DISTINCT campaign_id FROM ads_opportunity_reservations WHERE is_simulated=false AND state IN('HELD','ISSUED') AND expires_at<=now() LIMIT 100`);
+  async reconcile(campaigns?: string[]) {
+    if (campaigns && !campaigns.length) return { campaigns: 0 };
+    const scope = campaigns ? sql`AND campaign_id IN (${sql.join(campaigns.map(id => sql`${id}::uuid`), sql`, `)})` : sql``;
+    const due=await this.db.execute(sql`SELECT DISTINCT campaign_id FROM ads_opportunity_reservations WHERE is_simulated=false AND state IN('HELD','ISSUED') AND expires_at<=now() ${scope} ORDER BY campaign_id LIMIT 100`);
     for(const row of due.rows??due)await this.db.transaction(async(tx:any)=>{await this.lock(tx,row.campaign_id);await this.expire(tx,row.campaign_id);});return {campaigns:(due.rows??due).length};}
 }

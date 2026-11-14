@@ -288,6 +288,20 @@
       "when": 1793538000005,
       "tag": "0041_cpc_visitor_continuity",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "7",
+      "when": 1793538000006,
+      "tag": "0042_redirect_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "7",
+      "when": 1793538000007,
+      "tag": "0043_points_correction_observations",
+      "breakpoints": true
     }
   ]
 }

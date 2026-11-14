@@ -1,0 +1,8 @@
+{
+  "build": { "builder": "DOCKERFILE" },
+  "deploy": {
+    "startCommand": "node api/ads-api/dist/api/ads-api/src/scheduled-click-processor.js",
+    "cronSchedule": "*/5 * * * *",
+    "restartPolicyType": "NEVER"
+  }
+}

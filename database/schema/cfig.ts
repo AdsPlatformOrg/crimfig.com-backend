@@ -66,7 +66,7 @@ export const cfigLedger = pgTable(
       .defaultNow(),
   },
   (t) => [
-    uniqueIndex("cfig_ledger_event_kind_uq").on(t.eventId, t.kind).where(sql`${t.kind} <> 'convert'`),
+    uniqueIndex("cfig_ledger_event_kind_uq").on(t.eventId, t.kind).where(sql`${t.kind} IN ('accrue', 'clear')`),
     index("cfig_ledger_promoter_created").on(t.promoterId, t.createdAt),
     index("cfig_ledger_event_created").on(t.eventId, t.createdAt),
   ],
