@@ -40,6 +40,10 @@ export interface OpportunityCapacityDetails {
   usedOrReservedNanos?: string;
   requestedNanos?: string;
   availableNanos?: string;
+  pacingMode?: 'adaptive' | 'fixed';
+  baseHourlyAllowanceNanos?: string;
+  watHour?: number;
+  remainingWatHours?: number;
   outstandingReservedNanos?: string;
   carryNanos?: string;
   remainingBudgetNanos?: string;

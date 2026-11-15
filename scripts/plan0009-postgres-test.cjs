@@ -158,6 +158,7 @@ try {
     ...(process.argv.includes('--plan0096') ? ['--testNamePattern','PLAN0096 matched|PLAN0092 Billing HTTP','--json','--outputFile=../docs/reviews/plan-0096/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0097') ? ['--testNamePattern','PLAN0097 missing gateway|verified funding callback and webhook credit once','--json','--outputFile=../docs/reviews/plan-0097/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0104') ? ['--testNamePattern','PLAN0104|PLAN0102 daily reports|PLAN0103 network and legacy|PLAN0101 advertiser','--json','--outputFile=../docs/reviews/plan-0104/backend-integration-results.json'] : []),
+    ...(process.argv.includes('--plan0113') ? ['--testNamePattern','PLAN0113'] : []),
     ...(process.argv.includes('--plan0114') ? ['--testNamePattern','PLAN0114|PLAN0104 audit windows'] : []),
     ...(process.argv.includes('--plan0102-reports') ? ['--testNamePattern','PLAN0102 daily reports','--json','--outputFile=../docs/reviews/plan-0102/reports-integration-results.json'] : []),
     ...(process.argv.includes('--plan0103-settlement') ? ['--testNamePattern','PLAN0092 Billing|funded settlement races|unproven legacy events|CPM fractions survive','--json','--outputFile=../docs/reviews/plan-0103/settlement-integration-results.json'] : []),

@@ -179,14 +179,17 @@ describe('PLAN-0112 granular Billing capacity conflict codes', () => {
     process.env = { ...prevEnv };
   });
 
-  it('rejects with HOURLY_PACING_EXHAUSTED and exact $0.21/$0.20/$0.10/$0.01 telemetry without inserting reservation', async () => {
+  it('rejects with HOURLY_PACING_EXHAUSTED and exact $0.21/$0.20/$0.10/$0.01 telemetry without inserting reservation when fixed hourly pacing is configured', async () => {
     const input = makeInput();
-    const { db, inserted, inputRef } = makeDbStub({
-      outstanding: '200000000',
-      daily: '200000000',
-      hourly: '200000000', // $0.20 used/reserved out of $0.21
-      frequency: 1,
-    });
+    const { db, inserted, inputRef } = makeDbStub(
+      {
+        outstanding: '200000000',
+        daily: '200000000',
+        hourly: '200000000', // $0.20 used/reserved out of fixed $0.21
+        frequency: 1,
+      },
+      { dailyBudgetUsdCents: null, hourlyPacingUsdCents: 21 },
+    );
     inputRef.campaignId = input.campaignId;
     inputRef.creativeId = input.creativeId;
     inputRef.submissionId = input.submissionId;
@@ -206,11 +209,57 @@ describe('PLAN-0112 granular Billing capacity conflict codes', () => {
           usedOrReservedNanos: '200000000',
           requestedNanos: '100000000',
           availableNanos: '10000000',
+          pacingMode: 'fixed',
+          baseHourlyAllowanceNanos: '210000000',
           decision: 'rejected_house_fallback',
         },
       },
     });
     expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects with HOURLY_PACING_EXHAUSTED and adaptive telemetry when adaptive redistributed hourly allowance is exhausted', async () => {
+    jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+    jest.setSystemTime(new Date('2026-11-14T05:00:00.000Z')); // 06:00 WAT -> 18 remaining hours -> 5_000_000_000 / 18 = 277_777_777
+    try {
+      const input = makeInput();
+      const { db, inserted, inputRef } = makeDbStub({
+        outstanding: '200000000',
+        daily: '200000000',
+        hourly: '200000000',
+        frequency: 1,
+      });
+      inputRef.campaignId = input.campaignId;
+      inputRef.creativeId = input.creativeId;
+      inputRef.submissionId = input.submissionId;
+      inputRef.promoterId = input.promoterId;
+      inputRef.websiteId = input.websiteId;
+      inputRef.slotId = input.slotId;
+
+      const service = new AdOpportunityService(db);
+      await expect(service.reserve(input)).rejects.toMatchObject({
+        response: {
+          statusCode: 409,
+          code: 'HOURLY_PACING_EXHAUSTED',
+          capacityDetails: {
+            limitType: 'hourly_pacing',
+            unit: 'usd_nanos',
+            allowanceNanos: '277777777',
+            usedOrReservedNanos: '200000000',
+            requestedNanos: '100000000',
+            availableNanos: '77777777',
+            pacingMode: 'adaptive',
+            baseHourlyAllowanceNanos: '210000000',
+            watHour: 6,
+            remainingWatHours: 18,
+            decision: 'rejected_house_fallback',
+          },
+        },
+      });
+      expect(inserted).toHaveLength(0);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('rejects with DAILY_BUDGET_EXHAUSTED before hourly pacing when daily budget is exceeded', async () => {

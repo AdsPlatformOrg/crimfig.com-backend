@@ -16,6 +16,10 @@ import {
   NANOS_PER_USD_CENT,
   reservePriceMicrosForModel,
 } from './pricing-contract';
+import {
+  computeEffectiveHourlyAllowanceNanos,
+  parseAdaptiveBurstMultiplier,
+} from '../../../../billing-api/src/modules/ecosystem/adaptive-pacing';
 
 export type BidderGroupingMode = 'advertiser' | 'campaign';
 
@@ -73,6 +77,8 @@ export interface AuctionCandidate {
   activeReservedNanos?: bigint;
   hourlyPacingUsdCents?: number | null;
   currentHourSpendUsdCents?: number | null;
+  dailyBudgetUsdCents?: number | null;
+  currentDaySpendUsdCents?: number | null;
   frequencyCapPerDay?: number | null;
   viewerDailyImpressions?: number | null;
   targetCountries?: string[] | null;
@@ -366,13 +372,8 @@ export class AuctionEngineService {
         }
       }
 
-      // Hourly pacing check
-      if (
-        cand.hourlyPacingUsdCents != null &&
-        cand.hourlyPacingUsdCents > 0 &&
-        cand.currentHourSpendUsdCents != null &&
-        cand.currentHourSpendUsdCents >= cand.hourlyPacingUsdCents
-      ) {
+      // Hourly pacing check (adaptive when daily budget & day spend are supplied; fixed fallback otherwise)
+      if (this.isHourlyPacingExhausted(cand, now)) {
         excludedCandidates.push({
           campaignId: cand.campaignId,
           creativeId: cand.creativeId,
@@ -908,5 +909,30 @@ export class AuctionEngineService {
       }
     }
     return expiredCount;
+  }
+
+  private isHourlyPacingExhausted(cand: AuctionCandidate, now: Date): boolean {
+    if (
+      cand.hourlyPacingUsdCents == null ||
+      cand.hourlyPacingUsdCents <= 0 ||
+      cand.currentHourSpendUsdCents == null
+    ) {
+      return false;
+    }
+    if (cand.dailyBudgetUsdCents != null && cand.currentDaySpendUsdCents != null) {
+      const hourlyUsedNanos = BigInt(Math.max(0, Math.round(cand.currentHourSpendUsdCents))) * NANOS_PER_USD_CENT;
+      const dailyUsedNanos = BigInt(Math.max(0, Math.round(cand.currentDaySpendUsdCents))) * NANOS_PER_USD_CENT;
+      const effectiveAllowanceNanos = computeEffectiveHourlyAllowanceNanos({
+        dailyBudgetUsdCents: cand.dailyBudgetUsdCents,
+        hourlyPacingUsdCents: cand.hourlyPacingUsdCents,
+        dailyUsedNanos: dailyUsedNanos > hourlyUsedNanos ? dailyUsedNanos : hourlyUsedNanos,
+        hourlyUsedNanos,
+        now,
+        maxBurstMultiplier: parseAdaptiveBurstMultiplier(),
+      });
+      if (effectiveAllowanceNanos == null) return false;
+      return hourlyUsedNanos >= effectiveAllowanceNanos;
+    }
+    return cand.currentHourSpendUsdCents >= cand.hourlyPacingUsdCents;
   }
 }

@@ -29,6 +29,7 @@ import { FraudRulesService } from '../../../api/ads-api/src/modules/verification
 import { EvidenceService } from '../../../api/ads-api/src/modules/delivery/evidence.service';
 import { AdOpportunityController } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.controller';
 import { AdOpportunityService } from '../../../api/billing-api/src/modules/ecosystem/ad-opportunity.service';
+import { computeEffectiveHourlyAllowanceNanos } from '../../../api/billing-api/src/modules/ecosystem/adaptive-pacing';
 import { OpportunityClient, OpportunityConflictError } from '../../../api/ads-api/src/modules/billing/opportunity-client';
 import { ConfigService } from '@nestjs/config';
 import { eventPriceNanos, reservePriceMicrosForModel } from '../../../api/ads-api/src/modules/delivery/pricing-contract';
@@ -2664,6 +2665,232 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     } finally {
       if (prevStart === undefined) delete process.env.ADS_CPC_PROCESSOR_START;
       else process.env.ADS_CPC_PROCESSOR_START = prevStart;
+    }
+  });
+
+  test('PLAN0113 adaptive hourly pacing enforces dynamic WAT ceiling concurrently and resets at WAT midnight', async () => {
+    const priorPolicy = process.env.ADS_AUCTION_POLICY_APPROVAL;
+    const priorBurst = process.env.ADS_ADAPTIVE_PACING_MAX_BURST;
+    const priorServing = process.env.ADS_PAID_SERVING_ENABLED;
+    const priorRelease = process.env.ADS_PAID_RELEASE_ENABLED;
+    try {
+      process.env.ADS_PAID_SERVING_ENABLED = 'true';
+      process.env.ADS_PAID_RELEASE_ENABLED = 'true';
+      process.env.ADS_ADAPTIVE_PACING_MAX_BURST = '3';
+      process.env.ADS_AUCTION_POLICY_APPROVAL = JSON.stringify({
+        version: 'plan0113-isolated-fixture',
+        approvedBy: 'JED',
+        approvedAt: '2026-11-14T00:00:00Z',
+        pricing: 'second_price',
+        bidderGrouping: 'advertiser',
+        floors: 'bid_and_clearing',
+        fractionalClosure: 'write_off_subcent',
+        pctrBasisPoints: 150,
+        eventWindowMs: 900000,
+        ingestionToleranceMs: 60000,
+      });
+
+      const submissionId = randomUUID();
+      const [campaign] = await db
+        .insert(schema.adsCampaigns)
+        .values({
+          advertiserId: owner,
+          title: 'PLAN0113 adaptive integration fixture',
+          budgetUsdCents: 2000,
+          remainingBudgetUsdCents: 2000,
+          dailyBudgetUsdCents: 1000,
+          hourlyPacingUsdCents: 21,
+          costPerClickUsdCents: 10,
+          costPerImpressionUsdCents: 50,
+          status: 'paused',
+          moderationStatus: 'approved',
+          pricingVersion: 2,
+          pricingModel: 'cpc',
+          contentRevision: 1,
+          approvedRevision: 1,
+          currentSubmissionId: submissionId,
+          approvedSubmissionId: submissionId,
+        })
+        .returning();
+      await db.insert(schema.billingWallets).values({ userId: owner, balanceUsdCents: 5000 });
+      await new CampaignEscrowService(db).change(owner, campaign.id, 'reserve', undefined, 'active');
+
+      const publisher = randomUUID();
+      await pool.query("insert into users(id,email,status) values($1,'p113-pub@example.test','ACTIVE')", [publisher]);
+      const [promoter] = await db.insert(schema.adsPromoters).values({ userId: publisher, type: 'INDIVIDUAL', trustScore: 90 }).returning();
+      const [stack] = await db.insert(schema.adsCreativeStacks).values({ campaignId: campaign.id, name: 'Stack #1', position: 1 }).returning();
+      const [creative] = await db.insert(schema.adsCreatives).values({
+        campaignId: campaign.id,
+        adStackId: stack.id,
+        headline: 'Adaptive Ad',
+        destinationUrl: 'https://plan0113.example.test',
+        status: 'active',
+        reviewStatus: 'approved',
+        adFormat: 'banner',
+        adType: 'text',
+      }).returning();
+      const [site] = await db.insert(schema.adsPromoterWebsites).values({
+        promoterId: promoter.id,
+        url: 'https://plan0113.example.test',
+        domain: 'plan0113.example.test',
+        verificationToken: randomUUID(),
+        verificationMethod: 'dns_txt',
+        verificationStatus: 'verified',
+        verificationExpiresAt: new Date(Date.now() + 86400000),
+        policyStatus: 'approved',
+        trustScore: 90,
+      }).returning();
+      const [slot] = await db.insert(schema.adstationSlots).values({
+        websiteId: site.id,
+        promoterId: promoter.id,
+        name: 'PLAN0113 integration slot',
+        slotTagId: 'cf-slot-plan0113-adaptive',
+        slotType: 'network',
+        format: 'banner',
+        lifecycleStatus: 'active',
+        installationStatus: 'verified',
+        allowedAdTypes: '["text"]',
+        isActive: true,
+      }).returning();
+
+      const now = new Date();
+      // 1. Insert yesterday WAT reservation ($9.50) — must be excluded by Africa/Lagos midnight reset.
+      const watBoundaryResult = await pool.query(
+        "select (date_trunc('day', now() AT TIME ZONE 'Africa/Lagos') AT TIME ZONE 'Africa/Lagos' - interval '2 hours') as yesterday_wat",
+      );
+      await db.insert(schema.adsOpportunityReservations).values({
+        opportunityId: randomUUID(),
+        campaignId: campaign.id,
+        pricingModel: 'cpc',
+        reservedNanos: 9_500_000_000n,
+        state: 'ISSUED',
+        expiresAt: new Date(Date.now() + 60000),
+        createdAt: new Date(watBoundaryResult.rows[0].yesterday_wat),
+      });
+
+      // 2. Compute deterministic current-WAT-hour adaptive allowance ($10/day vs $0.21/hr is always > $0.21/hr).
+      const effectiveAllowance = computeEffectiveHourlyAllowanceNanos({
+        dailyBudgetUsdCents: 1000,
+        hourlyPacingUsdCents: 21,
+        dailyUsedNanos: 0n,
+        hourlyUsedNanos: 0n,
+        now,
+        maxBurstMultiplier: 3n,
+      });
+      if (effectiveAllowance == null) throw new Error('Expected non-null effective allowance');
+      expect(effectiveAllowance).toBeGreaterThan(210_000_000n);
+
+      // Seed current hour to leave exact 150,000,000n ($0.15) headroom: 1x $0.10 fits, 2nd rejects.
+      await db.insert(schema.adsOpportunityReservations).values({
+        opportunityId: randomUUID(),
+        campaignId: campaign.id,
+        pricingModel: 'cpc',
+        reservedNanos: effectiveAllowance - 150_000_000n,
+        state: 'ISSUED',
+        expiresAt: new Date(Date.now() + 60000),
+      });
+
+      const opportunitySvc = new AdOpportunityService(db);
+      const makeReserveInput = (idx: number) => {
+        const opportunityId = randomUUID();
+        return {
+          serveBefore: new Date(Date.now() + 9000).toISOString(),
+          opportunityId,
+          campaignId: campaign.id,
+          creativeId: creative.id,
+          submissionId,
+          contentRevision: 1,
+          promoterId: promoter.id,
+          websiteId: site.id,
+          slotId: slot.id,
+          policyVersion: 'plan0113-isolated-fixture',
+          priceNanos: '100000000',
+          clearingPriceMicros: 1500000,
+          visitorKey: `${idx}`.repeat(64).slice(0, 64),
+          cpcVisitorKey: `c${idx}`.repeat(32).slice(0, 64),
+          ipHash: `${idx}`.repeat(16).slice(0, 16),
+          decision: {
+            requestId: opportunityId,
+            slotHandle: slot.slotTagId,
+            policyVersion: 'plan0113-isolated-fixture',
+            bidderGroupingMode: 'advertiser',
+            tieSeed: `tie-${idx}`,
+            candidateCount: 1,
+            eligibleGroupCount: 1,
+            evaluatedCandidates: [{ campaignId: campaign.id, creativeId: creative.id, bidderGroupKey: `owner:${owner}`, pricingModel: 'cpc', bidUsdCents: 10, scoreMicros: 1500000, tieDigest: '0'.repeat(64) }],
+            excludedCandidates: [],
+            winnerCampaignId: campaign.id,
+            winnerCreativeId: creative.id,
+            runnerUpCampaignId: null,
+            pricingModel: 'cpc',
+            clearingPriceMicros: 1500000,
+            billingPriceNanos: '100000000',
+          },
+        };
+      };
+
+      // 3. Concurrency race: 4 simultaneous calls contend for 1 remaining $0.10 slot above static $0.21 cap.
+      const outcomes = await Promise.allSettled([
+        opportunitySvc.reserve(makeReserveInput(1)),
+        opportunitySvc.reserve(makeReserveInput(2)),
+        opportunitySvc.reserve(makeReserveInput(3)),
+        opportunitySvc.reserve(makeReserveInput(4)),
+      ]);
+      const fulfilled = outcomes.filter((r) => r.status === 'fulfilled');
+      const rejected = outcomes.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(3);
+      for (const failure of rejected) {
+        const body = typeof failure.reason?.getResponse === 'function' ? failure.reason.getResponse() : failure.reason;
+        expect(body).toMatchObject({
+          statusCode: 409,
+          code: 'HOURLY_PACING_EXHAUSTED',
+          capacityDetails: {
+            limitType: 'hourly_pacing',
+            pacingMode: 'adaptive',
+            baseHourlyAllowanceNanos: '210000000',
+          },
+        });
+      }
+
+      // 4. Daily hard cap beats hourly allowance when daily budget remaining < $0.10.
+      const heldCountBeforeDailyCap = (
+        await pool.query("select count(*)::int n from ads_opportunity_reservations where campaign_id=$1 and state='HELD'", [campaign.id])
+      ).rows[0].n;
+      expect(heldCountBeforeDailyCap).toBe(1);
+      const todaySumRow = (
+        await pool.query(
+          "select coalesce(sum(reserved_nanos),0)::text total from ads_opportunity_reservations where campaign_id=$1 and created_at >= date_trunc('day', now() AT TIME ZONE 'Africa/Lagos') AT TIME ZONE 'Africa/Lagos' and state in ('HELD','ISSUED','CLAIMED')",
+          [campaign.id],
+        )
+      ).rows[0];
+      const remainingDailyNanos = 10_000_000_000n - BigInt(todaySumRow.total);
+      if (remainingDailyNanos > 50_000_000n) {
+        await db.insert(schema.adsOpportunityReservations).values({
+          opportunityId: randomUUID(),
+          campaignId: campaign.id,
+          pricingModel: 'cpc',
+          reservedNanos: remainingDailyNanos - 50_000_000n,
+          state: 'ISSUED',
+          expiresAt: new Date(Date.now() + 60000),
+        });
+      }
+      await expect(opportunitySvc.reserve(makeReserveInput(5))).rejects.toMatchObject({
+        response: expect.objectContaining({ code: 'DAILY_BUDGET_EXHAUSTED' }),
+      });
+      const heldCountAfterDailyCap = (
+        await pool.query("select count(*)::int n from ads_opportunity_reservations where campaign_id=$1 and state='HELD'", [campaign.id])
+      ).rows[0].n;
+      expect(heldCountAfterDailyCap).toBe(1);
+    } finally {
+      if (priorPolicy === undefined) delete process.env.ADS_AUCTION_POLICY_APPROVAL;
+      else process.env.ADS_AUCTION_POLICY_APPROVAL = priorPolicy;
+      if (priorBurst === undefined) delete process.env.ADS_ADAPTIVE_PACING_MAX_BURST;
+      else process.env.ADS_ADAPTIVE_PACING_MAX_BURST = priorBurst;
+      if (priorServing === undefined) delete process.env.ADS_PAID_SERVING_ENABLED;
+      else process.env.ADS_PAID_SERVING_ENABLED = priorServing;
+      if (priorRelease === undefined) delete process.env.ADS_PAID_RELEASE_ENABLED;
+      else process.env.ADS_PAID_RELEASE_ENABLED = priorRelease;
     }
   });
 

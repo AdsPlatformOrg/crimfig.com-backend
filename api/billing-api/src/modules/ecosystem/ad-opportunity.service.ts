@@ -1,7 +1,10 @@
 import { selectGeneralSlotImage } from '../../../../ads-api/src/modules/uploads/image-ad-presets';
 import { resolveGeneralSlotCreativeTypes, resolveSlotCreativeTypes } from './creative-slot-policy';
 import type { OpportunityCapacityDetails, OpportunityConflictCode } from './ad-opportunity-conflict-codes';
-import { computeEffectiveHourlyAllowanceNanos } from './adaptive-pacing';
+import {
+  computeAdaptiveHourlyPacingDetails,
+  parseAdaptiveBurstMultiplier,
+} from './adaptive-pacing';
 import {BadRequestException,ConflictException,Inject,Injectable,NotFoundException,ServiceUnavailableException} from '@nestjs/common';
 import {randomUUID} from 'crypto';
 import {and,eq,sql} from 'drizzle-orm';
@@ -136,12 +139,14 @@ export class AdOpportunityService {
           });
         }
       }
-      const hourlyAllowanceNanos = computeEffectiveHourlyAllowanceNanos({
+      const hourlyEvaluation = computeAdaptiveHourlyPacingDetails({
         dailyBudgetUsdCents: c.dailyBudgetUsdCents,
         hourlyPacingUsdCents: c.hourlyPacingUsdCents,
         dailyUsedNanos: BigInt(u.daily),
         hourlyUsedNanos: BigInt(u.hourly),
+        maxBurstMultiplier: parseAdaptiveBurstMultiplier(),
       });
+      const hourlyAllowanceNanos = hourlyEvaluation.effectiveHourlyAllowanceNanos;
       if (hourlyAllowanceNanos != null) {
         const hourlyUsedNanos = BigInt(u.hourly);
         if (hourlyUsedNanos + price > hourlyAllowanceNanos) {
@@ -153,6 +158,16 @@ export class AdOpportunityService {
             usedOrReservedNanos: hourlyUsedNanos.toString(),
             requestedNanos: price.toString(),
             availableNanos: availableNanos.toString(),
+            ...(hourlyEvaluation.mode !== 'uncapped' ? { pacingMode: hourlyEvaluation.mode } : {}),
+            ...(hourlyEvaluation.baselineHourlyAllowanceNanos != null
+              ? { baseHourlyAllowanceNanos: hourlyEvaluation.baselineHourlyAllowanceNanos.toString() }
+              : {}),
+            ...(hourlyEvaluation.mode === 'adaptive'
+              ? {
+                  watHour: hourlyEvaluation.watHour,
+                  remainingWatHours: hourlyEvaluation.remainingWatHours,
+                }
+              : {}),
             decision: 'rejected_house_fallback',
           });
         }
