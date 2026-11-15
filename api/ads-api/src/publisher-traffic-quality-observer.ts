@@ -16,11 +16,12 @@ export async function recordPublisherTrafficQualityObservations(
     `SELECT
        i.promoter_id,
        i.website_id,
-       count(DISTINCT COALESCE(i.cpc_visitor_key, i.ip_hash, i.id::text))::int AS visitor_count,
-       count(DISTINCT i.ip_hash)::int AS distinct_ip_count,
+       count(DISTINCT COALESCE(s.cpc_visitor_key, i.keyed_ip_hash, i.id::text))::int AS visitor_count,
+       count(DISTINCT i.keyed_ip_hash)::int AS distinct_ip_count,
        count(*) FILTER (WHERE i.type = 'click')::int AS click_count,
-       count(DISTINCT i.campaign_id) FILTER (WHERE i.type = 'click')::int AS distinct_campaigns_clicked
+       count(DISTINCT s.campaign_id) FILTER (WHERE i.type = 'click')::int AS distinct_campaigns_clicked
      FROM ads_interactions i
+     LEFT JOIN ads_serves s ON s.id = i.serve_id
      WHERE i.created_at >= $1
        AND i.created_at <= $2
        AND i.promoter_id IS NOT NULL

@@ -1,4 +1,15 @@
 import { applyEventCashRebates, restoreOverturnedEventCash } from '../../../api/ads-api/src/event-cash-rebate-reconciliation';
+import { CronJobRegistry, CronLeaseLostError } from '../../../api/ads-api/src/modules/scheduling/cron-job-registry';
+import { CronJobStateRepository } from '../../../api/ads-api/src/modules/scheduling/cron-job-state.repository';
+import { CronExecutionCoordinator } from '../../../api/ads-api/src/modules/scheduling/cron-execution-coordinator.service';
+import { AdsCronSchedulerService } from '../../../api/ads-api/src/modules/scheduling/ads-cron-scheduler.service';
+import { CpcProcessingJob } from '../../../api/ads-api/src/modules/scheduling/jobs/cpc-processing.job';
+import { TrafficQualityJob } from '../../../api/ads-api/src/modules/scheduling/jobs/traffic-quality.job';
+import { RollingFraudAuditJob } from '../../../api/ads-api/src/modules/scheduling/jobs/rolling-fraud-audit.job';
+import { Day15AuditJob } from '../../../api/ads-api/src/modules/scheduling/jobs/day-15-audit.job';
+import { Day30AuditJob } from '../../../api/ads-api/src/modules/scheduling/jobs/day-30-audit.job';
+import { RewardsReconciliationJob } from '../../../api/ads-api/src/modules/scheduling/jobs/rewards-reconciliation.job';
+import { SchedulingMonitorController } from '../../../api/ads-api/src/modules/scheduling/scheduling-monitor.controller';
 import { houseCfigCorrectionPreview, reconcileHouseCfigCorrections } from '../../../api/ads-api/src/house-cfig-correction-preview';
 import { paidPointsCorrectionPreview, reconcilePaidPointsCorrections, recordPaidPointsCorrectionObservations } from '../../../api/ads-api/src/paid-points-correction-preview';
 import { evidenceSignature } from '../../../shared/src/ad-authority-policy';
@@ -2496,6 +2507,163 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       else process.env.ADS_EVIDENCE_HASH_SECRET = prevSecret;
       if (prevKeyId === undefined) delete process.env.ADS_EVIDENCE_HASH_KEY_ID;
       else process.env.ADS_EVIDENCE_HASH_KEY_ID = prevKeyId;
+    }
+  });
+
+  test('PLAN0114 real PostgreSQL distributed cron leases, fencing tokens, heavy deferral, and report-only audits', async () => {
+    const registry = new CronJobRegistry();
+    const stateRepo = new CronJobStateRepository(db as any);
+
+    const replica1 = new CronExecutionCoordinator(registry, stateRepo, 'pg-replica-1');
+    const replica2 = new CronExecutionCoordinator(registry, stateRepo, 'pg-replica-2');
+    const replica3 = new CronExecutionCoordinator(registry, stateRepo, 'pg-replica-3');
+
+    await replica1.onModuleInit();
+
+    // 1. Three replicas race on the same job against real PostgreSQL: only 1 wins the lease
+    let executionCount = 0;
+    const raceOutcomes = await Promise.all([
+      replica1.run('ads.cpc.processing', async (ctx) => {
+        executionCount++;
+        await new Promise((r) => setTimeout(r, 40));
+        await ctx.assertLeaseOwnership();
+        return { processedCount: 7, summary: { winner: ctx.instanceId } };
+      }),
+      replica2.run('ads.cpc.processing', async () => {
+        executionCount++;
+        return { processedCount: 99 };
+      }),
+      replica3.run('ads.cpc.processing', async () => {
+        executionCount++;
+        return { processedCount: 99 };
+      }),
+    ]);
+
+    expect(raceOutcomes.filter((o) => o.status === 'COMPLETED')).toHaveLength(1);
+    expect(raceOutcomes.filter((o) => o.status === 'SKIPPED_LOCKED')).toHaveLength(2);
+    expect(executionCount).toBe(1);
+
+    // 2. Expired lease recovery and fencing token enforcement against real PostgreSQL
+    let zombieWriteCommitted = false;
+    const zombieOutcome = await replica1.run('ads.cpc.processing', async (ctx1) => {
+      expect(ctx1.fencingToken).toBe(2);
+      // Force lease expiry in PostgreSQL to simulate a stalled container
+      await pool.query(
+        "UPDATE ads_cron_job_state SET lease_expires_at = clock_timestamp() - interval '5 seconds' WHERE job_key = 'ads.cpc.processing'",
+      );
+
+      // Replica 2 recovers the expired lease with fencing token 3
+      const recovered = await replica2.run('ads.cpc.processing', async (ctx2) => {
+        expect(ctx2.fencingToken).toBe(3);
+        await ctx2.saveCheckpoint({ owner: 'pg-replica-2', token: 3 });
+        return { processedCount: 2 };
+      });
+      expect(recovered.status).toBe('COMPLETED');
+
+      // Replica 1 now attempts to save a checkpoint with stale fencing token 2 -> must throw CronLeaseLostError!
+      await ctx1.saveCheckpoint({ owner: 'zombie-replica-1', token: 2 });
+      zombieWriteCommitted = true;
+      return { processedCount: 1 };
+    });
+
+    expect(zombieOutcome.status).toBe('FAILED');
+    expect((zombieOutcome as any).error).toContain('Cron lease ownership lost or expired');
+    expect(zombieWriteCommitted).toBe(false);
+
+    const cpRow = (
+      await pool.query(
+        "SELECT fencing_token, last_completed_checkpoint FROM ads_cron_job_state WHERE job_key = 'ads.cpc.processing'",
+      )
+    ).rows[0];
+    expect(Number(cpRow.fencing_token)).toBe(3);
+    expect(cpRow.last_completed_checkpoint).toEqual({ owner: 'pg-replica-2', token: 3 });
+
+    // 3. Heavy job capacity deferral & recovery on real PostgreSQL
+    let releaseCpc!: () => void;
+    const cpcHold = new Promise<void>((resolve) => {
+      releaseCpc = resolve;
+    });
+    const activeCpcPromise = replica1.run('ads.cpc.processing', async () => {
+      await cpcHold;
+      return { processedCount: 1 };
+    });
+
+    // Wait briefly until replica1 acquires the PostgreSQL lease
+    for (let i = 0; i < 20; i++) {
+      const lockCheck = await pool.query(
+        "SELECT lease_owner FROM ads_cron_job_state WHERE job_key = 'ads.cpc.processing'",
+      );
+      if (lockCheck.rows[0]?.lease_owner === 'pg-replica-1') break;
+      await new Promise((r) => setTimeout(r, 15));
+    }
+
+    const deferredAudit = await replica2.run(
+      'ads.audit.rolling72h',
+      async () => ({ processedCount: 10 }),
+      {
+        deferralWindow: {
+          lower: '2026-01-01T00:00:00.000Z',
+          upper: '2026-01-01T06:00:00.000Z',
+        },
+      },
+    );
+    expect(deferredAudit.status).toBe('DEFERRED_CAPACITY');
+
+    releaseCpc();
+    await activeCpcPromise;
+
+    // 4. Execute RollingFraudAuditJob, Day15AuditJob, Day30AuditJob via AdsCronSchedulerService in REPORT_ONLY mode
+    const cpcJob = new CpcProcessingJob(
+      db as any,
+      registry,
+      new TrafficQualityJob(db as any),
+      new RewardsReconciliationJob(db as any),
+    );
+    const scheduler = new AdsCronSchedulerService(
+      replica1,
+      registry,
+      stateRepo,
+      cpcJob,
+      new TrafficQualityJob(db as any),
+      new RollingFraudAuditJob(db as any),
+      new Day15AuditJob(db as any),
+      new Day30AuditJob(db as any),
+      new RewardsReconciliationJob(db as any),
+    );
+
+    const prevStart = process.env.ADS_CPC_PROCESSOR_START;
+    process.env.ADS_CPC_PROCESSOR_START = '2026-01-01T00:00:00.000Z';
+    try {
+      const triggerTime = new Date('2026-01-01T12:00:00.000Z');
+      const r6h = await scheduler.auditRecentTraffic({ triggerTime });
+      const r15d = await scheduler.auditDay15({ triggerTime });
+      const r30d = await scheduler.auditDay30({ triggerTime });
+
+      expect(r6h.status).toBe('COMPLETED');
+      expect(r15d.status).toBe('COMPLETED');
+      expect(r30d.status).toBe('COMPLETED');
+
+      const auditRows = await pool.query(
+        'SELECT audit_level, status, notes FROM ads_deep_audit_runs ORDER BY run_number',
+      );
+      expect(auditRows.rows.length).toBeGreaterThanOrEqual(6);
+      for (const row of auditRows.rows) {
+        expect(JSON.parse(row.notes).mode).toBe('report-only');
+      }
+      expect(
+        (await pool.query("SELECT count(*)::int AS count FROM billing_transactions WHERE type='ads_spend'")).rows[0]
+          .count,
+      ).toBe(0);
+
+      // 5. Verify SchedulingMonitorController health snapshot over real PostgreSQL
+      const monitor = new SchedulingMonitorController(scheduler);
+      const health = await monitor.getSchedulingHealth();
+      expect(health.status).toBe('success');
+      expect(health.data.jobs).toHaveLength(6);
+      expect(health.data.recentRuns.length).toBeGreaterThan(0);
+    } finally {
+      if (prevStart === undefined) delete process.env.ADS_CPC_PROCESSOR_START;
+      else process.env.ADS_CPC_PROCESSOR_START = prevStart;
     }
   });
 

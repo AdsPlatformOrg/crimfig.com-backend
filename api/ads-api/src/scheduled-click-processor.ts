@@ -145,13 +145,14 @@ export async function processScheduledClicks() {
     }
     const worker = new AdOpportunityWorker(db, new AdOpportunityService(db),
       new AdSettlementService(db), new CampaignEscrowService(db));
-    await worker.tick({ campaigns, start, deadline: deadline + 60_000 });
+    await worker.tick({ campaigns: targetCampaigns, start, deadline: deadline + 60_000 });
     if (assessmentFailures || recoveryFailures) throw new Error('Some CPC assessments require retry');
     const window = { lower: start, upper: new Date().toISOString() };
-    const cashRebates = await applyEventCashRebates(db, window);
-    const cashRestores = await restoreOverturnedEventCash(db, window);
-    const pointsReconciliation = await reconcilePaidPointsCorrections(db, window);
-    const houseReconciliation = await reconcileHouseCfigCorrections(db, window);
+    const allowCorrections = process.env.ADS_AUTOMATIC_FINANCIAL_CORRECTIONS_ENABLED === 'true';
+    const cashRebates = allowCorrections ? await applyEventCashRebates(db, window) : { skippedReportOnly: true };
+    const cashRestores = allowCorrections ? await restoreOverturnedEventCash(db, window) : { skippedReportOnly: true };
+    const pointsReconciliation = allowCorrections ? await reconcilePaidPointsCorrections(db, window) : { skippedReportOnly: true };
+    const houseReconciliation = allowCorrections ? await reconcileHouseCfigCorrections(db, window) : { skippedReportOnly: true };
     const points = await recordPaidPointsCorrectionObservations(db, window);
     const house = await houseCfigCorrectionPreview(db, window);
     const trafficQuality = await recordPublisherTrafficQualityObservations(db.$client, { endAt: new Date(window.upper) });

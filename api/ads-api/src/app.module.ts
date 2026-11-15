@@ -23,6 +23,7 @@ import { DisputesModule } from './modules/disputes/disputes.module';
 import { EcosystemModule } from './modules/ecosystem/ecosystem.module';
 import { AdstationModule } from './modules/adstation/adstation.module';
 import { AdvertiserMilestonesModule } from './modules/advertiser-milestones/advertiser-milestones.module';
+import { SchedulingModule } from './modules/scheduling/scheduling.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { AdvertiserMilestonesModule } from './modules/advertiser-milestones/adve
     AdstationModule,
     AdsOperationsModule,
     AdvertiserMilestonesModule,
+    SchedulingModule,
   ],
   providers: [
     {provide:DurableErrorMonitorSink,useFactory:(db:any)=>new DurableErrorMonitorSink(db,'ads-api'),inject:['DATABASE_CONNECTION']},
