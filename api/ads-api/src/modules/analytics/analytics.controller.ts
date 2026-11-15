@@ -83,6 +83,16 @@ export class AnalyticsController {
     return { status: 'success', data: stats };
   }
 
+  @Get('promoter/summary')
+  @ApiOperation({ summary: 'Get Promoter Hub overview dashboard summary and timeseries' })
+  @ApiQuery({ name: 'period', required: false, enum: ['7d', '30d', '90d'] })
+  async getPromoterDashboardSummary(@Req() req: any, @Query('period') period?: string) {
+    const userId = req.user.sub;
+    const promoter = await this.promotersService.getOrCreatePromoter(userId);
+    const summary = await this.analyticsService.getPromoterDashboardSummary(promoter.id, userId, period);
+    return { status: 'success', data: summary };
+  }
+
   @Get('advertiser')
   @ApiOperation({ summary: 'Get advertiser campaigns, budget spend, and conversion metrics' })
   async getAdvertiserAnalytics(@Req() req: any) {

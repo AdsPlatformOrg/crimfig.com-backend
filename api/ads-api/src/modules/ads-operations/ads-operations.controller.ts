@@ -171,6 +171,25 @@ export class AdsOperationsController {
     );
     return { status: 'success', data: result };
   }
+  @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
+  @Post(['adstation/admin/slots/:id/direct-review', 'admin/ads/slots/:id/direct-review'])
+  @ApiOperation({
+    summary: 'Admin: Approve or reject an AdStation Direct Ad Slot on its current material revision',
+  })
+  async adminReviewDirectSlot(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body('decision') decision: 'approved' | 'rejected',
+    @Body('reason') reason: string,
+    @Req() req: any,
+  ) {
+    const result = await this.operations.adminReviewDirectSlot(
+      id,
+      decision,
+      reason,
+      req.user?.sub,
+    );
+    return { status: 'success', data: result };
+  }
 }
 
 documentAdsController(AdsOperationsController);

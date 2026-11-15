@@ -7,6 +7,11 @@ import * as schema from '@crimfig/database/schema';
 import {
   adsInteractions,
   adsPromoterEarnings,
+  adsPromoterSettlementItems,
+  adsConversions,
+  adsPromoterWebsites,
+  adsPromoterApps,
+  adstationSlots,
   adsPlacements,
   adsServes,
   billingTransactions,
@@ -96,6 +101,236 @@ export class AnalyticsService {
       ctr: parseFloat(ctr.toFixed(2)),
       earningsUsd: totalEarningsCents / 100,
       recentActivity: recentLogs,
+    };
+  }
+
+  /**
+   * Promoter Hub Overview Dashboard Summary (PLAN-0115)
+   */
+  async getPromoterDashboardSummary(promoterId: string, userId: string, period = '30d') {
+    const days = period === '7d' ? 7 : period === '90d' ? 90 : 30;
+    const now = new Date();
+    const startDate = new Date(now);
+    startDate.setDate(now.getDate() - days);
+
+    const [impressionsRow] = await this.db
+      .select({
+        validCount: sql<number>`count(*) filter (where ${adsInteractions.isValid} = true)`,
+        grossCount: sql<number>`count(*)`,
+      })
+      .from(adsInteractions)
+      .where(
+        and(
+          eq(adsInteractions.promoterId, promoterId),
+          eq(adsInteractions.type, 'impression'),
+          gte(adsInteractions.createdAt, startDate),
+          lte(adsInteractions.createdAt, now),
+        ),
+      );
+
+    const [clicksRow] = await this.db
+      .select({
+        validCount: sql<number>`count(*) filter (where ${adsInteractions.isValid} = true)`,
+        grossCount: sql<number>`count(*)`,
+      })
+      .from(adsInteractions)
+      .where(
+        and(
+          eq(adsInteractions.promoterId, promoterId),
+          eq(adsInteractions.type, 'click'),
+          gte(adsInteractions.createdAt, startDate),
+          lte(adsInteractions.createdAt, now),
+        ),
+      );
+
+    const [acquisitionsRow] = await this.db
+      .select({
+        count: sql<number>`count(*)`,
+      })
+      .from(adsConversions)
+      .where(
+        and(
+          eq(adsConversions.attributedPromoterId, promoterId),
+          eq(adsConversions.status, 'attributed'),
+          gte(adsConversions.occurredAt, startDate),
+          lte(adsConversions.occurredAt, now),
+        ),
+      );
+
+    const [settlementRow] = await this.db
+      .select({
+        clearedCents: sql<number>`COALESCE(SUM(CASE WHEN ${adsPromoterSettlementItems.clearanceStatus} = 'cleared' THEN ${adsPromoterSettlementItems.earnedUsdCents} ELSE 0 END), 0)`,
+        pendingCents: sql<number>`COALESCE(SUM(CASE WHEN ${adsPromoterSettlementItems.clearanceStatus} = 'pending' THEN ${adsPromoterSettlementItems.earnedUsdCents} ELSE 0 END), 0)`,
+        reversedCents: sql<number>`COALESCE(SUM(CASE WHEN ${adsPromoterSettlementItems.clearanceStatus} IN ('penalized', 'clawed_back') THEN ${adsPromoterSettlementItems.earnedUsdCents} ELSE 0 END), 0)`,
+        rowCount: sql<number>`count(*)`,
+      })
+      .from(adsPromoterSettlementItems)
+      .where(
+        and(
+          eq(adsPromoterSettlementItems.promoterId, promoterId),
+          gte(adsPromoterSettlementItems.createdAt, startDate),
+          lte(adsPromoterSettlementItems.createdAt, now),
+        ),
+      );
+
+    const [legacyEarningsRow] = await this.db
+      .select({
+        totalCents: sql<number>`COALESCE(SUM(${adsPromoterEarnings.amountUsdCents}), 0)`,
+      })
+      .from(adsPromoterEarnings)
+      .where(
+        and(
+          eq(adsPromoterEarnings.promoterId, promoterId),
+          gte(adsPromoterEarnings.createdAt, startDate),
+          lte(adsPromoterEarnings.createdAt, now),
+        ),
+      );
+
+    const [withdrawalsRow] = await this.db
+      .select({
+        withdrawnCents: sql<number>`COALESCE(SUM(${billingTransactions.amountUsdCents}), 0)`,
+      })
+      .from(billingTransactions)
+      .where(
+        and(
+          eq(billingTransactions.userId, userId),
+          eq(billingTransactions.type, 'wallet_withdraw'),
+          eq(billingTransactions.status, 'completed'),
+          gte(billingTransactions.createdAt, startDate),
+          lte(billingTransactions.createdAt, now),
+        ),
+      );
+
+    const clearedCents = Number(settlementRow?.clearedCents ?? 0);
+    const pendingCents = Number(settlementRow?.pendingCents ?? 0);
+    const reversedCents = Number(settlementRow?.reversedCents ?? 0);
+    const hasSettlementItems = Number(settlementRow?.rowCount ?? 0) > 0;
+    const legacyCents = Number(legacyEarningsRow?.totalCents ?? 0);
+    const netEarnedCents = hasSettlementItems
+      ? Math.max(0, clearedCents + pendingCents)
+      : Math.max(0, legacyCents);
+
+    const websites = await this.db
+      .select({
+        id: adsPromoterWebsites.id,
+        verificationStatus: adsPromoterWebsites.verificationStatus,
+        policyStatus: adsPromoterWebsites.policyStatus,
+        isActive: adsPromoterWebsites.isActive,
+        isSuspended: adsPromoterWebsites.isSuspended,
+      })
+      .from(adsPromoterWebsites)
+      .where(eq(adsPromoterWebsites.promoterId, promoterId));
+
+    const apps = await this.db
+      .select({ id: adsPromoterApps.id })
+      .from(adsPromoterApps)
+      .where(eq(adsPromoterApps.promoterId, promoterId));
+
+    const slots = await this.db
+      .select({
+        id: adstationSlots.id,
+        slotType: adstationSlots.slotType,
+        lifecycleStatus: adstationSlots.lifecycleStatus,
+        isActive: adstationSlots.isActive,
+      })
+      .from(adstationSlots)
+      .where(eq(adstationSlots.promoterId, promoterId));
+
+    const dailyInteractions = await this.db
+      .select({
+        day: sql<string>`TO_CHAR(${adsInteractions.createdAt}, 'YYYY-MM-DD')`,
+        type: adsInteractions.type,
+        count: sql<number>`count(*)`,
+      })
+      .from(adsInteractions)
+      .where(
+        and(
+          eq(adsInteractions.promoterId, promoterId),
+          eq(adsInteractions.isValid, true),
+          gte(adsInteractions.createdAt, startDate),
+          lte(adsInteractions.createdAt, now),
+        ),
+      )
+      .groupBy(sql`TO_CHAR(${adsInteractions.createdAt}, 'YYYY-MM-DD')`, adsInteractions.type);
+
+    const dailyEarnings = await this.db
+      .select({
+        day: sql<string>`TO_CHAR(${adsPromoterSettlementItems.createdAt}, 'YYYY-MM-DD')`,
+        cents: sql<number>`COALESCE(SUM(CASE WHEN ${adsPromoterSettlementItems.clearanceStatus} IN ('cleared', 'pending') THEN ${adsPromoterSettlementItems.earnedUsdCents} ELSE 0 END), 0)`,
+      })
+      .from(adsPromoterSettlementItems)
+      .where(
+        and(
+          eq(adsPromoterSettlementItems.promoterId, promoterId),
+          gte(adsPromoterSettlementItems.createdAt, startDate),
+          lte(adsPromoterSettlementItems.createdAt, now),
+        ),
+      )
+      .groupBy(sql`TO_CHAR(${adsPromoterSettlementItems.createdAt}, 'YYYY-MM-DD')`);
+
+    const dailyMap = new Map<string, { impressions: number; clicks: number; earningsUsd: number }>();
+    for (const row of dailyInteractions) {
+      const entry = dailyMap.get(row.day) ?? { impressions: 0, clicks: 0, earningsUsd: 0 };
+      if (row.type === 'impression') entry.impressions += Number(row.count || 0);
+      if (row.type === 'click') entry.clicks += Number(row.count || 0);
+      dailyMap.set(row.day, entry);
+    }
+    for (const row of dailyEarnings) {
+      const entry = dailyMap.get(row.day) ?? { impressions: 0, clicks: 0, earningsUsd: 0 };
+      entry.earningsUsd += Number(row.cents || 0) / 100;
+      dailyMap.set(row.day, entry);
+    }
+
+    const timeseries: Array<{ date: string; impressions: number; clicks: number; earningsUsd: number }> = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(now.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const item = dailyMap.get(dateStr) ?? { impressions: 0, clicks: 0, earningsUsd: 0 };
+      timeseries.push({
+        date: dateStr,
+        impressions: item.impressions,
+        clicks: item.clicks,
+        earningsUsd: parseFloat(item.earningsUsd.toFixed(2)),
+      });
+    }
+
+    const validImpressions = Number(impressionsRow?.validCount ?? 0);
+    const validClicks = Number(clicksRow?.validCount ?? 0);
+
+    return {
+      period,
+      startDate: startDate.toISOString(),
+      endDate: now.toISOString(),
+      earnings: {
+        netEarnedUsd: netEarnedCents / 100,
+        clearedUsd: (hasSettlementItems ? clearedCents : legacyCents) / 100,
+        pendingUsd: pendingCents / 100,
+        reversedUsd: reversedCents / 100,
+        withdrawnUsd: Number(withdrawalsRow?.withdrawnCents ?? 0) / 100,
+      },
+      performance: {
+        impressions: validImpressions,
+        grossImpressions: Number(impressionsRow?.grossCount ?? 0),
+        clicks: validClicks,
+        grossClicks: Number(clicksRow?.grossCount ?? 0),
+        ctr: validImpressions > 0 ? parseFloat(((validClicks / validImpressions) * 100).toFixed(2)) : 0,
+        acquisitions: Number(acquisitionsRow?.count ?? 0),
+        acquisitionsSupported: true,
+      },
+      adNetwork: {
+        websitesCount: websites.length,
+        activeWebsitesCount: websites.filter(
+          (w) => w.isActive && !w.isSuspended && w.verificationStatus === 'verified' && w.policyStatus === 'approved',
+        ).length,
+        appsCount: apps.length,
+        slotsCount: slots.filter((s) => s.slotType !== 'direct').length,
+        activeSlotsCount: slots.filter(
+          (s) => s.slotType !== 'direct' && s.isActive && s.lifecycleStatus === 'active',
+        ).length,
+        directSlotsCount: slots.filter((s) => s.slotType === 'direct').length,
+      },
+      timeseries,
     };
   }
 
@@ -242,8 +477,30 @@ export class AnalyticsService {
     const billedClicks = clickCounts.reduce((total, row) => total + row.billed, 0);
     const totalBudgetCents = campaigns.reduce((acc, c) => acc + (Number(c.budgetUsdCents) || 0), 0);
     const totalRemainingCents = campaigns.reduce((acc, c) => acc + (Number(c.remainingBudgetUsdCents) || 0), 0);
-    const totalSpentCents = Math.max(0, totalBudgetCents - totalRemainingCents);
-    const ctr = totalImpressions > 0 ? (totalClicks / totalImpressions) * 100 : 0;
+    let totalSpentCents = 0;
+    if (campaignIds.length > 0) {
+      const [spendRow] = await this.db
+        .select({
+          grossSpendCents: sql<number>`COALESCE(SUM(CASE WHEN ${billingTransactions.type} = 'ads_spend' THEN ${billingTransactions.amountUsdCents} ELSE 0 END), 0)`,
+          reversalCents: sql<number>`COALESCE(SUM(CASE WHEN ${billingTransactions.type} = 'internal_credit' AND ${billingTransactions.idempotencyKey} LIKE 'ads-rejection:v1:%' THEN ${billingTransactions.amountUsdCents} ELSE 0 END), 0)`,
+        })
+        .from(billingTransactions)
+        .where(
+          and(
+            eq(billingTransactions.userId, advertiserId),
+            eq(billingTransactions.status, 'completed'),
+            eq(billingTransactions.provider, 'internal'),
+            gte(billingTransactions.createdAt, startDate),
+            lte(billingTransactions.createdAt, now),
+            sql`(${billingTransactions.metadata}::jsonb)->>'campaignId' IN (${sql.join(campaignIds.map((id) => sql`${id}`), sql`, `)})`,
+          ),
+        );
+      totalSpentCents = Math.max(
+        0,
+        Number(spendRow?.grossSpendCents ?? 0) - Number(spendRow?.reversalCents ?? 0),
+      );
+    }
+    const ctr = totalImpressions > 0 ? (validClicks / totalImpressions) * 100 : 0;
     const avgCpmUsd = totalImpressions > 0 ? ((totalSpentCents / 100) / totalImpressions) * 1000 : 0;
     const avgCpcUsd = billedClicks > 0 ? (totalSpentCents / 100) / billedClicks : 0;
 
@@ -265,6 +522,7 @@ export class AnalyticsService {
       financials: {
         totalBudgetUsd: totalBudgetCents / 100,
         totalSpentUsd: totalSpentCents / 100,
+        netSettledSpendUsd: totalSpentCents / 100,
         remainingBudgetUsd: totalRemainingCents / 100,
       },
       performance: {

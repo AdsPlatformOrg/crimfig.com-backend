@@ -9,6 +9,7 @@ import { adstationSlots, adsPromoterWebsites, adsServes, adsInteractions, adsSup
 import { and, eq, desc, gte, sql, or } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { normalizeSlotPresetPolicy, CURRENT_IMAGE_PRESETS_POLICY_VERSION } from '../uploads/image-ad-presets';
+import { evaluateDirectSlotReadiness } from '../adstation/adstation-gating';
 
 export interface CreateAdstationSlotDto {
   websiteId: string;
@@ -16,6 +17,7 @@ export interface CreateAdstationSlotDto {
   slotType: 'consideration' | 'direct' | 'network' | 'hybrid';
   format?: string;
   slotDeliveryPreference?: string;
+  lifecycleStatus?: 'draft' | 'testing';
   width?: number;
   height?: number;
   responsive?: boolean;
@@ -27,7 +29,7 @@ export interface UpdateAdstationSlotDto {
   name?: string;
   format?: string;
   slotDeliveryPreference?: string;
-  lifecycleStatus?: 'testing' | 'active' | 'paused' | 'disabled';
+  lifecycleStatus?: 'draft' | 'testing' | 'active' | 'paused' | 'disabled';
   width?: number;
   height?: number;
   responsive?: boolean;
@@ -59,7 +61,18 @@ export class PublisherSlotsService {
    * List slots for a promoter website
    */
   async getSlots(promoterId: string, websiteId: string) {
-    return this.db
+    const [website] = await this.db
+      .select()
+      .from(adsPromoterWebsites)
+      .where(
+        and(
+          eq(adsPromoterWebsites.id, websiteId),
+          eq(adsPromoterWebsites.promoterId, promoterId),
+        ),
+      )
+      .limit(1);
+
+    const slots = await this.db
       .select()
       .from(adstationSlots)
       .where(
@@ -69,6 +82,15 @@ export class PublisherSlotsService {
         ),
       )
       .orderBy(desc(adstationSlots.createdAt));
+
+    return slots.map((slot) =>
+      slot.slotType === 'direct'
+        ? {
+            ...slot,
+            adstationReadiness: evaluateDirectSlotReadiness(slot, website, slots),
+          }
+        : slot,
+    );
   }
 
   /**
@@ -104,10 +126,17 @@ export class PublisherSlotsService {
     }
 
     const isConsideration = dto.slotType === 'consideration';
+    const isDirect = dto.slotType === 'direct';
     const tagSuffix = crypto.randomBytes(8).toString('hex');
     const slotTagId = `cf-slot-${dto.slotType}-${tagSuffix}`;
     const initialLifecycle =
-      website.policyStatus === 'approved' ? 'testing' : 'testing';
+      isDirect && dto.lifecycleStatus === 'draft'
+        ? 'draft'
+        : website.policyStatus === 'approved'
+          ? 'testing'
+          : 'testing';
+    const initialManualReviewStatus =
+      isDirect && initialLifecycle !== 'draft' ? 'pending_review' : 'not_submitted';
 
     const normalizedPolicy = slotPresetPolicy(dto.allowedPresetIds);
 
@@ -136,6 +165,8 @@ export class PublisherSlotsService {
         presetPolicyVersion: CURRENT_IMAGE_PRESETS_POLICY_VERSION,
         installationStatus: 'unchecked',
         policyRevision: 1,
+        manualReviewStatus: initialManualReviewStatus,
+        approvedRevision: null,
         isActive: true,
       })
       .returning();
@@ -172,100 +203,163 @@ export class PublisherSlotsService {
     slotId: string,
     dto: UpdateAdstationSlotDto,
   ) {
-    const [slot] = await this.db
-      .select()
-      .from(adstationSlots)
-      .where(
-        and(
-          eq(adstationSlots.id, slotId),
-          eq(adstationSlots.promoterId, promoterId),
-        ),
-      )
-      .limit(1);
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout='5s'`);
+      await tx.execute(sql`set local statement_timeout='8s'`);
 
-    if (!slot) {
-      throw new NotFoundException('AdStation slot not found or unauthorized');
-    }
-
-    if (slot.lifecycleStatus === 'suspended') {
-      throw new ForbiddenException(
-        'This ad slot is suspended by compliance moderation and cannot be modified or resumed without admin reinstatement.',
-      );
-    }
-
-    let nextLifecycle = slot.lifecycleStatus;
-    let nextIsActive = slot.isActive;
-    if (dto.lifecycleStatus) {
-      if (
-        !['testing', 'active', 'paused', 'disabled'].includes(
-          dto.lifecycleStatus,
+      const [slot] = await tx
+        .select()
+        .from(adstationSlots)
+        .where(
+          and(
+            eq(adstationSlots.id, slotId),
+            eq(adstationSlots.promoterId, promoterId),
+          ),
         )
-      ) {
-        throw new BadRequestException('Invalid slot lifecycle status');
+        .for('update')
+        .limit(1);
+
+      if (!slot) {
+        throw new NotFoundException('AdStation slot not found or unauthorized');
       }
-      if (
-        dto.lifecycleStatus === 'active' &&
-        slot.installationStatus !== 'verified' &&
-        !slot.isConsiderationVerified
-      ) {
-        // Keep in testing until installation check passes
-        nextLifecycle = 'testing';
-      } else {
-        nextLifecycle = dto.lifecycleStatus;
+
+      if (slot.lifecycleStatus === 'suspended') {
+        throw new ForbiddenException(
+          'This ad slot is suspended by compliance moderation and cannot be modified or resumed without admin reinstatement.',
+        );
       }
-      nextIsActive =
-        nextLifecycle !== 'paused' && nextLifecycle !== 'disabled';
-    }
 
-    let presetUpdates = {};
-    if (dto.allowedPresetIds !== undefined) {
-      const normalized = slotPresetPolicy(dto.allowedPresetIds);
-      presetUpdates = {
-        presetPolicy: normalized.policy,
-        allowedPresetIds:
-          dto.allowedPresetIds && dto.allowedPresetIds.length > 0
-            ? JSON.stringify(normalized.allowedPresetIds)
-            : null,
-        presetPolicyVersion: CURRENT_IMAGE_PRESETS_POLICY_VERSION,
-      };
-    }
+      const hasMaterialEdit =
+        (dto.name !== undefined && dto.name.trim() !== slot.name) ||
+        (dto.format !== undefined && dto.format !== slot.format) ||
+        (dto.slotDeliveryPreference !== undefined &&
+          dto.slotDeliveryPreference !== slot.slotDeliveryPreference) ||
+        (dto.width !== undefined && dto.width !== slot.width) ||
+        (dto.height !== undefined && dto.height !== slot.height) ||
+        (dto.responsive !== undefined && dto.responsive !== slot.responsive) ||
+        dto.allowedAdTypes !== undefined ||
+        dto.allowedPresetIds !== undefined;
 
-    const [updated] = await this.db
-      .update(adstationSlots)
-      .set({
-        ...(dto.name ? { name: dto.name.trim() } : {}),
-        ...(dto.format ? { format: dto.format } : {}),
-        ...(dto.slotDeliveryPreference !== undefined
-          ? { slotDeliveryPreference: dto.slotDeliveryPreference }
-          : {}),
-        ...(dto.width !== undefined ? { width: dto.width } : {}),
-        ...(dto.height !== undefined ? { height: dto.height } : {}),
-        ...(dto.responsive !== undefined ? { responsive: dto.responsive } : {}),
-        ...(dto.allowedAdTypes !== undefined
-          ? { allowedAdTypes: slotTypesForWrite(dto.allowedAdTypes) }
-          : {}),
-        ...presetUpdates,
-        lifecycleStatus: nextLifecycle,
-        isActive: nextIsActive,
-        policyRevision: (slot.policyRevision || 1) + 1,
-        updatedAt: new Date(),
-      })
-      .where(eq(adstationSlots.id, slotId))
-      .returning();
+      let nextLifecycle = slot.lifecycleStatus;
+      let nextIsActive = slot.isActive;
+      let nextManualReviewStatus = slot.manualReviewStatus;
+      let nextApprovedRevision = slot.approvedRevision;
 
-    if (nextLifecycle !== slot.lifecycleStatus) {
-      await this.db.insert(adsSupplyStateHistory).values({
-        entityType: 'slot',
-        entityId: slot.id,
-        dimension: 'lifecycle_status',
-        fromState: slot.lifecycleStatus,
-        toState: nextLifecycle,
-        actorRole: 'promoter',
-        reason: `Promoter updated slot lifecycle to ${nextLifecycle}`,
-      });
-    }
+      if (slot.slotType === 'direct' && hasMaterialEdit) {
+        nextApprovedRevision = null;
+        if (slot.manualReviewStatus === 'approved' || slot.manualReviewStatus === 'rejected') {
+          nextManualReviewStatus = 'pending_review';
+        }
+        if (slot.lifecycleStatus === 'active' && dto.lifecycleStatus !== 'paused' && dto.lifecycleStatus !== 'disabled') {
+          nextLifecycle = 'testing';
+        }
+      }
 
-    return updated;
+      if (dto.lifecycleStatus) {
+        if (
+          !['draft', 'testing', 'active', 'paused', 'disabled'].includes(
+            dto.lifecycleStatus,
+          )
+        ) {
+          throw new BadRequestException('Invalid slot lifecycle status');
+        }
+
+        if (slot.slotType === 'direct') {
+          if (dto.lifecycleStatus === 'active') {
+            if (hasMaterialEdit) {
+              throw new ForbiddenException(
+                'Material changes invalidate prior approval. Submit the updated revision for manual review before going live.',
+              );
+            }
+            const [website] = await tx
+              .select()
+              .from(adsPromoterWebsites)
+              .where(eq(adsPromoterWebsites.id, slot.websiteId))
+              .for('share')
+              .limit(1);
+            const websiteSlots = await tx
+              .select()
+              .from(adstationSlots)
+              .where(eq(adstationSlots.websiteId, slot.websiteId));
+            const evaluation = evaluateDirectSlotReadiness(slot, website, websiteSlots);
+            if (!evaluation.liveEligible) {
+              throw new ForbiddenException(
+                `Direct Ad Slot cannot go live: ${evaluation.blockerReasons.join(' ')}`,
+              );
+            }
+            nextLifecycle = 'active';
+          } else {
+            nextLifecycle = dto.lifecycleStatus;
+            if (nextLifecycle === 'testing' && nextManualReviewStatus === 'not_submitted') {
+              nextManualReviewStatus = 'pending_review';
+            }
+          }
+        } else if (
+          dto.lifecycleStatus === 'active' &&
+          slot.installationStatus !== 'verified' &&
+          !slot.isConsiderationVerified
+        ) {
+          // Keep in testing until installation check passes
+          nextLifecycle = 'testing';
+        } else {
+          nextLifecycle = dto.lifecycleStatus;
+        }
+        nextIsActive =
+          nextLifecycle !== 'paused' && nextLifecycle !== 'disabled';
+      }
+
+      let presetUpdates = {};
+      if (dto.allowedPresetIds !== undefined) {
+        const normalized = slotPresetPolicy(dto.allowedPresetIds);
+        presetUpdates = {
+          presetPolicy: normalized.policy,
+          allowedPresetIds:
+            dto.allowedPresetIds && dto.allowedPresetIds.length > 0
+              ? JSON.stringify(normalized.allowedPresetIds)
+              : null,
+          presetPolicyVersion: CURRENT_IMAGE_PRESETS_POLICY_VERSION,
+        };
+      }
+
+      const [updated] = await tx
+        .update(adstationSlots)
+        .set({
+          ...(dto.name ? { name: dto.name.trim() } : {}),
+          ...(dto.format ? { format: dto.format } : {}),
+          ...(dto.slotDeliveryPreference !== undefined
+            ? { slotDeliveryPreference: dto.slotDeliveryPreference }
+            : {}),
+          ...(dto.width !== undefined ? { width: dto.width } : {}),
+          ...(dto.height !== undefined ? { height: dto.height } : {}),
+          ...(dto.responsive !== undefined ? { responsive: dto.responsive } : {}),
+          ...(dto.allowedAdTypes !== undefined
+            ? { allowedAdTypes: slotTypesForWrite(dto.allowedAdTypes) }
+            : {}),
+          ...presetUpdates,
+          lifecycleStatus: nextLifecycle,
+          isActive: nextIsActive,
+          manualReviewStatus: nextManualReviewStatus,
+          approvedRevision: nextApprovedRevision,
+          policyRevision: (slot.policyRevision || 1) + (hasMaterialEdit ? 1 : 0),
+          updatedAt: new Date(),
+        })
+        .where(eq(adstationSlots.id, slotId))
+        .returning();
+
+      if (nextLifecycle !== slot.lifecycleStatus) {
+        await tx.insert(adsSupplyStateHistory).values({
+          entityType: 'slot',
+          entityId: slot.id,
+          dimension: 'lifecycle_status',
+          fromState: slot.lifecycleStatus,
+          toState: nextLifecycle,
+          actorRole: 'promoter',
+          reason: `Promoter updated slot lifecycle to ${nextLifecycle}`,
+        });
+      }
+
+      return updated;
+    });
   }
 
   /**

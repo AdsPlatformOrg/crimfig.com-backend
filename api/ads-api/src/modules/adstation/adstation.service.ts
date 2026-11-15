@@ -1,11 +1,12 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
 import { adstationSlots, adstationDirectCampaigns, adsPromoterWebsites } from '@crimfig/database/schema';
-import { and, eq, desc, or } from 'drizzle-orm';
+import { and, eq, desc, or, sql } from 'drizzle-orm';
 
 import { PublisherSlotsService } from '../publisher-inventory/publisher-slots.service';
+import { evaluateDirectSlotReadiness } from './adstation-gating';
 export type { CreateAdstationSlotDto, UpdateAdstationSlotDto } from '../publisher-inventory/publisher-slots.service';
 
 export interface CreateDirectCampaignDto {
@@ -188,6 +189,67 @@ export class AdstationService extends PublisherSlotsService {
     return campaign;
   }
 
+  async submitDirectSlotForReview(promoterId: string, slotId: string) {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout='5s'`);
+      await tx.execute(sql`set local statement_timeout='8s'`);
+
+      const [slot] = await tx
+        .select()
+        .from(adstationSlots)
+        .where(
+          and(
+            eq(adstationSlots.id, slotId),
+            eq(adstationSlots.promoterId, promoterId),
+          ),
+        )
+        .for('update')
+        .limit(1);
+
+      if (!slot) {
+        throw new NotFoundException('AdStation slot not found or unauthorized');
+      }
+
+      if (slot.slotType !== 'direct') {
+        throw new BadRequestException('Only Direct Ad Slots use AdStation direct review submission.');
+      }
+
+      if (slot.lifecycleStatus === 'suspended') {
+        throw new ForbiddenException('Suspended slots cannot be submitted for review.');
+      }
+
+      const [website] = await tx
+        .select()
+        .from(adsPromoterWebsites)
+        .where(eq(adsPromoterWebsites.id, slot.websiteId))
+        .for('share')
+        .limit(1);
+      const websiteSlots = await tx
+        .select()
+        .from(adstationSlots)
+        .where(eq(adstationSlots.websiteId, slot.websiteId));
+
+      const nextLifecycle = slot.lifecycleStatus === 'draft' ? 'testing' : slot.lifecycleStatus;
+      const [updated] = await tx
+        .update(adstationSlots)
+        .set({
+          lifecycleStatus: nextLifecycle,
+          manualReviewStatus: 'pending_review',
+          approvedRevision: null,
+          reviewReason: null,
+          isActive: nextLifecycle !== 'paused' && nextLifecycle !== 'disabled',
+          updatedAt: new Date(),
+        })
+        .where(eq(adstationSlots.id, slotId))
+        .returning();
+
+      return {
+        ...updated,
+        adstationReadiness: evaluateDirectSlotReadiness(updated, website, websiteSlots),
+      };
+    });
+  }
+
   /**
    * Record Direct Deal Ad Event with Idempotency Deduplication (PLAN-0018 Phase 3)
    */
@@ -218,6 +280,39 @@ export class AdstationService extends PublisherSlotsService {
 
       if (!campaign) {
         throw new NotFoundException('Direct campaign not found or unauthorized');
+      }
+    }
+
+    if (dto.slotId) {
+      const [slot] = await this.db
+        .select()
+        .from(adstationSlots)
+        .where(
+          and(
+            eq(adstationSlots.id, dto.slotId),
+            eq(adstationSlots.websiteId, dto.websiteId),
+          ),
+        )
+        .limit(1);
+      if (!slot) {
+        throw new NotFoundException('AdStation slot not found for website');
+      }
+      if (slot.slotType === 'direct') {
+        const [website] = await this.db
+          .select()
+          .from(adsPromoterWebsites)
+          .where(eq(adsPromoterWebsites.id, dto.websiteId))
+          .limit(1);
+        const websiteSlots = await this.db
+          .select()
+          .from(adstationSlots)
+          .where(eq(adstationSlots.websiteId, dto.websiteId));
+        const readiness = evaluateDirectSlotReadiness(slot, website, websiteSlots);
+        if (slot.lifecycleStatus !== 'active' || !readiness.liveEligible) {
+          throw new ForbiddenException(
+            `Direct Ad Slot is not eligible for live delivery: ${readiness.blockerReasons.join(' ')}`,
+          );
+        }
       }
     }
 

@@ -5,6 +5,7 @@ import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
 import { adstationSlots, adsPromoterWebsites, adsServes, adsInteractions, adsAuctionDecisions, adsSupplyStateHistory } from '@crimfig/database/schema';
+import { evaluateDirectSlotReadiness } from '../adstation/adstation-gating';
 import { and, eq, desc, gte, sql, or, ilike } from 'drizzle-orm';
 
 
@@ -657,7 +658,18 @@ export class AdsOperationsService {
         if (website.isSuspended) {
           throw new ForbiddenException('Cannot activate slot: Parent website is suspended.');
         }
-        if (slot.installationStatus !== 'verified') {
+        if (slot.slotType === 'direct') {
+          const websiteSlots = await tx
+            .select()
+            .from(adstationSlots)
+            .where(eq(adstationSlots.websiteId, slot.websiteId));
+          const readiness = evaluateDirectSlotReadiness(slot, website, websiteSlots);
+          if (!readiness.liveEligible) {
+            throw new BadRequestException(
+              `Cannot activate direct ad slot: ${readiness.blockerReasons.join(' ')}`,
+            );
+          }
+        } else if (slot.installationStatus !== 'verified') {
           throw new BadRequestException(`Cannot activate slot: Slot installation status is "${slot.installationStatus}". Verified embed telemetry is required.`);
         }
       }
@@ -690,6 +702,88 @@ export class AdsOperationsService {
         previousLifecycle,
         currentLifecycle: targetLifecycle,
         slot: updatedSlot,
+      };
+    });
+  }
+
+  /**
+   * Admin: Manual review approval/rejection for an AdStation Direct Ad Slot on its current material revision.
+   */
+  async adminReviewDirectSlot(
+    slotId: string,
+    decision: 'approved' | 'rejected',
+    reason: string,
+    reviewerId?: string,
+  ) {
+    if (!reason || reason.trim().length < 5) {
+      throw new BadRequestException('A review reason of at least 5 characters is required.');
+    }
+
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout='5s'`);
+      await tx.execute(sql`set local statement_timeout='8s'`);
+
+      const [slot] = await tx
+        .select()
+        .from(adstationSlots)
+        .where(eq(adstationSlots.id, slotId))
+        .for('update')
+        .limit(1);
+
+      if (!slot) {
+        throw new NotFoundException('AdStation slot not found');
+      }
+
+      if (slot.slotType !== 'direct') {
+        throw new BadRequestException('Direct slot review applies only to slots with slotType "direct".');
+      }
+
+      const [website] = await tx
+        .select()
+        .from(adsPromoterWebsites)
+        .where(eq(adsPromoterWebsites.id, slot.websiteId))
+        .for('share')
+        .limit(1);
+
+      const nextLifecycle =
+        decision === 'rejected' && slot.lifecycleStatus === 'active'
+          ? 'testing'
+          : slot.lifecycleStatus;
+
+      const [updatedSlot] = await tx
+        .update(adstationSlots)
+        .set({
+          manualReviewStatus: decision,
+          approvedRevision: decision === 'approved' ? slot.policyRevision : null,
+          reviewedAt: new Date(),
+          reviewedBy: reviewerId || null,
+          reviewReason: reason.trim(),
+          lifecycleStatus: nextLifecycle,
+          updatedAt: new Date(),
+        })
+        .where(eq(adstationSlots.id, slotId))
+        .returning();
+
+      await tx.insert(adsSupplyStateHistory).values({
+        entityType: 'slot',
+        entityId: slotId,
+        dimension: 'manual_review_status',
+        fromState: slot.manualReviewStatus,
+        toState: decision,
+        actorId: reviewerId || null,
+        actorRole: 'ads_admin',
+        reason: `Revision ${slot.policyRevision} ${decision}: ${reason.trim()}`,
+      });
+
+      const websiteSlots = await tx
+        .select()
+        .from(adstationSlots)
+        .where(eq(adstationSlots.websiteId, slot.websiteId));
+
+      return {
+        message: `Direct ad slot revision ${slot.policyRevision} marked as ${decision}.`,
+        slot: updatedSlot,
+        adstationReadiness: evaluateDirectSlotReadiness(updatedSlot, website, websiteSlots),
       };
     });
   }

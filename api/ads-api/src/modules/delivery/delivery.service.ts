@@ -12,6 +12,7 @@ import {OpportunityClient,OpportunityConflictError,OpportunityHttpError} from '.
 import {adDigest,approvedAdPolicy,stableAdValue} from '@crimfig/shared';
 import { currentApproval } from '../campaigns/campaign-workflow';
 import { paidDeliveryReadiness } from './paid-delivery-policy';
+import { evaluateDirectSlotReadiness } from '../adstation/adstation-gating';
 import { selectImageRendition } from '../uploads/prepared-image';
 import { resolvedSchedule, scheduleMatches } from '../campaigns/daily-schedule';
 import {
@@ -1238,6 +1239,23 @@ export class DeliveryService {
         throw new ForbiddenException(
           `Ad slot "${canonicalSlot.slotTagId}" is currently ${canonicalSlot.lifecycleStatus}.`,
         );
+      }
+
+      if (canonicalSlot.slotType === 'direct') {
+        const websiteSlots = await this.db
+          .select()
+          .from(adstationSlots)
+          .where(eq(adstationSlots.websiteId, canonicalWebsite.id));
+        const readiness = evaluateDirectSlotReadiness(
+          canonicalSlot,
+          canonicalWebsite,
+          websiteSlots,
+        );
+        if (canonicalSlot.lifecycleStatus !== 'active' || !readiness.liveEligible) {
+          throw new ForbiddenException(
+            `Direct Ad Slot "${canonicalSlot.slotTagId}" is not eligible for live delivery: ${readiness.blockerReasons.join(' ')}`,
+          );
+        }
       }
 
       // Enforce domain match against Origin / Referer / domain query parameter

@@ -69,6 +69,14 @@ export const adstationSlots = pgTable(
     installationDiagnostic: text('installation_diagnostic'),
     policyRevision: integer('policy_revision').notNull().default(1),
 
+    // PLAN-0115: Direct Ad Slot manual review & revision-bound LIVE gating
+    // 'not_submitted' | 'pending_review' | 'approved' | 'rejected'
+    manualReviewStatus: varchar('manual_review_status', { length: 24 }).notNull().default('not_submitted'),
+    approvedRevision: integer('approved_revision'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewedBy: uuid('reviewed_by'),
+    reviewReason: text('review_reason'),
+
     // PLAN-0067: Nine Approved Presets & Sizing Policy
     // 'auto_any_approved' | 'fixed' | 'allowed_set'
     presetPolicy: varchar('preset_policy', { length: 32 }).notNull().default('auto_any_approved'),

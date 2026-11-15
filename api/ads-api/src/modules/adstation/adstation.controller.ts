@@ -185,6 +185,21 @@ export class AdstationController extends PublisherInventoryController {
     return { status: 'success', data: result };
   }
 
+  @Post('slots/:slotId/submit-review')
+  @ApiOperation({ summary: 'Submit a Direct Ad Slot revision for manual review' })
+  async submitDirectSlotForReview(@Req() req: any, @Param('slotId') slotId: string) {
+    const userId = req.user.sub;
+    const promoter = await this.promotersService.getOrCreatePromoter(
+      userId,
+      'WEBSITE',
+    );
+    const result = await this.adstationService.submitDirectSlotForReview(
+      promoter.id,
+      slotId,
+    );
+    return { status: 'success', data: result };
+  }
+
   @Get('websites/:websiteId/health')
   @ApiOperation({
     summary: 'Audit consideration slot health and 48h grace status',

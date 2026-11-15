@@ -2,6 +2,10 @@
 
 Prior historical entries up to 2026-11-03 are archived in `backend/SERIAL_LOGS_ARCHIVE_20261103.md`.
 
+## 2026-11-15 - PLAN-0115 Advertiser Studio / Promoter Hub Analytics & AdStation Dual LIVE Gating
+
+Updated `analytics.service.ts` (`getDashboardSummary`) to compute authoritative net settled advertiser spend (`ads_spend` minus `ads-rejection:v1:%` reversals in `billing_transactions` for the selected period) and added `getPromoterDashboardSummary` (`GET /api/v1/analytics/promoter/summary`) returning verified earnings breakdown (`cleared`, `pending` 72h hold, `withdrawn`, `reversed`), valid attributable impressions/clicks, attributed conversions (`ads_conversions`), and daily timeseries. Added migration `0046_adstation_direct_slot_gating.sql` and `adstation-gating.ts` enforcing mandatory dual LIVE gating for AdStation Direct Ad Slots (active operational CrimFig Ad Network integration on the same website + manual review approval on the current `policyRevision`), enforced in `PublisherSlotsService`, `AdstationService`, `AdsOperationsService`, and `DeliveryService`. Verification: `tsc --noEmit` (0 errors), `plan0115-adstation-gating.spec.ts` (9/9 passed), isolated PostgreSQL 17 migration replay (`plan0009-postgres-test.cjs --plan0104-migration`, passed).
+
 ## 2026-11-06 - PLAN-0096 mobile candidate eligibility and trace evidence
 
 Unified mobile device matching in upstream targeting and auction, preserved serialized/parsed targeting and stack overrides, and rejected malformed targeting. Persisted specific candidate rejections, bounded stage/device/policy context and replay-compatible paid audit metadata. Historical staging records confirm Android but lack individual candidate reasons. Current round-the-clock schedule supersedes legacy hours. Focused units passed 38 and isolated real Ads-to-Billing HTTP/PostgreSQL passed two selected cases, including three device-specific paid serves and four zero-charge House fallbacks. Deployment and live mobile render remain pending. Reports are in workspace docs/reviews/plan-0096.
