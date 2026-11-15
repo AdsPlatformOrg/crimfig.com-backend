@@ -2,6 +2,10 @@
 
 Prior historical entries up to 2026-11-03 are archived in `backend/SERIAL_LOGS_ARCHIVE_20261103.md`.
 
+## 2026-11-15 - ADS-API `adminReviewDirectSlot` Contract Registration Fix & Production Auth/Ads Deployment Unblock
+
+Added missing `adminReviewDirectSlot: json()` entry under `responses.AdsOperationsController` in `backend/api/ads-api/src/contracts/ads-contract.ts` (resolving `Missing API response contract for AdsOperationsController.adminReviewDirectSlot` boot crash on `ADS-API` staging/production). Added contract registration + negative-case test in `backend/auth/test/security/plan0115-adstation-gating.spec.ts`. Verified `tsc --noEmit` on `ads-api` and `auth` (0 errors) and `plan0115-adstation-gating.spec.ts` (10/10 passed). Note: Railway production `crimfig_core` currently has `tcpProxies: []` (`postgres.railway.internal:5432` has no public TCP proxy), so pending production DB migrations (`0018`–`0046`) await public TCP proxy enablement or `railway ssh` execution.
+
 ## 2026-11-15 - PLAN-0115 Advertiser Studio / Promoter Hub Analytics & AdStation Dual LIVE Gating
 
 Updated `analytics.service.ts` (`getDashboardSummary`) to compute authoritative net settled advertiser spend (`ads_spend` minus `ads-rejection:v1:%` reversals in `billing_transactions` for the selected period) and added `getPromoterDashboardSummary` (`GET /api/v1/analytics/promoter/summary`) returning verified earnings breakdown (`cleared`, `pending` 72h hold, `withdrawn`, `reversed`), valid attributable impressions/clicks, attributed conversions (`ads_conversions`), and daily timeseries. Added migration `0046_adstation_direct_slot_gating.sql` and `adstation-gating.ts` enforcing mandatory dual LIVE gating for AdStation Direct Ad Slots (active operational CrimFig Ad Network integration on the same website + manual review approval on the current `policyRevision`), enforced in `PublisherSlotsService`, `AdstationService`, `AdsOperationsService`, and `DeliveryService`. Verification: `tsc --noEmit` (0 errors), `plan0115-adstation-gating.spec.ts` (9/9 passed), isolated PostgreSQL 17 migration replay (`plan0009-postgres-test.cjs --plan0104-migration`, passed).

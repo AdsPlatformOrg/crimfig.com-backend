@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Get } from '@nestjs/common';
 import {
   evaluateDirectSlotReadiness,
   isWebsiteNetworkOperational,
@@ -6,6 +6,8 @@ import {
 import { PublisherSlotsService } from '../../../api/ads-api/src/modules/publisher-inventory/publisher-slots.service';
 import { AdstationService } from '../../../api/ads-api/src/modules/adstation/adstation.service';
 import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
+import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
+import { documentAdsController } from '../../../api/ads-api/src/contracts/ads-contract';
 import { AnalyticsService } from '../../../api/ads-api/src/modules/analytics/analytics.service';
 
 const futureDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -282,6 +284,17 @@ describe('PLAN-0115: AdStation Direct Ad Slot Mandatory Dual LIVE Gating', () =>
       expect(summary.performance.validClicks).toBe(7);
       expect(summary.performance.clicks).toBe(13);
       expect(summary.performance.billedClicks).toBe(7);
+    });
+
+    it('AdsOperationsController loads and passes documentAdsController contract registration (including adminReviewDirectSlot)', () => {
+      class UncontractedController {
+        @Get('undocumented')
+        undocumentedMethod() {}
+      }
+      expect(() => documentAdsController(UncontractedController)).toThrow(
+        /Missing API response contract/,
+      );
+      expect(() => documentAdsController(AdsOperationsController)).not.toThrow();
     });
   });
 });

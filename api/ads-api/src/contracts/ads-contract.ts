@@ -111,7 +111,7 @@ const responses: Record<string, Record<string, Schema>> = {
         bidUsdCents: nullable(num()), billingUnit: nullable(enumeration('eligible click', 'eligible viewable impression')),
         clearingBasis: nullable(enumeration('single_group_reserve', 'runner_up_with_floor')),
       })),
-    })), adminCheckSlotInstallation: json(), adminUpdateSlotLifecycle: json(),
+    })), adminCheckSlotInstallation: json(), adminUpdateSlotLifecycle: json(), adminReviewDirectSlot: json(),
   },
   CampaignsController: {
     campaignPage:object({items:array(campaign),page:{type:'integer'},pageSize:{type:'integer'},total:{type:'integer'},counts:{type:'object',additionalProperties:{type:'integer'}}}),
