@@ -28,6 +28,7 @@ export interface CronJobDefinition {
   isHeavy: boolean;
   defaultMode: CronJobMode;
   featureFlagEnv: string;
+  aliasFeatureFlagEnvs?: readonly string[];
   defaultEnabled: boolean;
 }
 
@@ -88,6 +89,7 @@ export const DEFAULT_CRON_JOB_DEFINITIONS: readonly CronJobDefinition[] = [
     isHeavy: true,
     defaultMode: 'ACTIVE',
     featureFlagEnv: 'ADS_CPC_PROCESSOR_ENABLED',
+    aliasFeatureFlagEnvs: ['ADS_CRON_CPC_ENABLED'],
     defaultEnabled: true,
   },
   {
@@ -101,6 +103,7 @@ export const DEFAULT_CRON_JOB_DEFINITIONS: readonly CronJobDefinition[] = [
     isHeavy: false,
     defaultMode: 'REPORT_ONLY',
     featureFlagEnv: 'ADS_TRAFFIC_QUALITY_CRON_ENABLED',
+    aliasFeatureFlagEnvs: ['ADS_CRON_TRAFFIC_QUALITY_ENABLED'],
     defaultEnabled: true,
   },
   {
@@ -114,6 +117,7 @@ export const DEFAULT_CRON_JOB_DEFINITIONS: readonly CronJobDefinition[] = [
     isHeavy: false,
     defaultMode: 'REPORT_ONLY',
     featureFlagEnv: 'ADS_REWARDS_RECONCILE_CRON_ENABLED',
+    aliasFeatureFlagEnvs: ['ADS_CRON_REWARDS_RECONCILIATION_ENABLED'],
     defaultEnabled: true,
   },
   {
@@ -127,6 +131,7 @@ export const DEFAULT_CRON_JOB_DEFINITIONS: readonly CronJobDefinition[] = [
     isHeavy: true,
     defaultMode: 'REPORT_ONLY',
     featureFlagEnv: 'ADS_AUDIT_ROLLING_72H_ENABLED',
+    aliasFeatureFlagEnvs: ['ADS_CRON_ROLLING_AUDIT_ENABLED'],
     defaultEnabled: true,
   },
   {
@@ -140,6 +145,7 @@ export const DEFAULT_CRON_JOB_DEFINITIONS: readonly CronJobDefinition[] = [
     isHeavy: true,
     defaultMode: 'REPORT_ONLY',
     featureFlagEnv: 'ADS_AUDIT_DAY_15_ENABLED',
+    aliasFeatureFlagEnvs: ['ADS_CRON_DAY15_AUDIT_ENABLED'],
     defaultEnabled: true,
   },
   {
@@ -153,6 +159,7 @@ export const DEFAULT_CRON_JOB_DEFINITIONS: readonly CronJobDefinition[] = [
     isHeavy: true,
     defaultMode: 'REPORT_ONLY',
     featureFlagEnv: 'ADS_AUDIT_DAY_30_ENABLED',
+    aliasFeatureFlagEnvs: ['ADS_CRON_DAY30_AUDIT_ENABLED'],
     defaultEnabled: true,
   },
 ];
@@ -221,15 +228,30 @@ export class CronJobRegistry {
   isJobEnabled(jobKey: string, env: NodeJS.ProcessEnv = process.env): boolean {
     if (!this.isMasterEnabled(env)) return false;
     const def = this.getOrThrow(jobKey);
-    return parseBoolEnv(env[def.featureFlagEnv], def.defaultEnabled);
+    const primaryRaw = env[def.featureFlagEnv];
+    if (primaryRaw !== undefined && primaryRaw.trim() !== '') {
+      return parseBoolEnv(primaryRaw, def.defaultEnabled);
+    }
+    for (const alias of def.aliasFeatureFlagEnvs ?? []) {
+      const aliasRaw = env[alias];
+      if (aliasRaw !== undefined && aliasRaw.trim() !== '') {
+        return parseBoolEnv(aliasRaw, def.defaultEnabled);
+      }
+    }
+    return def.defaultEnabled;
   }
 
   /**
    * Automatic retrospective deductions, rebates, and reward reversals are NEVER inferred
-   * from monitoring or CPC settlement flags. Requires explicit ADS_AUTOMATIC_FINANCIAL_CORRECTIONS_ENABLED=true.
+   * from monitoring or CPC settlement flags. Requires explicit ADS_AUTOMATIC_FINANCIAL_CORRECTIONS_ENABLED=true
+   * or ADS_CRON_AUTO_FINANCIAL_CORRECTIONS_ENABLED=true.
    */
   isAutomaticFinancialCorrectionsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-    return parseBoolEnv(env.ADS_AUTOMATIC_FINANCIAL_CORRECTIONS_ENABLED, false);
+    const primary = env.ADS_AUTOMATIC_FINANCIAL_CORRECTIONS_ENABLED;
+    if (primary !== undefined && primary.trim() !== '') {
+      return parseBoolEnv(primary, false);
+    }
+    return parseBoolEnv(env.ADS_CRON_AUTO_FINANCIAL_CORRECTIONS_ENABLED, false);
   }
 
   resolveMode(jobKey: string, env: NodeJS.ProcessEnv = process.env): CronJobMode {
