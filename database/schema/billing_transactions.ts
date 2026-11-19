@@ -62,7 +62,7 @@ export const billingTransactions = pgTable(
 
     // FK to the exact exchange rate snapshot used — permanently linked
     exchangeRateId: uuid('exchange_rate_id').references(() => billingExchangeRates.id),
-    exchangeRateNumeric: numeric('exchange_rate_numeric', { precision: 12, scale: 4 }),
+    exchangeRateNumeric: numeric('exchange_rate_numeric', { precision: 18, scale: 6 }),
 
     // PSP payment reference (Paystack reference, Stripe session ID, etc.)
     reference: text('reference').unique(),

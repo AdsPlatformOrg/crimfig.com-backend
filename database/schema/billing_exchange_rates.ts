@@ -9,10 +9,8 @@ import { pgTable, uuid, numeric, jsonb, timestamp, pgEnum, index } from 'drizzle
  * Every billing_transactions row references the exact rate row
  * used at the moment of a funding/withdrawal operation.
  *
- * Rate source priority:
- *   1. Frankfurter (main, no key — ECB data)
- *   2. ExchangeRate-API v6 (fallback, key = ExchangeRateAPI_API_KEY)
- *   3. stale_fallback — last saved row returned when both APIs fail
+ * Current source: ExchangeRate-API Open Access, then the keyed v6 endpoint
+ * when EXCHANGE_RATE_API_KEY is configured. Other source values are historical.
  */
 export const exchangeRateSourceEnum = pgEnum('exchange_rate_source', [
   'frankfurter',

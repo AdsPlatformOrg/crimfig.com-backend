@@ -37,6 +37,7 @@ export class TransactionsService {
         amountUsdCents: billingTransactions.amountUsdCents,
         amountNgnKobo: billingTransactions.amountNgnKobo,
         exchangeRateId: billingTransactions.exchangeRateId,
+        exchangeRateNumeric: billingTransactions.exchangeRateNumeric,
         metadata: billingTransactions.metadata,
         failureReason: billingTransactions.failureReason,
         createdAt: billingTransactions.createdAt,

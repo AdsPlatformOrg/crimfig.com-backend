@@ -92,7 +92,8 @@ export class ExchangeRateService {
     this.validAmount(usdCents);
     const fx = snapshot ?? await this.getUsdToNgnRate();
     if (!this.usable(fx)) throw new ServiceUnavailableException('FX quote is no longer fresh');
-    const ngnKobo = Math.round(usdCents * fx.rate);
+    const scaledRate = BigInt(fx.rate.toFixed(6).replace('.', ''));
+    const ngnKobo = Number((BigInt(usdCents) * scaledRate + 500000n) / 1000000n);
     this.validAmount(ngnKobo);
     return { usdCents, ngnKobo, ngnAmount: ngnKobo / 100, rate: fx.rate, rateId: fx.rateId };
   }
@@ -100,7 +101,8 @@ export class ExchangeRateService {
     this.validAmount(ngnKobo);
     const fx = snapshot ?? await this.getUsdToNgnRate();
     if (!this.usable(fx)) throw new ServiceUnavailableException('FX quote is no longer fresh');
-    const usdCents = Math.round(ngnKobo / fx.rate);
+    const scaledRate = BigInt(fx.rate.toFixed(6).replace('.', ''));
+    const usdCents = Number((BigInt(ngnKobo) * 1000000n + scaledRate / 2n) / scaledRate);
     this.validAmount(usdCents);
     return { ngnKobo, usdCents, usdAmount: usdCents / 100, rate: fx.rate, rateId: fx.rateId };
   }

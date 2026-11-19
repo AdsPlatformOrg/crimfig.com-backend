@@ -79,6 +79,7 @@ export class SubscriptionPaymentsService {
       if (pending.some(row => this.metadata(row).appSlug === price.appSlug)) throw new ConflictException('Recover the existing subscription payment before starting another');
       const [row] = await tx.insert(transactions).values({ userId: input.userId, type: 'subscription_charge', status: 'pending',
         provider: 'paystack', reference, amountUsdCents: price.cents, amountNgnKobo: conversion.ngnKobo, exchangeRateId: quote.rateId,
+        exchangeRateNumeric: quote.rate.toFixed(6),
         metadata: JSON.stringify({ subscriptionVersion: 2, subscriptionId: randomUUID(), requestId: input.requestId.toLowerCase(),
           ...price, expectedEmail: owner.email.toLowerCase().trim(), domain, callbackUrl: callback.href, dispatch: 'started', autoRenew: false }),
       }).returning();
@@ -265,6 +266,7 @@ export class SubscriptionPaymentsService {
       if (!card || card.provider !== 'paystack' || card.billingEmail?.toLowerCase().trim() !== meta.expectedEmail) throw new ConflictException('Renewal card unavailable');
       const [row] = await tx.insert(transactions).values({ userId: sub.userId, type: 'subscription_renewal', status: 'pending', provider: 'paystack', reference,
         amountUsdCents: sub.priceUsdCents, amountNgnKobo: conversion.ngnKobo, exchangeRateId: quote.rateId,
+        exchangeRateNumeric: quote.rate.toFixed(6),
         metadata: JSON.stringify({ subscriptionVersion: 2, subscriptionId: sub.id, requestId: randomUUID(), appSlug: sub.appSlug,
           planId: meta.planId, interval: sub.plan, expectedEmail: meta.expectedEmail, domain, renewalConsent: consent,
           expectedPeriodEnd: sub.currentPeriodEnd.toISOString(), renewalBaseReference: sub.lastPaymentReference, dispatch: 'started' }) }).returning();

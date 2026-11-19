@@ -123,6 +123,7 @@ export class WithdrawalLedgerService {
       const balances = withdrawalBalances(wallet.balanceUsdCents, wallet.lockedUsdCents, { availableDelta: -cents, lockedDelta: cents });
       const [intent] = await tx.insert(billingTransactions).values({ userId, type: 'wallet_withdraw', status: 'pending',
         amountUsdCents: cents, amountNgnKobo: amountKobo, exchangeRateId: rate.id, provider: 'paystack', reference,
+        exchangeRateNumeric: quote.rate.toFixed(6),
         balanceBeforeUsdCents: wallet.balanceUsdCents, balanceAfterUsdCents: balances.available,
         metadata: JSON.stringify({ withdrawalVersion: 2, requestId: requestId.toLowerCase(), bankAccountId, authorityDigest,
           recipientCode: bank.recipientCode, domain: this.paystack.paymentDomain(), dispatch: 'not_started',

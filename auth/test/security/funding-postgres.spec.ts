@@ -63,7 +63,7 @@ import { CampaignEscrowService } from '../../../api/billing-api/src/modules/ecos
 import { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import { getTableConfig, PgDialect } from 'drizzle-orm/pg-core';
-import { getTableName } from 'drizzle-orm';
+import { eq, getTableName } from 'drizzle-orm';
 import { randomUUID, createHash } from 'crypto';
 import { spawn } from 'child_process';
 import { resolve } from 'path';
@@ -1500,6 +1500,19 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     const psp=provider(),requestId=randomUUID();const settled=await Promise.allSettled(Array.from({length:6},()=>service(psp).initializeFunding({userId:owner,userEmail:'owner@example.test',requestId,amountUsd:5})));
     expect(settled.every(item=>item.status==='fulfilled')).toBe(true);const results=settled.map(item=>(item as PromiseFulfilledResult<any>).value);
     expect(psp.initializeTransaction).toHaveBeenCalledTimes(1);expect(new Set(results.map(row=>row.reference)).size).toBe(1);expect((await pool.query('select count(*)::int count from billing_transactions')).rows[0].count).toBe(1);expect(await service(psp).recoverFundingRequest(owner,requestId)).toMatchObject({checkoutReady:true});
+  });
+  test('PLAN0116 funding completion and replay preserve the applied FX rate', async () => {
+    const wallet = service();
+    const checkout = await wallet.initializeFunding({
+      userId: owner, userEmail: 'owner@example.test', requestId: randomUUID(), amountUsd: 5,
+    });
+    const [row] = await db.select().from(schema.billingTransactions).where(eq(schema.billingTransactions.reference, checkout.reference));
+    expect(row).toMatchObject({ exchangeRateId: rateId, exchangeRateNumeric: '100.000000', amountNgnKobo: 50000 });
+    await wallet.completeSuccessfulFunding(row.id, proof(row));
+    await wallet.completeSuccessfulFunding(row.id, proof(row));
+    const [saved] = await db.select().from(schema.billingTransactions).where(eq(schema.billingTransactions.id, row.id));
+    expect(saved).toMatchObject({ status: 'completed', exchangeRateNumeric: row.exchangeRateNumeric, amountNgnKobo: row.amountNgnKobo });
+    expect((await pool.query('select balance_usd_cents from billing_wallets')).rows[0].balance_usd_cents).toBe(500);
   });
   test('provider ambiguity persists across a new service instance without replay',async()=>{
     const psp=provider();psp.initializeTransaction.mockRejectedValue(Error('lost provider response'));const requestId=randomUUID();await expect(service(psp).initializeFunding({userId:owner,userEmail:'owner@example.test',requestId,amountUsd:5})).rejects.toThrow();

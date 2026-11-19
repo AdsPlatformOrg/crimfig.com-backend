@@ -12,3 +12,12 @@ test('valid unpersisted provider data is not an approved quote',async()=>{global
 test('provider age expires independently of retrieval/cache age',async()=>{const data=store({id:'snapshot',source:'exchangerate_api',usdToNgn:'1550.123457',fetchedAt:now,rawMainResponse:proof()});global.fetch=jest.fn(async()=>{throw Error('offline');})as any;const service=new ExchangeRateService(data.db);const quote=await service.getUsdToNgnRate();jest.setSystemTime(now.getTime()+86400_000);await expect(service.getUsdToNgnRate()).rejects.toThrow();await expect(service.convertUsdCentsToNgn(100,quote)).rejects.toThrow('fresh');expect(data.insert).not.toHaveBeenCalled();});
 test('optional configured fallback uses keyed proof and actual provider identity',async()=>{process.env.EXCHANGE_RATE_API_KEY='fixture';const fn=jest.fn(async(url:string)=>url.includes('open.er-api')?new Response(null,{status:503}):Response.json({...proof(),rates:undefined,conversion_rates:{NGN:1600}}));global.fetch=fn as any;const data=store();expect(await new ExchangeRateService(data.db).getUsdToNgnRate()).toMatchObject({rate:1600,source:'exchangerate_api'});expect(fn).toHaveBeenCalledTimes(2);expect(data.rows[0].rawFallbackResponse.conversion_rates.NGN).toBe(1600);});
 test('conversion rejects unsafe/fractional amounts and overflow, preserves zero',async()=>{const service=new ExchangeRateService(store({id:'snapshot',source:'exchangerate_api',usdToNgn:'1550.123457',fetchedAt:now,rawMainResponse:proof()}).db);for(const value of[-1,NaN,Infinity,1.5,Number.MAX_SAFE_INTEGER])await expect(service.convertUsdCentsToNgn(value)).rejects.toThrow();expect((await service.convertUsdCentsToNgn(0)).ngnKobo).toBe(0);});
+
+test('six-decimal rounding uses exact integer arithmetic at large and half-unit boundaries', async () => {
+  const data = store({id:'snapshot', source:'exchangerate_api', usdToNgn:'1.000001', fetchedAt:now,
+    rawMainResponse:proof({rates:{NGN:1.000001}})});
+  const service = new ExchangeRateService(data.db);
+  expect((await service.convertUsdCentsToNgn(500000)).ngnKobo).toBe(500001);
+  expect((await service.convertUsdCentsToNgn(8999991000008999)).ngnKobo).toBe(8999999999999999);
+  expect((await service.convertNgnKoboToUsdCents(500000)).usdCents).toBe(500000);
+});

@@ -134,6 +134,7 @@ export class WalletService {
       const [intent] = await tx.insert(billingTransactions).values({
         userId: params.userId, type: 'wallet_fund', status: 'pending', provider: 'paystack', reference,
         amountUsdCents: usdCents, amountNgnKobo: conversion.ngnKobo, exchangeRateId: fx.rateId,
+        exchangeRateNumeric: fx.rate.toFixed(6),
         metadata: JSON.stringify({ fundingVersion: 2, expectedEmail, saveCard: binding.saveCard,
           fundingRequestId: params.requestId.toLowerCase(), initialization: { state: 'started', ...binding },
           description: `Fund Wallet $${(usdCents / 100).toFixed(2)} USD` }),
