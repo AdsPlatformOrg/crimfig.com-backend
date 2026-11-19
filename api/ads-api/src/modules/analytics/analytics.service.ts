@@ -500,7 +500,7 @@ export class AnalyticsService {
         Number(spendRow?.grossSpendCents ?? 0) - Number(spendRow?.reversalCents ?? 0),
       );
     }
-    const ctr = totalImpressions > 0 ? (validClicks / totalImpressions) * 100 : 0;
+    const ctr = totalImpressions > 0 ? (billedClicks / totalImpressions) * 100 : 0;
     const avgCpmUsd = totalImpressions > 0 ? ((totalSpentCents / 100) / totalImpressions) * 1000 : 0;
     const avgCpcUsd = billedClicks > 0 ? (totalSpentCents / 100) / billedClicks : 0;
 
