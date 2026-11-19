@@ -92,11 +92,13 @@ export class AdsEscrowService {
     const wallet = await this.billingClient.getWalletBalance(userId);
 
     // Sum active locked escrows across active campaigns
-    const escrows = await this.db
-      .select()
+    const rows = await this.db
+      .select({ escrow: adsCampaignEscrows, campaignTitle: adsCampaigns.title })
       .from(adsCampaignEscrows)
+      .leftJoin(adsCampaigns, and(eq(adsCampaigns.id, adsCampaignEscrows.campaignId), eq(adsCampaigns.advertiserId, userId)))
       .where(and(eq(adsCampaignEscrows.userId, userId), eq(adsCampaignEscrows.status, 'active')));
 
+    const escrows = rows.map(({ escrow, campaignTitle }) => ({ ...escrow, campaignTitle }));
     const totalEscrowLockedCents = escrows.reduce(
       (sum, e) => sum + (e.allocatedUsdCents - e.consumedUsdCents - e.refundedUsdCents),
       0,
@@ -126,6 +128,7 @@ export class AdsEscrowService {
           refundedUsd: e.refundedUsdCents / 100,
           burnPercent: e.allocatedUsdCents > 0 ? e.consumedUsdCents / e.allocatedUsdCents * 100 : 0,
           campaignId: e.campaignId,
+          campaignTitle: e.campaignTitle,
           allocatedUsd: e.allocatedUsdCents / 100,
           consumedUsd: e.consumedUsdCents / 100,
           remainingUsd: (e.allocatedUsdCents - e.consumedUsdCents - e.refundedUsdCents) / 100,
