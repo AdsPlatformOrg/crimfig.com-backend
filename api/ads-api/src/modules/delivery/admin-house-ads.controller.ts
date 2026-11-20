@@ -1,3 +1,4 @@
+import { defaultHouseDestination, requireHouseDestination } from './house-click-policy';
 import {
   Controller,
   Get,
@@ -216,6 +217,7 @@ export class AdminHouseAdsController {
   @Post()
   @ApiOperation({ summary: 'Create a new house ad creative' })
   async createHouseCreative(@Body() dto: CreateHouseCreativeDto, @Req() req: any) {
+    if (dto.destinationUrl !== undefined) requireHouseDestination(dto.destinationUrl);
     await this.validateAssets(dto,req.user.sub);
     if ((dto.adType || 'image') === 'image' && !dto.imageUrl) {
       throw new BadRequestException('Image creative requires imageUrl');
@@ -252,7 +254,7 @@ export class AdminHouseAdsController {
         headline: dto.headline,
         bodyText: dto.bodyText,
         ctaText: dto.ctaText || 'Start Advertising',
-        destinationUrl: dto.destinationUrl || 'https://ads.crimfig.com',
+        destinationUrl: dto.destinationUrl === undefined ? defaultHouseDestination() : requireHouseDestination(dto.destinationUrl),
         adType: dto.adType || 'image',
         format: dto.format || 'banner',
         imageAssetId:dto.imageAssetId||null,
@@ -284,6 +286,7 @@ export class AdminHouseAdsController {
     @Body() dto: UpdateHouseCreativeDto,
     @Req() req:any,
   ) {
+    if (dto.destinationUrl !== undefined) requireHouseDestination(dto.destinationUrl);
     await this.validateAssets(dto,req.user.sub);
     const [existing] = await this.db
       .select()
@@ -313,7 +316,7 @@ export class AdminHouseAdsController {
         ...(dto.headline !== undefined ? { headline: dto.headline } : {}),
         ...(dto.bodyText !== undefined ? { bodyText: dto.bodyText } : {}),
         ...(dto.ctaText !== undefined ? { ctaText: dto.ctaText } : {}),
-        ...(dto.destinationUrl !== undefined ? { destinationUrl: dto.destinationUrl } : {}),
+        ...(dto.destinationUrl !== undefined ? { destinationUrl: requireHouseDestination(dto.destinationUrl) } : {}),
         ...(dto.adType !== undefined ? { adType: dto.adType } : {}),
         ...(dto.format !== undefined ? { format: dto.format } : {}),
         ...(dto.imageAssetId!==undefined?{imageAssetId:dto.imageAssetId}:{}),

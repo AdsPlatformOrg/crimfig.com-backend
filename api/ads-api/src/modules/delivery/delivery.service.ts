@@ -1,3 +1,4 @@
+import { defaultHouseDestination, parseHouseDestination, resolveSafeHouseDestinationUrl, isHouseCampaignTokenPayload } from './house-click-policy';
 import { resolveGeneralSlotCreativeTypes, resolveSlotCreativeTypes } from '../../../../billing-api/src/modules/ecosystem/creative-slot-policy';
 import { cpcVisitorContinuity } from './cpc-visitor-continuity';
 import { matchesDeviceTarget } from './device-targeting';
@@ -89,12 +90,7 @@ export const CRIMFIG_HOUSE_CREATIVE: HouseCreativeResolved = {
   width: 1024,
   height: 682,
   durationSeconds: null,
-  destinationUrl:
-    process.env.APP_ENV === 'staging' ||
-    process.env.RAILWAY_ENVIRONMENT_NAME === 'staging' ||
-    process.env.ADS_WEB_URL?.includes('staging')
-      ? 'https://staging-ads.crimfig.com'
-      : (process.env.ADS_WEB_URL || 'https://ads.crimfig.com'),
+  destinationUrl: defaultHouseDestination(),
 };
 
 const SLOT_HANDLE_BY_ID: Record<string, string> = {
@@ -993,7 +989,7 @@ export class DeliveryService {
             width: preferred.renditionWidth || preferred.width || 300,
             height: preferred.renditionHeight || preferred.height || 250,
             durationSeconds: null,
-            destinationUrl: preferred.destinationUrl || 'https://ads.crimfig.com',
+            destinationUrl: resolveSafeHouseDestinationUrl(preferred.destinationUrl),
           };
         }
       }
@@ -1953,22 +1949,33 @@ export class DeliveryService {
       strictTokenPayload ||
       this.tokenService.verifyToken(token, clientIp, { allowIpMismatch: true });
 
-    // Zero-charge CrimFig House/Shadow Ad click path (`G11`)
-    if (tokenPayload && tokenPayload.campaignId === HOUSE_CAMPAIGN_UUID) {
-      if (!(await this.boundServe(tokenPayload, true)))
-        throw new NotFoundException('House click attribution is unavailable');
-      await this.logInteraction({
-        impToken: token,
-        type: 'click',
-        source: 'embed',
-        clientIp,
-        userAgent,
-        referrer,
-      });
+    const housePayload = tokenPayload?.campaignId === HOUSE_CAMPAIGN_UUID
+      ? tokenPayload
+      : this.tokenService.verifyToken(token,clientIp,{allowIpMismatch:true,allowExpired:true});
 
-      const [issuedServe] = await this.db.select({destinationUrl: adsServes.houseDestinationUrl}).from(adsServes).where(eq(adsServes.id,tokenPayload.servedId)).limit(1);
-      return issuedServe?.destinationUrl || CRIMFIG_HOUSE_CREATIVE.destinationUrl;
+    if (housePayload?.campaignId === HOUSE_CAMPAIGN_UUID) {
+      try {
+        const bound = await this.boundServe(housePayload,true);
+        if (bound) {
+          if (Date.now() - housePayload.timestamp <= 15 * 60 * 1000) {
+            try {
+              await this.logInteraction({impToken:token,type:'click',source:'embed',clientIp,userAgent,referrer});
+            } catch { this.logger.warn('House click telemetry could not be recorded'); }
+          }
+          const [serve] = await this.db.select({destination:adsServes.houseDestinationUrl}).from(adsServes)
+            .where(eq(adsServes.id,housePayload.servedId)).limit(1);
+          const destination = parseHouseDestination(serve?.destination);
+          if (destination) return destination;
+        }
+        const [creative] = await this.db.select({destination:adsHouseCreatives.destinationUrl}).from(adsHouseCreatives)
+          .where(eq(adsHouseCreatives.id,housePayload.creativeId)).limit(1);
+        return resolveSafeHouseDestinationUrl(creative?.destination);
+      } catch {
+        this.logger.warn('House click destination recovery used the default');
+        return defaultHouseDestination();
+      }
     }
+    if (!tokenPayload && isHouseCampaignTokenPayload(token)) return defaultHouseDestination();
 
     if (tokenPayload && !(await this.boundServe(tokenPayload))) {
       throw new NotFoundException(
@@ -2202,17 +2209,17 @@ export class DeliveryService {
 
     // 1. If signed impToken is provided, decode cryptographic payload
     if (params.impToken || recovery) {
-      const payload = recovery?.binding ?? this.tokenService.verifyToken(
-        params.impToken!,
-        params.clientIp,
-      );
+      let payload = recovery?.binding ?? this.tokenService.verifyToken(params.impToken!,params.clientIp);
+      if (!payload && params.type === 'click') {
+        const houseCandidate = this.tokenService.verifyToken(params.impToken!,params.clientIp,{allowIpMismatch:true});
+        if (houseCandidate?.campaignId === HOUSE_CAMPAIGN_UUID) payload = houseCandidate;
+      }
       if (!payload) return;
 
       isHouseOrShadowServe =
-        payload.campaignId === HOUSE_CAMPAIGN_UUID &&
-        payload.creativeId === HOUSE_CREATIVE_UUID;
+        payload.campaignId === HOUSE_CAMPAIGN_UUID;
 
-      if (!(await this.boundServe(payload))) return;
+      if (!(await this.boundServe(payload,isHouseOrShadowServe))) return;
 
       signedPayload = payload;
       placementId = payload.placementId;

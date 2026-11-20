@@ -101,7 +101,7 @@ const responses: Record<string, Record<string, Schema>> = {
   },
   AdsOperationsController: {
     suspendWebsite: json(), reinstateWebsite: json(), adminListWebsites: json(),
-    adminGetWebsite: json(), reviewWebsitePolicy: json(), listAuctionDecisions: json(),
+    adminGetWebsite: json(), retestOwnership: object({ isVerified: bool(), status: str(), errorMessage: nullable(str()) }), reviewWebsitePolicy: json(), listAuctionDecisions: json(),
     getAuctionDecision: nullable(optionalObject({
       pricingBreakdown: nullable(object({
         reservationId: str(), reservationState: str(), reservedNanos: str(), reservationSettledAt: nullable(str()),
@@ -114,6 +114,10 @@ const responses: Record<string, Record<string, Schema>> = {
     })), adminCheckSlotInstallation: json(), adminUpdateSlotLifecycle: json(), adminReviewDirectSlot: json(),
   },
   CampaignsController: {
+    liveSettings: object(campaignProperties,['id','title','contentRevision']),
+    liveStackSettings: stack, liveCreateStack: stack,
+    liveArchiveStack: object({ deleted: bool() }),
+    liveCreativeAddition: creative, liveCreativeReplacement: creative, liveCreativeStatus: creative,
     campaignPage:object({items:array(campaign),page:{type:'integer'},pageSize:{type:'integer'},total:{type:'integer'},counts:{type:'object',additionalProperties:{type:'integer'}}}),
     staffCampaignPage:object({items:array(object({
       id:str(),title:str(),advertiserId:str(),advertiserEmail:nullable(str()),status:str(),moderationStatus:str(),
@@ -217,6 +221,7 @@ export function documentAdsController(controller: AnyConstructor) {
     for (const [key, arg] of Object.entries(args) as [string, { index: number; data?: string }][]) {
       if (key.startsWith('3:') && !arg.data && types[arg.index] && types[arg.index] !== Object) documentValidatedDto(types[arg.index]);
     }
+    if (name === 'retestOwnership') apply(ApiBody({ schema: object({ method: enumeration('dns_txt', 'html_meta') }) }));
     if (name === 'updateStatus') apply(ApiBody({ schema: object({ status: enumeration('active', 'paused', 'trash', 'draft') }) }));
     if (['getQueue','getClaim'].includes(name)) apply(ApiQuery({ name: 'stage', required: false, enum: ['reviewer', 'manager'] }));
     if (name === 'operationsSummary') apply(ApiQuery({name:'targetType',required:false,enum:['all','creative','stack','campaign']}));

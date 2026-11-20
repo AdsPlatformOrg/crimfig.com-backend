@@ -24,6 +24,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  IsISO8601,
   Max,
   MaxLength,
   Min,
@@ -35,6 +36,11 @@ import { Public } from "@crimfig/shared";
 export class MutationDto {
   @IsInt() @Min(1) expectedRevision: number;
   @IsUUID() requestId: string;
+  @IsOptional() @IsISO8601() expectedUpdatedAt?: string;
+}
+export class LiveCreativeStatusDto extends MutationDto {
+  @IsIn(['active','paused','archived']) status: 'active' | 'paused' | 'archived';
+  @IsOptional() @IsUUID() adStackId?: string;
 }
 export class BeginEditDto extends MutationDto { @IsOptional() @IsUUID() submissionId?:string; }
 export class SaveCampaignDto extends MutationDto {
@@ -54,6 +60,7 @@ export class SaveCampaignDto extends MutationDto {
   @IsOptional() @IsIn(['global','targeted']) geoMode?:'global'|'targeted';
   @IsOptional() @IsArray() @IsString({each:true}) locations?:string[];
   @IsOptional() @IsArray() @ArrayMaxSize(30) stacks?:object[];
+  @IsOptional() @IsISO8601() endsAt?: string;
 }
 
 export class CreateCampaignDto {
@@ -298,6 +305,40 @@ export class UpdateStackDto extends MutationDto {
 @ApiTags("Campaigns")
 @Controller("campaigns")
 export class CampaignsController {
+  @Patch(':id/live-settings')
+  async liveSettings(@Param('id',new ParseUUIDPipe()) id:string,@Req() req:any,@Body() dto:SaveCampaignDto) {
+    return {status:'success',data:await this.campaignsService.saveCampaign(id,req.user.sub,dto,true)};
+  }
+
+  @Patch(':id/ad-stacks/:stackId/live-settings')
+  async liveStackSettings(@Param('id',new ParseUUIDPipe()) id:string,@Param('stackId',new ParseUUIDPipe()) stackId:string,@Req() req:any,@Body() dto:UpdateStackDto) {
+    return {status:'success',data:await this.campaignsService.updateStack(id,stackId,req.user.sub,dto,dto,true)};
+  }
+
+  @Post(':id/ad-stacks/live')
+  async liveCreateStack(@Param('id',new ParseUUIDPipe()) id:string,@Req() req:any,@Body() dto:CreateStackDto) {
+    return {status:'success',data:await this.campaignsService.createStack(id,req.user.sub,dto.name,dto,true)};
+  }
+
+  @Delete(':id/ad-stacks/:stackId/live')
+  async liveArchiveStack(@Param('id',new ParseUUIDPipe()) id:string,@Param('stackId',new ParseUUIDPipe()) stackId:string,@Req() req:any,@Body() dto:MutationDto) {
+    return {status:'success',data:await this.campaignsService.deleteStack(id,stackId,req.user.sub,dto,true)};
+  }
+
+  @Post(':id/creatives/submit-addition')
+  async liveCreativeAddition(@Param('id',new ParseUUIDPipe()) id:string,@Req() req:any,@Body() dto:AddCreativeDto) {
+    return {status:'success',data:await this.campaignsService.addCreative(id,req.user.sub,dto,dto,true)};
+  }
+
+  @Put(':id/creatives/:creativeId/submit-replacement')
+  async liveCreativeReplacement(@Param('id',new ParseUUIDPipe()) id:string,@Param('creativeId',new ParseUUIDPipe()) creativeId:string,@Req() req:any,@Body() dto:ReplaceCreativeDto) {
+    return {status:'success',data:await this.campaignsService.replaceLiveCreative(id,creativeId,req.user.sub,dto)};
+  }
+
+  @Patch(':id/creatives/:creativeId/status')
+  async liveCreativeStatus(@Param('id',new ParseUUIDPipe()) id:string,@Param('creativeId',new ParseUUIDPipe()) creativeId:string,@Req() req:any,@Body() dto:LiveCreativeStatusDto) {
+    return {status:'success',data:await this.campaignsService.updateLiveCreativeStatus(id,creativeId,req.user.sub,dto)};
+  }
   constructor(private readonly campaignsService: CampaignsService) {}
 
   @Public()

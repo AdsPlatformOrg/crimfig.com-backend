@@ -1,3 +1,4 @@
+import { displayBurnPercent } from './display-burn-percent';
 import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
@@ -72,7 +73,6 @@ export class AdsEscrowService {
     }
 
     const remainingCents = escrow.allocatedUsdCents - escrow.consumedUsdCents - escrow.refundedUsdCents;
-    const burnPercent = escrow.allocatedUsdCents > 0 ? (escrow.consumedUsdCents / escrow.allocatedUsdCents) * 100 : 0;
 
     return {
       ...escrow,
@@ -81,7 +81,7 @@ export class AdsEscrowService {
       consumedUsd: escrow.consumedUsdCents / 100,
       remainingUsd: Math.max(0, remainingCents) / 100,
       refundedUsd: escrow.refundedUsdCents / 100,
-      burnPercent: Number(burnPercent.toFixed(1)),
+      burnPercent: displayBurnPercent(escrow.consumedUsdCents, escrow.allocatedUsdCents),
     };
   }
 
@@ -126,7 +126,7 @@ export class AdsEscrowService {
         items: escrows.map((e) => ({
           id: e.id,
           refundedUsd: e.refundedUsdCents / 100,
-          burnPercent: e.allocatedUsdCents > 0 ? e.consumedUsdCents / e.allocatedUsdCents * 100 : 0,
+          burnPercent: displayBurnPercent(e.consumedUsdCents, e.allocatedUsdCents),
           campaignId: e.campaignId,
           campaignTitle: e.campaignTitle,
           allocatedUsd: e.allocatedUsdCents / 100,

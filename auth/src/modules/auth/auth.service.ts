@@ -241,6 +241,7 @@ export class AuthService {
       .select({
         id: schema.users.id,
         email: schema.users.email,
+        preferredLocale: schema.users.preferredLocale,
         avatarPresetId: schema.users.avatarPresetId,
         avatarVersion: schema.users.avatarVersion,
       })
@@ -254,6 +255,7 @@ export class AuthService {
     return {
       userId: user.id,
       email: user.email,
+      preferredLocale: user.preferredLocale,
       avatar: {
         kind: stored ? 'preset' : 'default',
         presetId: preset.id,
@@ -263,6 +265,15 @@ export class AuthService {
         version: user.avatarVersion,
       },
     };
+  }
+
+  async updatePreferredLocale(userId:string,preferredLocale:string) {
+    const {isSupportedLocale}=await import('../../../../shared/src/config/supported-locales');
+    if(!isSupportedLocale(preferredLocale))throw new BadRequestException('Choose a supported language.');
+    const [updated]=await this.db.update(schema.users).set({preferredLocale,updatedAt:new Date()})
+      .where(eq(schema.users.id,userId)).returning({id:schema.users.id});
+    if(!updated)throw new UnauthorizedException('Account is not available');
+    return {preferredLocale};
   }
 
   async updateAvatarPreset(userId: string, presetId: string | null) {

@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, Logger,ConflictException } from '@nestjs/common';
+import { BadRequestException, Injectable, Inject, NotFoundException, Logger,ConflictException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -21,6 +21,18 @@ export class VerificationService {
    * Verify domain ownership via DNS TXT record or HTML meta tag / file
    */
   async verifyWebsite(promoterId: string, websiteId: string) {
+    return this.checkWebsite(promoterId, websiteId);
+  }
+
+  async retestWebsite(websiteId: string, method: unknown, actorId: string) {
+    if (method !== 'dns_txt' && method !== 'html_meta') throw new BadRequestException('Unsupported verification method');
+    const [row] = await this.db.select({ promoterId: adsPromoterWebsites.promoterId }).from(adsPromoterWebsites)
+      .where(eq(adsPromoterWebsites.id, websiteId)).limit(1);
+    if (!row) throw new NotFoundException('Website not found');
+    return this.checkWebsite(row.promoterId, websiteId, { method, actorId });
+  }
+
+  private async checkWebsite(promoterId: string, websiteId: string, staff?: { method: 'dns_txt' | 'html_meta'; actorId: string }) {
     const [website] = await this.db
       .select()
       .from(adsPromoterWebsites)
@@ -41,6 +53,7 @@ export class VerificationService {
     }
 
     const token = website.verificationToken;
+    const method = staff ? (staff.method === 'dns_txt' ? 'dns_txt' : 'html_file_and_meta_tag') : website.verificationMethod;
     let isVerified = false;
     let errorMessage: string | null = null;
 
@@ -49,7 +62,7 @@ export class VerificationService {
       if (!token || !/^[a-zA-Z0-9_-]{16,256}$/.test(token)) {
         throw new Error('Invalid verification token; re-register this website');
       }
-      if (website.verificationMethod === 'dns_txt') {
+      if (method === 'dns_txt') {
         const expected = `crimfig-site-verification=${token}`;
         // First try local resolver
         try {
@@ -67,7 +80,7 @@ export class VerificationService {
             errorMessage = dohResult.errorMessage || 'Exact DNS TXT verification record was not found.';
           }
         }
-      } else if (website.verificationMethod === 'html_file_and_meta_tag') {
+      } else if (method === 'html_file_and_meta_tag') {
         isVerified = hasVerificationMeta(await fetchWebsiteProof(target), token);
         if (!isVerified) errorMessage = 'Exact crimfig-site-verification meta tag was not found.';
       } else {
@@ -82,16 +95,22 @@ export class VerificationService {
       await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
       const [current]=await tx.select().from(adsPromoterWebsites).where(and(eq(adsPromoterWebsites.id,websiteId),eq(adsPromoterWebsites.promoterId,promoterId))).for('update').limit(1);
       if(!current||current.domain!==website.domain||current.url!==website.url||current.verificationToken!==token||current.verificationMethod!==website.verificationMethod)throw new ConflictException('Website details changed. Run verification again.');
+      if (current.lastVerificationAttemptAt?.getTime() !== website.lastVerificationAttemptAt?.getTime()) {
+        throw new ConflictException('Another verification attempt finished. Reload and try again.');
+      }
+      const preserveProof = Boolean(staff && !isVerified && current.verificationStatus === 'verified' &&
+        current.verificationExpiresAt && current.verificationExpiresAt.getTime() > Date.now());
       // Ownership proof cannot erase a concurrent staff rejection or suspension.
       const nextPolicyStatus=isVerified&&current.policyStatus==='unverified'?'testing':current.policyStatus;
       const now=new Date();
       const [saved]=await tx.update(adsPromoterWebsites).set({
-        verificationStatus:isVerified?'verified':'failed',verifiedAt:isVerified?now:null,
-        verificationExpiresAt:isVerified?new Date(now.getTime()+30*86400000):null,
+        verificationStatus:isVerified?'verified':preserveProof?'verified':'failed',verifiedAt:isVerified?now:preserveProof?current.verifiedAt:null,
+        ...(staff && isVerified ? { verificationMethod: method } : {}),
+        verificationExpiresAt:isVerified?new Date(now.getTime()+30*86400000):preserveProof?current.verificationExpiresAt:null,
         policyStatus:nextPolicyStatus,lastVerificationAttemptAt:now,verificationErrorMessage:errorMessage,
         verificationFailures:isVerified?0:(current.verificationFailures||0)+1,updatedAt:now,
       }).where(eq(adsPromoterWebsites.id,websiteId)).returning();
-      await tx.insert(adsSupplyStateHistory).values({entityType:'website',entityId:websiteId,dimension:'ownership_status',fromState:current.verificationStatus,toState:saved.verificationStatus,actorRole:'owner',reason:isVerified?'OWNERSHIP_PROOF_CONFIRMED':'OWNERSHIP_PROOF_FAILED'});
+      await tx.insert(adsSupplyStateHistory).values({entityType:'website',entityId:websiteId,dimension:'ownership_status',fromState:current.verificationStatus,toState:saved.verificationStatus,actorRole:staff?'ads_staff':'owner',actorId:staff?.actorId,reason:staff ? (isVerified ? 'OWNERSHIP_RETEST_CONFIRMED_' : 'OWNERSHIP_RETEST_FAILED_') + staff.method.toUpperCase() : isVerified?'OWNERSHIP_PROOF_CONFIRMED':'OWNERSHIP_PROOF_FAILED'});
       return saved;
     });
 

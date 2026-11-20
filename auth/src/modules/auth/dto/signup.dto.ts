@@ -1,4 +1,5 @@
-import { IsEmail, IsString, MinLength, MaxLength, IsOptional, Matches } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, IsOptional, Matches, IsIn } from 'class-validator';
+import { SUPPORTED_LOCALES } from '../../../../../shared/src/config/supported-locales';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class SignupDto {
@@ -24,5 +25,6 @@ export class SignupDto {
   @IsOptional()
   @IsString()
   @MaxLength(10)
+  @IsIn(SUPPORTED_LOCALES)
   preferredLocale?: string;
 }

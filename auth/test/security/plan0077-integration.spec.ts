@@ -16,8 +16,11 @@ import { ModerationController } from '../../../api/ads-api/src/modules/moderatio
 import { AdsAccessGuard } from '../../../api/ads-api/src/modules/security/ads-access.guard';
 import { AdsStaffGrants } from '../../../api/ads-api/src/modules/security/ads-staff-grants';
 import { CampaignWorkflow } from '../../../api/ads-api/src/modules/campaigns/campaign-workflow';
+import { CampaignsService } from '../../../api/ads-api/src/modules/campaigns/campaigns.service';
+import { CampaignsController } from '../../../api/ads-api/src/modules/campaigns/campaigns.controller';
+let campaignService: CampaignsService;
 let service:ModerationService;
-@Module({controllers:[ModerationController],providers:[{provide:ModerationService,useFactory:()=>service}]})class LocalModule{}
+@Module({controllers:[ModerationController,CampaignsController],providers:[{provide:CampaignsService,useFactory:()=>campaignService},{provide:ModerationService,useFactory:()=>service}]})class LocalModule{}
 const run=process.env.PLAN0009_PG_URL?describe:describe.skip;
 run('PLAN0077 real local HTTP + PostgreSQL moderation (no Redis/provider boundary)',()=>{
  let pool:Pool,db:any,app:any,origin:string,owner:string,reviewer:string,manager:string,outsider:string,ids:any;
@@ -31,14 +34,14 @@ run('PLAN0077 real local HTTP + PostgreSQL moderation (no Redis/provider boundar
   const url=new URL(process.env.PLAN0009_PG_URL!);if(url.hostname!=='127.0.0.1'||url.port!=='25432'||url.pathname!=='/plan0009_test'||url.username!=='plan0009test')throw Error('Refusing non-disposable database');
   pool=new Pool({connectionString:url.href,max:8,connectionTimeoutMillis:5000});db=drizzle(pool,{schema});
   await pool.query('create table users(id uuid primary key,email text not null,status text not null)');
-  const tables=[schema.adsCampaigns,schema.adsCreativeStacks,schema.adsCreatives,schema.adsCampaignSubmissions,schema.adsCampaignMutations,schema.adsCampaignChanges,schema.adsModerationDecisions,schema.crimfigGeoTargets];
+  const tables=[schema.adsCampaigns,schema.adsMediaAssets,schema.adsCreativeStacks,schema.adsCreatives,schema.adsCampaignSubmissions,schema.adsCampaignMutations,schema.adsCampaignChanges,schema.adsModerationDecisions,schema.crimfigGeoTargets];
   const dialect=new PgDialect(),quote=(value:string)=>'"'+value.replace(/"/g,'""')+'"';
   const literal=(value:any):string=>value===null?'null':typeof value==='number'||typeof value==='boolean'?String(value):"'"+String(value).replace(/'/g,"''")+"'";
   const defaults=(value:any)=>{if(value&&typeof value==='object'&&'queryChunks' in value){const q=dialect.sqlToQuery(value);return q.sql.replace(/\$(\d+)/g,(_m,index)=>literal(q.params[Number(index)-1]));}return literal(value);};
   const enums=new Set<string>();
   for(const table of tables)for(const col of getTableConfig(table).columns as any[]){if(col.enum&&!enums.has(col.enum.enumName)){enums.add(col.enum.enumName);await pool.query(`create type ${quote(col.enum.enumName)} as enum (${col.enum.enumValues.map(literal).join(',')})`);}}
   for(const table of tables){const config=getTableConfig(table);const columns=config.columns.map((col:any)=>`${quote(col.name)} ${col.getSQLType()}${col.primary?' primary key':''}${col.notNull?' not null':''}${col.isUnique?' unique':''}${col.default!==undefined?' default '+defaults(col.default):''}`);for(const unique of config.uniqueConstraints)columns.push(`constraint ${quote(unique.name!)} unique (${unique.columns.map(col=>quote(col.name)).join(',')})`);for(const fk of config.foreignKeys){const ref=fk.reference();columns.push(`foreign key (${ref.columns.map(col=>quote(col.name)).join(',')}) references ${quote(getTableName(ref.foreignTable))} (${ref.foreignColumns.map(col=>quote(col.name)).join(',')})`);}await pool.query(`create table ${quote(config.name)} (${columns.join(',')})`);for(const index of config.indexes){if(index.config.unique){const cols=index.config.columns as any[];await pool.query(`create unique index ${quote(index.config.name!)} on ${quote(config.name)} (${cols.map(col=>quote(col.name)).join(',')})`);}}}
-  service=new ModerationService(db,grants);app=await NestFactory.create(LocalModule,{logger:false});app.setGlobalPrefix('api/v1');app.useGlobalInterceptors({intercept(context:any,next:any){return next.handle().pipe(tap(()=>{if(context.switchToHttp().getRequest().headers['x-test-drop-response']==='1')context.switchToHttp().getResponse().destroy();}));}});app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));app.useGlobalGuards(new AdsAccessGuard(jwt,new Reflector(),db,grants));await app.listen(0,'127.0.0.1');origin=await app.getUrl();
+  campaignService=new CampaignsService(db,{} as any,{} as any);service=new ModerationService(db,grants);app=await NestFactory.create(LocalModule,{logger:false});app.setGlobalPrefix('api/v1');app.useGlobalInterceptors({intercept(context:any,next:any){return next.handle().pipe(tap(()=>{if(context.switchToHttp().getRequest().headers['x-test-drop-response']==='1')context.switchToHttp().getResponse().destroy();}));}});app.useGlobalPipes(new ValidationPipe({whitelist:true,forbidNonWhitelisted:true,transform:true}));app.useGlobalGuards(new AdsAccessGuard(jwt,new Reflector(),db,grants));await app.listen(0,'127.0.0.1');origin=await app.getUrl();
  },30000);
  beforeEach(async()=>{
   await pool.query('truncate users,ads_campaigns cascade');roles.clear();owner=randomUUID();reviewer=randomUUID();manager=randomUUID();outsider=randomUUID();for(const id of [owner,reviewer,manager,outsider])await pool.query("insert into users values($1,$2,'ACTIVE')",[id,id+'@example.test']);roles.set(reviewer,['ads_reviewer','ads_manager']);roles.set(manager,['ads_manager']);
@@ -48,6 +51,66 @@ run('PLAN0077 real local HTTP + PostgreSQL moderation (no Redis/provider boundar
   const snapshot=await new CampaignWorkflow(db).snapshot(db,campaign);const [submission]=await db.insert(schema.adsCampaignSubmissions).values({campaignId:campaign.id,actorId:owner,requestId:randomUUID(),contentRevision:1,fingerprint:'a'.repeat(64),snapshot,state:'submitted',submittedAt:new Date()}).returning();await pool.query('update ads_campaigns set current_submission_id=$1,submitted_at=now() where id=$2',[submission.id,campaign.id]);ids={campaign:campaign.id,stack:stack.id,creative:creative.id,sub:submission.id};
  });
  afterAll(async()=>{await app?.close();await pool?.end();const dir=resolve('../docs/reviews/plan-0077');mkdirSync(dir,{recursive:true});writeFileSync(resolve(dir,'backend-contract-fixtures.json'),JSON.stringify(artifact,null,2));});
+ test('PLAN0123 live settings and asset submissions retain paid approval and isolate reviews',async()=>{
+  await pool.query("update ads_campaigns set status='active',moderation_status='approved',approved_submission_id=current_submission_id,approved_revision=content_revision");
+  await pool.query("update ads_creative_stacks set review_status='approved'");
+  await pool.query("update ads_creatives set review_status='approved'");
+  const read=async()=> (await pool.query('select * from ads_campaigns where id=$1',[ids.campaign])).rows[0];
+  let c=await read();
+  const control=()=>({expectedRevision:1,requestId:randomUUID(),expectedUpdatedAt:new Date(c.updated_at).toISOString()});
+  const send=async(path:string,body:any,actor=owner)=>{
+    const response=await fetch(origin+'/api/v1/campaigns/'+ids.campaign+path,{method:'PATCH',headers:{Authorization:'Bearer '+jwt.sign({sub:actor,email:'test@example.test',type:'access'},{expiresIn:'5m'}),'Content-Type':'application/json'},body:JSON.stringify(body),signal:AbortSignal.timeout(10000)});
+    return {status:response.status,body:await response.json() as any};
+  };
+  expect((await send('/live-settings',{...control(),title:'Foreign'},outsider)).status).toBe(404);
+  expect((await send('/live-settings',{...control(),budgetUsd:500})).status).toBe(400);
+  expect((await send('/live-settings',{...control(),costPerClickCents:1})).status).toBe(400);
+  expect((await send('/live-settings',{...control(),expectedUpdatedAt:'2000-01-01T00:00:00Z',title:'Stale'})).status).toBe(409);
+  const body={...control(),title:'Live updated',schedule:{version:1,mode:'round_the_clock',timezone:'Africa/Lagos',ranges:[]}};
+  await pool.query('update ads_campaigns set target_hours=$1 where id=$2',[JSON.stringify([1]),ids.campaign]);
+  const changed=await send('/live-settings',body);
+  expect(changed).toMatchObject({status:200});
+  expect((await send('/live-settings',body)).status).toBe(200);
+  c=await read();
+  expect(c.status).toBe('active');expect(c.moderation_status).toBe('approved');expect(c.content_revision).toBe(1);
+  expect(c.current_submission_id).toBe(c.approved_submission_id);expect(c.target_hours).toBeNull();
+  expect((await pool.query('select review_status from ads_creatives where id=$1',[ids.creative])).rows[0].review_status).toBe('approved');
+
+  const [asset]=await db.insert(schema.adsMediaAssets).values({ownerId:owner,storageKey:randomUUID(),cdnUrl:'https://example.test/new.webp',mimeType:'image/webp',bytes:1000,sha256:'a'.repeat(64),status:'ready'}).returning();
+  const newAd=await campaignService.addCreative(ids.campaign,owner,{adStackId:ids.stack,adType:'image',adFormat:'card',destinationUrl:'https://example.test',mediaAssetId:asset.id},control(),true);
+  expect(newAd.reviewStatus).toBe('pending');
+  const queue=await service.getQueue('reviewer');
+  const pending=(queue as any).creatives.find((row:any)=>row.id===newAd.id);
+  expect(pending).toBeDefined();expect(pending.submissionId).not.toBe(ids.sub);
+  const detail=await service.itemDetail('creative',newAd.id,reviewer);
+  expect(detail.capabilities.reviewer.allowed).toBe(true);
+  expect(detail.submissionId).toBe(pending.submissionId);
+  const decision=(actor:string)=>({requestId:randomUUID(),submissionId:pending.submissionId,expectedRevision:1,decision:'approved' as const,reviewerId:actor});
+  await service.reviewCreativePrimary(newAd.id,decision(reviewer));
+  await expect(service.reviewCreativeManager(newAd.id,decision(reviewer))).rejects.toThrow();
+  await service.reviewCreativeManager(newAd.id,decision(manager));
+  c=await read();
+  expect(c.status).toBe('active');expect(c.content_revision).toBe(1);expect(c.current_submission_id).toBe(ids.sub);
+  expect((await pool.query('select review_status from ads_creatives where id=$1',[newAd.id])).rows[0].review_status).toBe('approved');
+  c=await read();
+  const replacement=await campaignService.replaceLiveCreative(ids.campaign,newAd.id,owner,{
+    ...control(),mediaAssetId:asset.id,adType:'image',destinationUrl:'https://example.test/updated',
+  });
+  expect(replacement.id).not.toBe(newAd.id);
+  expect((await pool.query('select status from ads_creatives where id=$1',[newAd.id])).rows[0].status).toBe('archived');
+  expect((await pool.query('select review_status from ads_creatives where id=$1',[ids.creative])).rows[0].review_status).toBe('approved');
+  await expect(service.reviewCreativePrimary(replacement.id,decision(reviewer))).rejects.toThrow('submission changed');
+  const replacementQueue=await service.getQueue('reviewer');
+  expect((replacementQueue as any).creatives.map((row:any)=>row.id)).toContain(replacement.id);
+  c=await read();
+  const concurrentControl=control();
+  const raced=await Promise.all([
+    send('/live-settings',{...concurrentControl,requestId:randomUUID(),title:'Race one'}),
+    send('/live-settings',{...concurrentControl,requestId:randomUUID(),title:'Race two'}),
+  ]);
+  expect(raced.map(result=>result.status).sort()).toEqual([200,409]);
+
+ });
  test('INT01/02 real guards/DTO reject unauthenticated, wrong-role and stale revision without writes',async()=>{expect((await request('/queue?stage=manager')).status).toBe(401);expect((await request('/queue',outsider)).status).toBe(403);expect((await request(route('creative','primary-review'),reviewer,{...input(),expectedRevision:0})).status).toBe(400);expect((await request(route('creative','primary-review'),reviewer,{...input(),expectedRevision:2})).status).toBe(409);expect((await pool.query('select count(*)::int n from ads_moderation_decisions')).rows[0].n).toBe(0);});
  test('INT03/04/05 all three targets progress to Manager; distinct manager completes and summary agrees',async()=>{
   for(const type of ['creative','stack','campaign']){const response=await request(route(type,'primary-review'),reviewer,input());expect(response.status).toBe(201);artifact[type+'Receipt']=response.body;}

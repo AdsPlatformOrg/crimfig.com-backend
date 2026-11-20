@@ -15,7 +15,9 @@ export interface ImpressionTokenPayload {
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 @Injectable()
 export class ImpressionTokenService {
-  private readonly secretKey = process.env.ADS_IMPRESSION_SIGNING_KEY;
+  private get secretKey(): string | undefined {
+    return process.env.ADS_IMPRESSION_SIGNING_KEY;
+  }
   private readonly ttlMs = 15 * 60 * 1000;
 
   private configured(): boolean {
@@ -35,19 +37,19 @@ export class ImpressionTokenService {
     return `imp_${encoded}.${crypto.createHmac('sha256', this.secretKey!).update(encoded).digest('base64url')}`;
   }
 
-  private validPayload(payload: any): payload is ImpressionTokenPayload {
+  private validPayload(payload: any, allowExpired = false): payload is ImpressionTokenPayload {
     return payload && payload.version === 2 &&
       ['servedId', 'placementId', 'campaignId', 'creativeId', 'promoterId']
         .every(key => typeof payload[key] === 'string' && uuid.test(payload[key])) &&
       Number.isSafeInteger(payload.timestamp) && payload.timestamp <= Date.now() &&
-      Date.now() - payload.timestamp <= this.ttlMs &&
+      (allowExpired || Date.now() - payload.timestamp <= this.ttlMs) &&
       typeof payload.ipHash === 'string' && /^(?:[a-f0-9]{16}|unknown)$/.test(payload.ipHash);
   }
 
   verifyToken(
     token: string,
     clientIp?: string,
-    options?: { allowIpMismatch?: boolean },
+    options?: { allowIpMismatch?: boolean; allowExpired?: boolean },
   ): ImpressionTokenPayload | null {
     if (!this.configured() || typeof token !== 'string' || token.length > 2048) return null;
     const match = /^imp_([A-Za-z0-9_-]+)\.([A-Za-z0-9_-]{43})$/.exec(token);
@@ -58,7 +60,7 @@ export class ImpressionTokenService {
     if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null;
     try {
       const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-      if (!this.validPayload(payload)) return null;
+      if (!this.validPayload(payload, options?.allowExpired)) return null;
       if (!options?.allowIpMismatch && payload.ipHash !== this.hashIp(clientIp)) return null;
       return payload;
     } catch { return null; }

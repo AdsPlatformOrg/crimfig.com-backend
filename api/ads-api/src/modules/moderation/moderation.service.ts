@@ -18,7 +18,7 @@ import {
 } from '@crimfig/database/schema';
 import { eq, desc, and, sql } from 'drizzle-orm';
 import { CampaignWorkflow, controlRequired, fingerprint, uuidPattern, type ReviewControl } from '../campaigns/campaign-workflow';
-import { pendingModerationWork, queueMembership, queueClock, elapsedSeconds } from './moderation-reporting';
+import { pendingModerationWork, queueMembership, queueClock, queueSubmission, matchesReviewSubmission, elapsedSeconds } from './moderation-reporting';
 import { reviewOptions, knownReviewReason } from './review-policy';
 import { AdsStaffGrants } from '../security/ads-staff-grants';
 
@@ -73,7 +73,7 @@ export class ModerationService {
         stack: adsCreativeStacks,
         reviewClock: queueClock('stack',sql`${adsCreativeStacks.id}`,stage),
         campaignTitle: adsCampaigns.title,
-        submissionId: adsCampaigns.currentSubmissionId,
+        submissionId: queueSubmission('stack',sql`${adsCreativeStacks.id}`,stage),
         contentRevision: adsCampaigns.contentRevision,
       })
       .from(adsCreativeStacks)
@@ -96,7 +96,7 @@ export class ModerationService {
       .select({
         creative: adsCreatives,
         reviewClock: queueClock('creative',sql`${adsCreatives.id}`,stage),
-        submissionId: adsCampaigns.currentSubmissionId,
+        submissionId: queueSubmission('creative',sql`${adsCreatives.id}`,stage),
         contentRevision: adsCampaigns.contentRevision,
       })
       .from(adsCreatives)
@@ -195,7 +195,8 @@ export class ModerationService {
       if(campaign.advertiserId===actorId)throw new ForbiddenException('Owners cannot claim their own campaigns.');
       const [prior]=await tx.select().from(adsCampaignMutations).where(and(eq(adsCampaignMutations.campaignId,campaignId),eq(adsCampaignMutations.actorId,actorId),eq(adsCampaignMutations.requestId,params.requestId))).limit(1);
       if(prior){if(prior.purgedAt||prior.fingerprint!==hash)throw new ConflictException('Claim request identity changed or archived.');return prior.result;}
-      if(campaign.currentSubmissionId!==params.submissionId||campaign.contentRevision!==params.expectedRevision||campaign.submissionIntentId)throw new ConflictException('This claim submission changed. Reload details.');
+      const [claimSubmission] = await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,params.submissionId)).limit(1);
+      if(!matchesReviewSubmission(campaign,claimSubmission,type,id)||campaign.contentRevision!==params.expectedRevision) throw new ConflictException('This claim submission changed. Reload details.');
       const table=type==='campaign'?adsCampaigns:type==='creative'?adsCreatives:adsCreativeStacks;
       const [target]=await tx.select().from(table).where(and(eq(table.id,id),'campaignId' in table?eq(table.campaignId,campaignId):eq(table.id,campaignId),queueMembership(type,sql`${table.id}`,params.stage))).limit(1);
       if(!target)throw new ConflictException('This review is no longer pending.');
@@ -272,8 +273,15 @@ export class ModerationService {
       }
       const [campaign] = await tx.select().from(adsCampaigns).where(eq(adsCampaigns.id,campaignId)).limit(1);
       if (!campaign) throw new NotFoundException('Campaign not found.');
-      const [submission] = campaign.currentSubmissionId ? await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,campaign.currentSubmissionId)).limit(1) : [];
-      const current = !!submission && submission.state === 'submitted' && submission.contentRevision === campaign.contentRevision && !campaign.submissionIntentId;
+      const scopeKey = type === 'creative' ? 'creativeIds' : 'stackIds';
+      const [scopedSubmission] = type === 'campaign' ? [] : await tx.select().from(adsCampaignSubmissions).where(and(
+        eq(adsCampaignSubmissions.campaignId,campaign.id), eq(adsCampaignSubmissions.contentRevision,campaign.contentRevision),
+        eq(adsCampaignSubmissions.state,'submitted'),
+        sql`${adsCampaignSubmissions.snapshot}->'scope'->${scopeKey} ? ${id}`
+      )).orderBy(desc(adsCampaignSubmissions.createdAt)).limit(1);
+      const [baseSubmission] = campaign.currentSubmissionId ? await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,campaign.currentSubmissionId)).limit(1) : [];
+      const submission = scopedSubmission ?? baseSubmission;
+      const current = matchesReviewSubmission(campaign,submission,type,id);
       const snapshot = submission?.snapshot as {campaign?: Record<string, unknown>; stacks?: Record<string, unknown>[]; creatives?: Record<string, unknown>[]; targets?: Record<string, unknown>[]} | undefined;
       const table = type === 'creative' ? adsCreatives : adsCreativeStacks;
       const [child] = type === 'campaign' ? [] : await tx.select().from(table).where(eq(table.id,id)).limit(1);
@@ -417,8 +425,13 @@ export class ModerationService {
         return prior.result;
       }
 
+      const [submission] = await tx
+        .select()
+        .from(adsCampaignSubmissions)
+        .where(eq(adsCampaignSubmissions.id, params.submissionId))
+        .limit(1);
       if (
-        c.currentSubmissionId !== params.submissionId ||
+        !matchesReviewSubmission(c,submission,targetType,targetId) ||
         c.contentRevision !== params.expectedRevision ||
         c.submissionIntentId ||
         ['suspended', 'trash', 'cancelled', 'completed'].includes(c.status)
@@ -428,11 +441,6 @@ export class ModerationService {
 
       if(stage !== 'override' && params.reasonCode && !knownReviewReason(params.reasonCode)) throw new BadRequestException('Unsupported rejection reason. Use a listed code or omit the code and provide a custom explanation.');
 
-      const [submission] = await tx
-        .select()
-        .from(adsCampaignSubmissions)
-        .where(eq(adsCampaignSubmissions.id, params.submissionId))
-        .limit(1);
       if (submission?.state !== 'submitted' || submission.contentRevision !== c.contentRevision) {
         throw new ConflictException('This review is no longer current.');
       }

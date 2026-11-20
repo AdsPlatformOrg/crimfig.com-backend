@@ -1,12 +1,12 @@
 import { readinessReport, websiteReadiness } from '../delivery/readiness-report';
 import { paidDeliveryDiagnostics } from '../delivery/paid-delivery-policy';
-import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
 import { adstationSlots, adsPromoterWebsites, adsServes, adsInteractions, adsAuctionDecisions, adsSupplyStateHistory } from '@crimfig/database/schema';
 import { evaluateDirectSlotReadiness } from '../adstation/adstation-gating';
-import { and, eq, desc, gte, sql, or, ilike } from 'drizzle-orm';
+import { and, eq, asc, desc, gte, sql, or, ilike, inArray } from 'drizzle-orm';
 
 
 @Injectable()
@@ -84,6 +84,7 @@ export class AdsOperationsService {
     decision: 'approved' | 'rejected' | 'testing' | 'suspended',
     reason?: string,
     reviewerId?: string,
+    expectedRevision?: number,
   ) {
     if (!['approved', 'rejected', 'testing', 'suspended'].includes(decision)) throw new BadRequestException('Unsupported website policy decision.');
     if (reason !== undefined && (typeof reason !== 'string' || reason.length > 1000)) throw new BadRequestException('Review reason must be at most 1000 characters.');
@@ -99,6 +100,10 @@ export class AdsOperationsService {
 
       if (!existing) {
         throw new NotFoundException('Website not found');
+      }
+
+      if (expectedRevision !== undefined && expectedRevision !== (existing.policyRevision || 1)) {
+        throw new ConflictException('Website policy changed. Reload before saving another decision.');
       }
 
       if (decision === 'approved' && (existing.verificationStatus !== 'verified' || !existing.verificationExpiresAt || existing.verificationExpiresAt <= new Date())) {
@@ -289,10 +294,36 @@ export class AdsOperationsService {
     search?: string,
     policyStatus?: string,
     verificationStatus?: string,
+    sortBy = 'createdAt',
+    sortDirection = 'desc',
   ) {
     if (!Number.isSafeInteger(page) || page < 1 || page > 100000 || !Number.isSafeInteger(pageSize) || pageSize < 1 || pageSize > 100) {
       throw new BadRequestException('Invalid pagination parameters.');
     }
+    const now = new Date();
+    const ownershipExpired = sql<boolean>`${adsPromoterWebsites.verificationExpiresAt} <= ${now.toISOString()}`;
+    const eligibility = sql<string>`case
+      when ${adsPromoterWebsites.isSuspended} or not ${adsPromoterWebsites.isActive} then 'blocked'
+      when ${adsPromoterWebsites.verificationStatus} <> 'verified'
+        or ${adsPromoterWebsites.verificationExpiresAt} is null or ${ownershipExpired} then 'unverified'
+      when ${adsPromoterWebsites.policyStatus} in ('pending_approval', 'testing') then 'pending_approval'
+      when ${adsPromoterWebsites.policyStatus} <> 'approved' then 'blocked'
+      else 'eligible'
+    end`;
+    const columns = {
+      createdAt: adsPromoterWebsites.createdAt,
+      domain: sql`lower(${adsPromoterWebsites.domain})`,
+      promoter: sql`lower(nullif(${schema.users.email}, ''))`,
+      verificationStatus: sql`case when ${ownershipExpired} then 'expired' else ${adsPromoterWebsites.verificationStatus}::text end`,
+      policyStatus: sql`${adsPromoterWebsites.policyStatus}::text`,
+      paidEligibility: eligibility,
+      slots: sql`(select count(*) from ${adstationSlots} where ${adstationSlots.websiteId} = ${adsPromoterWebsites.id})`,
+    };
+    if (!Object.hasOwn(columns, sortBy) || (sortDirection !== 'asc' && sortDirection !== 'desc')) {
+      throw new BadRequestException('Invalid website sort parameters.');
+    }
+    const column = columns[sortBy as keyof typeof columns];
+    const sortOrder = sortDirection === 'asc' ? asc(column) : desc(column);
     const cleanSearch = search?.trim();
     return this.db.transaction(async (tx: any) => {
       await tx.execute(sql`SET LOCAL statement_timeout='8s'`);
@@ -331,12 +362,13 @@ export class AdsOperationsService {
           isSuspended: adsPromoterWebsites.isSuspended,
           createdAt: adsPromoterWebsites.createdAt,
           updatedAt: adsPromoterWebsites.updatedAt,
+          paidEligibility: eligibility,
         })
         .from(adsPromoterWebsites)
         .leftJoin(schema.adsPromoters, eq(adsPromoterWebsites.promoterId, schema.adsPromoters.id))
         .leftJoin(schema.users, eq(schema.adsPromoters.userId, schema.users.id))
         .where(whereClause)
-        .orderBy(desc(adsPromoterWebsites.createdAt), desc(adsPromoterWebsites.id))
+        .orderBy(sql`${sortOrder} nulls last`, desc(adsPromoterWebsites.id))
         .limit(pageSize)
         .offset((page - 1) * pageSize);
 
@@ -357,7 +389,7 @@ export class AdsOperationsService {
               activeSlots: sql<number>`count(*) filter (where ${adstationSlots.isActive} = true)::int`,
             })
             .from(adstationSlots)
-            .where(sql`${adstationSlots.websiteId} IN ${siteIds}`)
+            .where(inArray(adstationSlots.websiteId, siteIds))
             .groupBy(adstationSlots.websiteId)
         : [];
 
@@ -366,29 +398,9 @@ export class AdsOperationsService {
         slotMap.set(sc.websiteId, { total: sc.totalSlots || 0, active: sc.activeSlots || 0 });
       }
 
-      const now = Date.now();
       const items = rows.map((site: any) => {
-        const sc = slotMap.get(site.id) || { total: 0, active: 0 };
-        const expiry = site.verificationExpiresAt ? new Date(site.verificationExpiresAt).getTime() : 0;
-        const ownershipVerified = site.verificationStatus === 'verified' && expiry > now;
-
-        let paidEligibility: 'eligible' | 'pending_approval' | 'unverified' | 'blocked' = 'eligible';
-        if (site.isSuspended || !site.isActive) {
-          paidEligibility = 'blocked';
-        } else if (!ownershipVerified) {
-          paidEligibility = 'unverified';
-        } else if (site.policyStatus === 'pending_approval' || site.policyStatus === 'testing') {
-          paidEligibility = 'pending_approval';
-        } else if (site.policyStatus !== 'approved') {
-          paidEligibility = 'blocked';
-        }
-
-        return {
-          ...site,
-          slotCount: sc.total,
-          activeSlotCount: sc.active,
-          paidEligibility,
-        };
+        const counts = slotMap.get(site.id);
+        return { ...site, slotCount: counts?.total ?? 0, activeSlotCount: counts?.active ?? 0 };
       });
 
       return {

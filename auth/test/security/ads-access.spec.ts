@@ -1,3 +1,4 @@
+import { VerificationService } from '../../../api/ads-api/src/modules/verification/verification.service';
 import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
 import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
 import { SetupChecksService } from '../../../api/ads-api/src/modules/publisher-inventory/setup-checks.service';
@@ -36,6 +37,7 @@ const conversions = { getPixelScript: jest.fn(() => '// pixel'), ingestConversio
 const uploads = { getMediaStream: jest.fn(async () => ({ stream: Readable.from('preview'), contentType: 'image/png', contentLength: 7 })) };
 const adstation = { updateWebsiteAdstationStatus: jest.fn(async () => ({ status: 'suspended' })), checkConsiderationSlotHealth: jest.fn(async () => ({ status: 'healthy' })), recordDirectEvent: jest.fn(async () => ({ status: 'recorded' })) };
 const promoters = { getOrCreatePromoter: jest.fn(async (userId: string) => ({ id: `promoter-${userId}` })) };
+const verification = { retestWebsite: jest.fn(async () => ({ isVerified: true, status: 'verified', errorMessage: null, website: { verificationToken: 'internal' } })) };
 let status = 'ACTIVE';
 const database = { query: { users: { findFirst: jest.fn(async () => ({ id, email: 'current@example.test', status })) } } };
 
@@ -72,6 +74,7 @@ describe('Ads production guards and controllers over HTTP', () => {
           { provide: UploadsService, useValue: uploads },
           { provide: AdstationService, useValue: adstation },
           { provide: AdsOperationsService, useValue: adstation },
+          { provide: VerificationService, useValue: verification },
           { provide: SetupChecksService, useValue: {} },
           { provide: PromotersService, useValue: promoters },
         ],
@@ -97,6 +100,19 @@ describe('Ads production guards and controllers over HTTP', () => {
     expect(res.status).toBe(200); expect(escrow.getBillingOverview).toHaveBeenCalledWith(id);
     await fetch(`${base}/api/v1/ads/billing/escrow/campaign`, { headers: headers() });
     expect(escrow.getCampaignEscrow).toHaveBeenCalledWith('campaign', id);
+  });
+
+  it('PLAN0121 ownership retests require an admin grant and return only evidence status', async () => {
+    const request = () => fetch(`${base}/api/v1/admin/ads/websites/${id}/ownership-retest`, {
+      method: 'POST', headers: headers(), body: JSON.stringify({ method: 'html_meta', url: 'https://ignored.example' }),
+    });
+    expect((await request()).status).toBe(403);
+    expect(verification.retestWebsite).not.toHaveBeenCalled();
+    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_admin']);
+    const response = await request();
+    expect(response.status).toBe(201);
+    expect(verification.retestWebsite).toHaveBeenCalledWith(id, 'html_meta', id);
+    expect(await response.json()).toEqual({ status: 'success', data: { isVerified: true, status: 'verified', errorMessage: null } });
   });
 
   it('only configured finance staff can dispatch a funded settlement', async () => {

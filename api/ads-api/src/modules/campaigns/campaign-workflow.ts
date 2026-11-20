@@ -3,7 +3,7 @@ import { BadRequestException, ConflictException, NotFoundException } from '@nest
 import { and, eq, asc, sql } from 'drizzle-orm';
 import { adsCampaigns, adsCreatives, adsCreativeStacks, adsCampaignChanges, adsCampaignMutations, adsCampaignSubmissions, crimfigGeoTargets } from '@crimfig/database/schema';
 
-export interface MutationControl { expectedRevision: number; requestId: string }
+export interface MutationControl { expectedRevision: number; requestId: string; expectedUpdatedAt?: string }
 export interface ReviewControl extends MutationControl { submissionId: string }
 export const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function canonical(value: any): any {
@@ -62,7 +62,7 @@ export class CampaignWorkflow {
       entityIds: [...new Set([after.campaign.id, ...before.stacks.map((s: any) => s.id), ...after.stacks.map((s: any) => s.id), ...before.creatives.map((s: any) => s.id), ...after.creatives.map((s: any) => s.id)])],
       beforeSnapshot: before, afterSnapshot: after });
   }
-  async mutate(id: string, owner: string, action: string, control: MutationControl | undefined, payload: unknown, work: (tx: any, c: any) => Promise<any>, beginEdit = false) {
+  async mutate(id: string, owner: string, action: string, control: MutationControl | undefined, payload: unknown, work: (tx: any, c: any) => Promise<any>, beginEdit: boolean | 'live' = false) {
     controlRequired(control);
     const hash = fingerprint({ action, payload, expectedRevision: control.expectedRevision });
     return this.db.transaction(async (tx: any) => {
@@ -70,6 +70,13 @@ export class CampaignWorkflow {
       const [prior] = await tx.select().from(adsCampaignMutations).where(and(eq(adsCampaignMutations.campaignId,id),eq(adsCampaignMutations.actorId,owner),eq(adsCampaignMutations.requestId,control.requestId))).limit(1);
       if (prior) { if(prior.purgedAt)throw new ConflictException('This request receipt has been archived. Reload the campaign.');if (prior.fingerprint !== hash) throw new ConflictException('This request ID was used for different changes.'); return prior.result; }
       if (c.contentRevision !== control.expectedRevision) throw new ConflictException('This campaign changed. Reload before saving.');
+      if (beginEdit === 'live') {
+        if (!currentApproval(c) || !['active','paused'].includes(c.status)) throw new ConflictException('Live editing requires a currently approved campaign.');
+        if (!control.expectedUpdatedAt || !Number.isFinite(Date.parse(control.expectedUpdatedAt)) ||
+            Date.parse(control.expectedUpdatedAt) !== new Date(c.updatedAt).getTime()) {
+          throw new ConflictException('Campaign settings changed. Reload before saving.');
+        }
+      }
       if (!beginEdit) assertEditableCampaign(c);
       const before = await this.snapshot(tx,c);
       const result = await work(tx,c);
@@ -77,12 +84,29 @@ export class CampaignWorkflow {
       const after = await this.snapshot(tx,latest);
       let revision = c.contentRevision;
       if (fingerprint(before) !== fingerprint(after)) {
-        revision++;
-        await tx.update(adsCampaigns).set({ contentRevision:revision, approvedRevision:null, approvedSubmissionId:null, updatedAt:new Date() }).where(eq(adsCampaigns.id,id));
-        after.campaign.contentRevision = revision; after.campaign.approvedRevision = null; after.campaign.approvedSubmissionId = null;
-        await this.audit(tx,before,after,owner,action,control.requestId, Object.keys((payload || {}) as object).filter(k => !['requestId','expectedRevision'].includes(k)));
+        if (beginEdit === 'live') {
+          const updatedAt = new Date(Math.max(Date.now(), new Date(c.updatedAt).getTime() + 1));
+          await tx.update(adsCampaigns).set({ updatedAt }).where(eq(adsCampaigns.id,id));
+          const creativeIds = after.creatives.filter((row:any) => row.status === 'active' &&
+            !before.creatives.some((previous:any) => previous.id === row.id)).map((row:any) => row.id);
+          const stackIds = after.stacks.filter((row:any) => !row.archived &&
+            !before.stacks.some((previous:any) => previous.id === row.id)).map((row:any) => row.id);
+          if (creativeIds.length || stackIds.length) {
+            const snapshot = { ...after, scope: { creativeIds, stackIds } };
+            await tx.insert(adsCampaignSubmissions).values({
+              campaignId:id,actorId:owner,requestId:control.requestId,contentRevision:revision,
+              fingerprint:hash,snapshot,snapshotHash:fingerprint(snapshot),state:'submitted',submittedAt:new Date(),
+            });
+          }
+          after.campaign.updatedAt = updatedAt;
+        } else {
+          revision++;
+          await tx.update(adsCampaigns).set({ contentRevision:revision, approvedRevision:null, approvedSubmissionId:null, updatedAt:new Date() }).where(eq(adsCampaigns.id,id));
+          after.campaign.contentRevision = revision; after.campaign.approvedRevision = null; after.campaign.approvedSubmissionId = null;
+        }
+        await this.audit(tx,before,after,owner,action,control.requestId, Object.keys((payload || {}) as object).filter(k => !['requestId','expectedRevision','expectedUpdatedAt'].includes(k)));
       }
-      const output = { ...result, contentRevision:revision };
+      const output = { ...result, contentRevision:revision, ...(beginEdit === 'live' ? { updatedAt: after.campaign.updatedAt ?? c.updatedAt } : {}) };
       await tx.insert(adsCampaignMutations).values({ campaignId:id,actorId:owner,requestId:control.requestId,action,fingerprint:hash,result:output });
       return output;
     });

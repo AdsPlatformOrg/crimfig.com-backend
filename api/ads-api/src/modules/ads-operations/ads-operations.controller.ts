@@ -1,13 +1,14 @@
 import { documentAdsController } from '../../contracts/ads-contract';
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
+import { Optional, ServiceUnavailableException, Body, Controller, Get, Param, ParseUUIDPipe, Post, Query, Req } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { AdsRoles } from '../security/ads-staff-grants';
+import { VerificationService } from '../verification/verification.service';
 import { AdsOperationsService } from './ads-operations.service';
 
 @ApiTags('Ads Operations')
 @Controller()
 export class AdsOperationsController {
-  constructor(private readonly operations: AdsOperationsService) {}
+  constructor(private readonly operations: AdsOperationsService, @Optional() private readonly verification?: VerificationService) {}
 
   @AdsRoles('ads_admin', 'super_admin')
   @Post(['adstation/admin/websites/:websiteId/suspend', 'admin/ads/websites/:websiteId/suspend'])
@@ -52,12 +53,16 @@ export class AdsOperationsController {
   @ApiQuery({ name: 'search', required: false, type: String })
   @ApiQuery({ name: 'policyStatus', required: false, type: String })
   @ApiQuery({ name: 'verificationStatus', required: false, type: String })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'domain', 'promoter', 'verificationStatus', 'policyStatus', 'paidEligibility', 'slots'] })
+  @ApiQuery({ name: 'sortDirection', required: false, enum: ['asc', 'desc'] })
   async adminListWebsites(
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
     @Query('search') search?: string,
     @Query('policyStatus') policyStatus?: string,
     @Query('verificationStatus') verificationStatus?: string,
+    @Query('sortBy') sortBy?: string,
+    @Query('sortDirection') sortDirection?: string,
   ) {
     return {
       status: 'success',
@@ -67,6 +72,8 @@ export class AdsOperationsController {
         search,
         policyStatus,
         verificationStatus,
+        sortBy,
+        sortDirection,
       ),
     };
   }
@@ -83,6 +90,19 @@ export class AdsOperationsController {
     };
   }
 
+  @AdsRoles('ads_admin', 'super_admin')
+  @Post(['adstation/admin/websites/:websiteId/ownership-retest', 'admin/ads/websites/:websiteId/ownership-retest'])
+  @ApiOperation({ summary: 'Admin: Retest a website ownership proof' })
+  async retestOwnership(
+    @Req() req: { user: { sub: string } },
+    @Param('websiteId', new ParseUUIDPipe()) websiteId: string,
+    @Body() dto: { method?: unknown },
+  ) {
+    if (!this.verification) throw new ServiceUnavailableException('Website ownership checks are unavailable');
+    const { isVerified, status, errorMessage } = await this.verification.retestWebsite(websiteId, dto?.method, req.user.sub);
+    return { status: 'success', data: { isVerified, status, errorMessage } };
+  }
+
   @AdsRoles('ads_admin', 'super_admin', 'ads_reviewer')
   @Post(['adstation/admin/websites/:websiteId/policy', 'admin/ads/websites/:websiteId/policy'])
   @ApiOperation({
@@ -95,6 +115,7 @@ export class AdsOperationsController {
     dto: {
       decision: 'approved' | 'rejected' | 'testing' | 'suspended';
       reason?: string;
+      expectedRevision?: number;
     },
   ) {
     const result = await this.operations.reviewWebsitePolicy(
@@ -102,6 +123,7 @@ export class AdsOperationsController {
       dto.decision,
       dto.reason,
       req.user?.sub,
+      dto.expectedRevision,
     );
     return { status: 'success', data: result };
   }

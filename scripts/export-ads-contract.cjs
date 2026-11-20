@@ -27,8 +27,8 @@ function loadControllers() {
       if (!services.has(exportName)) services.set(exportName, { [exportName]: class {} });
       return services.get(exportName);
     }
-    if (['./setup-checks.service','./publisher-slots.service','./ads-operations.service','../promoters/promoters.service'].includes(id)) {
-      const name = {'./setup-checks.service':'SetupChecksService','./publisher-slots.service':'PublisherSlotsService','./ads-operations.service':'AdsOperationsService','../promoters/promoters.service':'PromotersService'}[id];
+    if (['./setup-checks.service','./publisher-slots.service','./ads-operations.service','../verification/verification.service','../promoters/promoters.service'].includes(id)) {
+      const name = {'./setup-checks.service':'SetupChecksService','./publisher-slots.service':'PublisherSlotsService','./ads-operations.service':'AdsOperationsService','../verification/verification.service':'VerificationService','../promoters/promoters.service':'PromotersService'}[id];
       if (!services.has(name)) services.set(name, { [name]: class {} });
       return services.get(name);
     }

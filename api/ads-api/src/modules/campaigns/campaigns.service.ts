@@ -485,14 +485,14 @@ export class CampaignsService {
     return { ...campaign, defaultStackId: stack?.id };
   }
 
-  async createStack(campaignId: string, advertiserId: string, name?: string, control?: MutationControl) {
+  async createStack(campaignId: string, advertiserId: string, name?: string, control?: MutationControl, live = false) {
     return this.workflow.mutate(campaignId, advertiserId, "create_stack", control, { name }, async (tx) => {
       const campaign = await this.campaignForUpdate(
         tx,
         campaignId,
         advertiserId,
       );
-      this.assertEditable(campaign);
+      if (!live) this.assertEditable(campaign);
       const [row] = await tx
         .select({
           max: sql<number>`coalesce(max(${adsCreativeStacks.position}), 0)`,
@@ -515,7 +515,7 @@ export class CampaignsService {
         })
         .returning();
       return stack;
-    });
+    }, live ? 'live' : false);
   }
 
   async updateStack(
@@ -524,6 +524,7 @@ export class CampaignsService {
     advertiserId: string,
     input: StackSettingsInput,
     control?: MutationControl,
+    live = false,
   ) {
     return this.workflow.mutate(campaignId, advertiserId, "update_stack", control, { stackId, ...input }, async (tx) => {
       const campaign = await this.campaignForUpdate(
@@ -531,7 +532,7 @@ export class CampaignsService {
         campaignId,
         advertiserId,
       );
-      this.assertEditable(campaign);
+      if (!live) this.assertEditable(campaign);
       const [stack] = await tx
         .select()
         .from(adsCreativeStacks)
@@ -561,6 +562,7 @@ export class CampaignsService {
       if (input.schedule !== undefined) {
         try {
           update.schedule = validateSchedule(input.schedule, true);
+          update.targetHours = null;
         } catch (e) {
           throw new BadRequestException((e as Error).message);
         }
@@ -592,17 +594,17 @@ export class CampaignsService {
         .where(eq(adsCreativeStacks.id, stack.id))
         .returning();
       return updated;
-    });
+    }, live ? 'live' : false);
   }
 
-  async deleteStack(campaignId: string, stackId: string, advertiserId: string, control?: MutationControl) {
+  async deleteStack(campaignId: string, stackId: string, advertiserId: string, control?: MutationControl, live = false) {
     return this.workflow.mutate(campaignId, advertiserId, "delete_stack", control, { stackId }, async (tx) => {
       const campaign = await this.campaignForUpdate(
         tx,
         campaignId,
         advertiserId,
       );
-      this.assertEditable(campaign);
+      if (!live) this.assertEditable(campaign);
       const stacks = await tx
         .select()
         .from(adsCreativeStacks)
@@ -616,6 +618,13 @@ export class CampaignsService {
         throw new BadRequestException(
           "The default ad stack cannot be removed.",
         );
+      if (live && campaign.status === 'active') {
+        const [other] = await tx.select({id:adsCreatives.id}).from(adsCreatives)
+          .innerJoin(adsCreativeStacks,eq(adsCreativeStacks.id,adsCreatives.adStackId))
+          .where(and(eq(adsCreatives.campaignId,campaignId),eq(adsCreatives.status,'active'),eq(adsCreatives.reviewStatus,'approved'),
+            eq(adsCreativeStacks.archived,false),eq(adsCreativeStacks.reviewStatus,'approved'),sql`${adsCreativeStacks.id} <> ${stackId}`)).limit(1);
+        if (!other) throw new ConflictException('Pause the campaign before archiving its last delivering stack.');
+      }
       await tx.update(adsCreatives).set({ status: 'archived' }).where(eq(adsCreatives.adStackId, stack.id));
       await tx
         .delete(crimfigGeoTargets)
@@ -629,7 +638,7 @@ export class CampaignsService {
         .update(adsCreativeStacks).set({ archived: true })
         .where(eq(adsCreativeStacks.id, stack.id));
       return { deleted: true };
-    });
+    }, live ? 'live' : false);
   }
 
   // ── Creatives ───────────────────────────────────────────────────────────────
@@ -792,6 +801,7 @@ export class CampaignsService {
     advertiserId: string,
     input: CreativeInput,
     control?: MutationControl,
+    live = false,
   ) {
     return this.workflow.mutate(campaignId, advertiserId, "add_creative", control, input, async (tx) => {
       const campaign = await this.campaignForUpdate(
@@ -799,7 +809,7 @@ export class CampaignsService {
         campaignId,
         advertiserId,
       );
-      this.assertEditable(campaign);
+      if (!live) this.assertEditable(campaign);
       const [stack] = input.adStackId
         ? await tx
             .select()
@@ -844,7 +854,7 @@ export class CampaignsService {
         })
         .returning();
       return creative;
-    });
+    }, live ? 'live' : false);
   }
 
   async replaceCreative(
@@ -852,6 +862,7 @@ export class CampaignsService {
     advertiserId: string,
     input: Partial<CreativeInput>,
     control?: MutationControl,
+    live = false,
   ) {
     const [parent] = await this.db.select({ campaignId: adsCreatives.campaignId }).from(adsCreatives)
       .innerJoin(adsCampaigns, eq(adsCreatives.campaignId, adsCampaigns.id))
@@ -878,7 +889,7 @@ export class CampaignsService {
         existing.campaign.id,
         advertiserId,
       );
-      this.assertEditable(campaign);
+      if (!live) this.assertEditable(campaign);
 
       const merged: CreativeInput = {
         adStackId: input.adStackId || existing.creative.adStackId,
@@ -912,9 +923,7 @@ export class CampaignsService {
       if (!targetStack || existing.creative.status === 'archived') throw new BadRequestException('Choose a current stack in this campaign.');
       merged.mediaAssetId = input.mediaAssetId === undefined ? existing.creative.mediaAssetId : input.mediaAssetId;
       const validated = await this.validateCreative(tx, advertiserId, merged);
-      const [updated] = await tx
-        .update(adsCreatives)
-        .set({
+      const values = {
           adStackId: merged.adStackId,
           adType: validated.adType,
           headline: validated.headline,
@@ -927,18 +936,48 @@ export class CampaignsService {
           mediaAssetId: validated.mediaAssetId,
           adFormat: validated.adFormat,
           mediaFormat: validated.mediaFormat,
-          reviewStatus: "pending",
+          reviewStatus: "pending" as const,
           rejectionReason: null,
           reviewedAt: null,
           updatedAt: new Date(),
-        })
-        .where(eq(adsCreatives.id, creativeId))
-        .returning();
+        };
+      if (live) {
+        const [replacement] = await tx.insert(adsCreatives).values({
+          ...values, campaignId: campaign.id, status: 'active',
+          primaryReviewerId: null, primaryReviewedAt: null, managerReviewerId: null, managerReviewedAt: null,
+        }).returning();
+        await tx.update(adsCreatives).set({status:'archived',updatedAt:new Date()}).where(eq(adsCreatives.id,creativeId));
+        return replacement;
+      }
+      const [updated] = await tx.update(adsCreatives).set(values).where(eq(adsCreatives.id,creativeId)).returning();
       return updated;
-    });
+    }, live ? 'live' : false);
   }
 
   // ── Review submission ───────────────────────────────────────────────────────
+
+  async replaceLiveCreative(id: string, creativeId: string, owner: string, input: any) {
+    const [creative] = await this.db.select({id:adsCreatives.id}).from(adsCreatives)
+      .innerJoin(adsCampaigns,eq(adsCampaigns.id,adsCreatives.campaignId))
+      .where(and(eq(adsCreatives.id,creativeId),eq(adsCreatives.campaignId,id),eq(adsCampaigns.advertiserId,owner))).limit(1);
+    if (!creative) throw new NotFoundException('Creative not found in this campaign.');
+    return this.replaceCreative(creativeId,owner,input,input,true);
+  }
+
+  async updateLiveCreativeStatus(id: string, creativeId: string, owner: string, input: any) {
+    return this.workflow.mutate(id,owner,'live_creative_status',input,{creativeId,...input},async tx => {
+      if (Object.keys(input).some(key => !['status','adStackId','expectedRevision','expectedUpdatedAt','requestId'].includes(key)) ||
+          !['active','paused','archived'].includes(input.status)) throw new BadRequestException('Invalid creative state change.');
+      const [creative] = await tx.select().from(adsCreatives).where(and(eq(adsCreatives.id,creativeId),eq(adsCreatives.campaignId,id))).limit(1);
+      if (!creative || creative.status === 'archived') throw new NotFoundException('Current creative not found.');
+      if (creative.reviewStatus !== 'approved') throw new ConflictException('Only an approved creative can use live controls.');
+      const target = input.adStackId ?? creative.adStackId;
+      const [stack] = await tx.select().from(adsCreativeStacks).where(and(eq(adsCreativeStacks.id,target),eq(adsCreativeStacks.campaignId,id),eq(adsCreativeStacks.archived,false))).limit(1);
+      if (!stack || stack.reviewStatus !== 'approved') throw new ConflictException('Choose an approved active stack.');
+      const [updated] = await tx.update(adsCreatives).set({status:input.status,adStackId:target,updatedAt:new Date()}).where(eq(adsCreatives.id,creativeId)).returning();
+      return updated;
+    },'live');
+  }
 
   async beginEdit(id: string, owner: string, control: MutationControl & { submissionId?: string }) {
     return this.workflow.mutate(id, owner, 'begin_edit', control, { submissionId: control.submissionId }, async (tx,c) => {
@@ -963,10 +1002,19 @@ export class CampaignsService {
   }
 
   /** Atomic full editor save. IDs supplied by clients are references, never ownership claims. */
-  async saveCampaign(id: string, owner: string, input: any) {
+  async saveCampaign(id: string, owner: string, input: any, live = false) {
     return this.workflow.mutate(id,owner,'save_campaign',input,input,async(tx,c) => {
       const patch: any = {};
-      const allowed = ['expectedRevision','requestId','title','description','category','channels','budgetUsd','dailyBudgetUsd','costPerImpressionCents','costPerClickCents','pricingModel','format','targetDevices','schedule','frequencyCapPerDay','geoMode','locations','stacks'];
+      if (live) {
+        const allowedLive = ['expectedRevision','expectedUpdatedAt','requestId','title','description','channels','dailyBudgetUsd','costPerImpressionCents','costPerClickCents','targetDevices','schedule','frequencyCapPerDay','geoMode','locations','endsAt'];
+        if (Object.keys(input).some(key => input[key] !== undefined && !allowedLive.includes(key))) throw new BadRequestException('This field requires the campaign review or escrow workflow.');
+        if (input.endsAt !== undefined) {
+          const date = new Date(input.endsAt);
+          if (!Number.isFinite(date.getTime()) || date <= new Date() || (c.startsAt && date <= c.startsAt)) throw new BadRequestException('Choose a future end date after the start date.');
+          patch.endsAt = date;
+        }
+      }
+      const allowed = ['expectedRevision','expectedUpdatedAt','endsAt','requestId','title','description','category','channels','budgetUsd','dailyBudgetUsd','costPerImpressionCents','costPerClickCents','pricingModel','format','targetDevices','schedule','frequencyCapPerDay','geoMode','locations','stacks'];
       if (Object.keys(input).some(k => !allowed.includes(k))) throw new BadRequestException('Unsupported campaign field.');
       for (const [field,max] of [['title',255],['description',5000],['category',80]] as const) if (input[field] !== undefined) patch[field] = cleanString(input[field],field,max,field==='title') || null;
       if (input.channels !== undefined) {
@@ -995,10 +1043,17 @@ export class CampaignsService {
         if(!Number.isSafeInteger(input[field]) || input[field]<min || input[field]>2147483647) throw new BadRequestException('The bid is below its floor or out of range.');
         patch[column]=input[field];patch.pricingVersion=2;
       }
-      if(input.pricingModel!==undefined) { if(!['cpm','cpc'].includes(input.pricingModel)) throw new BadRequestException('Unsupported pricing model.');patch.pricingModel=input.pricingModel; }
+      if(input.pricingModel!==undefined) {
+        if(!['cpm','cpc'].includes(input.pricingModel)) throw new BadRequestException('Unsupported pricing model.');
+        if(input.pricingModel!==c.pricingModel) {
+          const [escrow]=await tx.select().from(adsCampaignEscrows).where(eq(adsCampaignEscrows.campaignId,id)).limit(1);
+          if(escrow || c.remainingBudgetUsdCents!==c.budgetUsdCents) throw new ConflictException('A funded campaign cannot change pricing model.');
+        }
+        patch.pricingModel=input.pricingModel;
+      }
       if(input.format!==undefined) { if(!AD_FORMATS.includes(input.format)) throw new BadRequestException('Unsupported format.');patch.format=input.format; }
       if(input.targetDevices!==undefined) { const devices=cleanDevices(input.targetDevices);patch.targetDevices=devices?JSON.stringify(devices):null; }
-      if(input.schedule!==undefined) { try { patch.schedule=validateSchedule(input.schedule); } catch(e) { throw new BadRequestException((e as Error).message); } }
+      if(input.schedule!==undefined) { try { patch.schedule=validateSchedule(input.schedule); patch.targetHours=null; } catch(e) { throw new BadRequestException((e as Error).message); } }
       if(input.frequencyCapPerDay!==undefined) { if(!Number.isInteger(input.frequencyCapPerDay)||input.frequencyCapPerDay<1||input.frequencyCapPerDay>100) throw new BadRequestException('Invalid daily frequency cap.');patch.frequencyCapPerDay=input.frequencyCapPerDay; }
       if(input.geoMode!==undefined) {
         const geo=await this.resolveGeo(input.geoMode,input.locations);patch.geoMode=geo.mode;
@@ -1014,7 +1069,7 @@ export class CampaignsService {
           if(!stack || typeof stack!=='object' || Object.keys(stack).some(k=>!['id','name','geoMode','locations','targetDevices','schedule','ads'].includes(k))) throw new BadRequestException('Invalid stack fields.');
           if(stack.id && (!oldStacks.some((s:any)=>s.id===stack.id&&!s.archived)||keptStacks.has(stack.id))) throw new BadRequestException('Choose a current stack in this campaign.');
           const geo=await this.resolveGeo(stack.geoMode||'inherit',stack.locations);
-          const values={name:cleanString(stack.name,'Stack name',100,true),geoMode:geo.mode,targetDevices:cleanDevices(stack.targetDevices)?JSON.stringify(cleanDevices(stack.targetDevices)):null,schedule:validateSchedule(stack.schedule??inherited(),true)};
+          const values={name:cleanString(stack.name,'Stack name',100,true),geoMode:geo.mode,targetDevices:cleanDevices(stack.targetDevices)?JSON.stringify(cleanDevices(stack.targetDevices)):null,schedule:validateSchedule(stack.schedule??inherited(),true),targetHours:null};
           const [row]=stack.id ? await tx.update(adsCreativeStacks).set({...values,updatedAt:new Date()}).where(eq(adsCreativeStacks.id,stack.id)).returning():await tx.insert(adsCreativeStacks).values({...values,campaignId:id,position:nextPosition++}).returning();
           keptStacks.add(row.id);await this.locations.replaceTargets(tx,'stack',row.id,geo.targets);
           if(!Array.isArray(stack.ads)||stack.ads.length>100) throw new BadRequestException('Invalid ads.');
@@ -1032,7 +1087,7 @@ export class CampaignsService {
         for(const stack of oldStacks) if(!keptStacks.has(stack.id)&&!stack.archived) await tx.update(adsCreativeStacks).set({archived:true,updatedAt:new Date()}).where(eq(adsCreativeStacks.id,stack.id));
       }
       const [updated]=await tx.select().from(adsCampaigns).where(eq(adsCampaigns.id,id)).limit(1);return updated;
-    });
+    }, live ? 'live' : false);
   }
 
   async submitForReview(campaignId: string, advertiserId: string, control?: MutationControl) {

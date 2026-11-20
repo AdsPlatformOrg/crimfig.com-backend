@@ -3,7 +3,8 @@ import {
   UseGuards, UnauthorizedException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsOptional, IsString, MaxLength, IsIn } from 'class-validator';
+import { SUPPORTED_LOCALES } from '../../../../shared/src/config/supported-locales';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService, ForgotPasswordDto, ResetPasswordDto } from './auth.service';
@@ -16,6 +17,12 @@ import { config } from '../../config/config';
 import type { JwtPayload } from '../tokens/tokens.service';
 
 import { AuthStaffGrants } from '../../security/auth-staff-grants';
+
+export class UpdateLocaleDto {
+  @IsString()
+  @IsIn(SUPPORTED_LOCALES)
+  preferredLocale!: string;
+}
 
 export class UpdateAvatarDto {
   @IsOptional()
@@ -145,6 +152,14 @@ export class AuthController {
   @ApiOperation({ summary: 'List curated avatar presets and attribution' })
   getAvatarPresets() {
     return this.authService.avatarCatalog();
+  }
+
+  @Patch('profile/locale')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Save the authenticated account language preference' })
+  updateLocale(@CurrentUser() user: JwtPayload, @Body() dto: UpdateLocaleDto) {
+    return this.authService.updatePreferredLocale(user.sub,dto.preferredLocale);
   }
 
   @Patch('profile/avatar')

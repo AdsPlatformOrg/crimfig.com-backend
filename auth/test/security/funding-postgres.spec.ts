@@ -1,3 +1,5 @@
+import { VerificationService } from '../../../api/ads-api/src/modules/verification/verification.service';
+import { AuthService } from '../../src/modules/auth/auth.service';
 import { applyEventCashRebates, restoreOverturnedEventCash } from '../../../api/ads-api/src/event-cash-rebate-reconciliation';
 import { CronJobRegistry, CronLeaseLostError } from '../../../api/ads-api/src/modules/scheduling/cron-job-registry';
 import { CronJobStateRepository } from '../../../api/ads-api/src/modules/scheduling/cron-job-state.repository';
@@ -106,7 +108,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await pool.query('create table apps(id uuid primary key)');
     // Actual Drizzle columns/defaults/enums/unique constraints/FKs, not the serialized mock adapter.
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
-    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsTrafficControls, schema.adsEvidenceRecords, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsClicks, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
+    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsCampaignSubmissions, schema.adsCampaignMutations, schema.adsCampaignChanges, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsTrafficControls, schema.adsEvidenceRecords, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsClicks, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
     const enums = new Set<string>();
     tables.splice(tables.indexOf(schema.adsCreatives), 0, schema.adsMediaAssets as any, schema.crimfigGeoTargets as any, schema.adsHouseCreatives as any);
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
@@ -405,6 +407,95 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     const directDeal=await service.createDirectCampaign(promoter.id,{websiteId:website.id,slotId:slot.id,clientName:'Fixture advertiser',campaignTitle:'Fixture direct campaign',destinationUrl:'https://advertiser.example.test'});
     expect(directDeal.slotId).toBe(slot.id);
     expect((await pool.query('select id, slot_tag_id from adstation_slots order by id')).rows).toEqual(beforeSlots.rows);
+  });
+
+  test('PLAN0121 staff meta retest records ownership evidence without clearing deactivation', async () => {
+    const [promoter] = await db.insert(schema.adsPromoters).values({ userId: owner, type: 'WEBSITE' }).returning();
+    const token = randomUUID();
+    const [site] = await db.insert(schema.adsPromoterWebsites).values({
+      promoterId: promoter.id, domain: 'publisher.example.test', url: 'https://publisher.example.test',
+      verificationToken: token, verificationMethod: 'dns_txt', verificationStatus: 'failed',
+      policyStatus: 'suspended', isSuspended: true,
+    }).returning();
+    const proofModule = require('../../../api/ads-api/src/modules/verification/website-proof');
+    const fetchProof = jest.spyOn(proofModule, 'fetchWebsiteProof').mockResolvedValue(
+      '<head><meta name="crimfig-site-verification" content="' + token + '"></head>',
+    );
+    try {
+      const service = new VerificationService(db);
+      await expect(service.retestWebsite(site.id, 'unsupported', owner)).rejects.toThrow('Unsupported verification method');
+      expect(fetchProof).not.toHaveBeenCalled();
+      await expect(service.retestWebsite(site.id, 'html_meta', owner)).resolves.toMatchObject({
+        isVerified: true, status: 'verified',
+        website: { verificationMethod: 'html_file_and_meta_tag', policyStatus: 'suspended', isSuspended: true },
+      });
+      await expect(service.retestWebsite(site.id, 'html_meta', owner)).rejects.toThrow('attempted recently');
+      expect(fetchProof).toHaveBeenCalledTimes(1);
+      expect((await pool.query('select to_state, actor_id, reason from ads_supply_state_history where entity_id=$1', [site.id])).rows)
+        .toEqual([{ to_state: 'verified', actor_id: owner, reason: 'OWNERSHIP_RETEST_CONFIRMED_HTML_META' }]);
+    } finally {
+      fetchProof.mockRestore();
+    }
+  });
+
+  test('PLAN0122 sorts filtered websites before pagination', async () => {
+    const [promoter] = await db.insert(schema.adsPromoters).values({ userId: owner, type: 'WEBSITE' }).returning();
+    const [older, newer] = await db.insert(schema.adsPromoterWebsites).values(
+      ['zulu', 'alpha'].map((name, index) => ({
+        promoterId: promoter.id, domain: `${name}.plan0122.test`, url: `https://${name}.plan0122.test`,
+        verificationToken: randomUUID(), verificationMethod: 'dns_txt' as const,
+        createdAt: new Date(Date.UTC(2026, 0, index + 1)),
+      })),
+    ).returning();
+    await db.insert(schema.adstationSlots).values({
+      websiteId: older.id, promoterId: promoter.id, name: 'Sort fixture', slotTagId: 'cf-slot-plan0122',
+      slotType: 'network', format: 'banner', lifecycleStatus: 'testing', isActive: true,
+    });
+    const service = new AdsOperationsService(db);
+    const first = await service.adminListWebsites(1, 1, 'plan0122.test');
+    expect(first.items.map((row: { id: string }) => row.id)).toEqual([newer.id]);
+    expect(first.total).toBe(2);
+    for (const direction of ['asc', 'desc']) {
+      const a = await service.adminListWebsites(1, 1, 'plan0122.test', undefined, undefined, 'slots', direction);
+      const b = await service.adminListWebsites(2, 1, 'plan0122.test', undefined, undefined, 'slots', direction);
+      expect([a.items[0].slotCount, b.items[0].slotCount]).toEqual(direction === 'asc' ? [0, 1] : [1, 0]);
+    }
+  });
+
+  test('PLAN0121 deactivation prevents new House fallback issuance', async () => {
+    const [promoter] = await db.insert(schema.adsPromoters).values({ userId: owner, type: 'WEBSITE' }).returning();
+    const [site] = await db.insert(schema.adsPromoterWebsites).values({
+      promoterId: promoter.id, domain: 'publisher.example.test', url: 'https://publisher.example.test',
+      verificationToken: randomUUID(), verificationMethod: 'dns_txt', verificationStatus: 'verified',
+      verificationExpiresAt: new Date(Date.now() + 86400000), policyStatus: 'testing',
+    }).returning();
+    const [slot] = await db.insert(schema.adstationSlots).values({
+      websiteId: site.id, promoterId: promoter.id, name: 'Deactivation fixture', slotTagId: 'cf-slot-plan0121',
+      slotType: 'network', format: 'banner', lifecycleStatus: 'testing', isActive: true,
+    }).returning();
+    await db.insert(schema.adsHouseCreatives).values({
+      title: 'House fixture', headline: 'House fixture', bodyText: 'Local test', adType: 'text', format: 'banner',
+    });
+    const tokens = { assertConfigured: () => undefined, hashIp: () => 'fixture-ip-hash', generateToken: () => 'fixture-token' };
+    const delivery = new DeliveryService(db, tokens as any, new AuctionEngineService(), new FraudRulesService());
+    const serveFallback = () => (delivery as any).serveHouseOrShadowAd({
+      requestId: randomUUID(), slotTagId: slot.slotTagId, slotId: slot.id, websiteId: site.id,
+      promoterId: promoter.id, placementId: null, format: 'banner', inventoryClass: 'house',
+      deliveryMode: 'normal', trafficRiskStatus: 'normal', clientIp: '192.0.2.1',
+      fallbackReasonCode: 'DELIVERY_DEADLINE_EXCEEDED',
+    });
+    const operations = new AdsOperationsService(db);
+    await expect(operations.reviewWebsitePolicy(site.id, 'suspended', 'Deactivate test website', owner, 9))
+      .rejects.toThrow('Website policy changed');
+    await operations.reviewWebsitePolicy(site.id, 'suspended', 'Deactivate test website', owner, 1);
+    await expect(delivery.getAdForPlacement(slot.slotTagId, '192.0.2.1', 'Fixture browser', site.domain))
+      .rejects.toThrow('not verified or eligible');
+    await expect(serveFallback()).rejects.toThrow('Ad delivery is unavailable');
+    expect((await pool.query('select count(*)::int n from ads_serves where slot_id=$1', [slot.id])).rows[0].n).toBe(0);
+    const [saved] = await db.select().from(schema.adsPromoterWebsites).where(eq(schema.adsPromoterWebsites.id, site.id));
+    expect(saved).toMatchObject({ policyStatus: 'suspended', isSuspended: true, policyRevision: 2 });
+    expect((await pool.query('select to_state, actor_id from ads_supply_state_history where entity_id=$1', [site.id])).rows)
+      .toEqual([{ to_state: 'suspended', actor_id: owner }]);
   });
 
   test('PLAN0080 website policy HTTP enforces staff, expiry, atomic history and concurrent revisions',async()=>{
@@ -1043,6 +1134,63 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     } finally {await app.close();}
   },30000);
 
+  test('PLAN0110 supported account preferences persist without changing another account',async()=>{
+    await pool.query('alter table users add column if not exists updated_at timestamp default now()');
+    const other=randomUUID();
+    await pool.query("insert into users(id,email,status) values($1,'locale-other@example.test','ACTIVE')",[other]);
+    const auth=new AuthService(db,{} as any,{} as any,new JwtService());
+    await expect(auth.updatePreferredLocale(owner,'unsupported')).rejects.toThrow('supported language');
+    await expect(auth.updatePreferredLocale(randomUUID(),'fr')).rejects.toThrow('not available');
+    for(const locale of ['pt-BR','ar','yo','pcm']){
+      expect(await auth.updatePreferredLocale(owner,locale)).toEqual({preferredLocale:locale});
+      expect((await pool.query('select preferred_locale from users where id=$1',[owner])).rows[0].preferred_locale).toBe(locale);
+      expect((await pool.query('select preferred_locale from users where id=$1',[other])).rows[0].preferred_locale).toBe('en');
+    }
+  });
+
+  test('PLAN0124 fresh House clicks stay non-payable; expired clicks only navigate',async()=>{
+    const prior={...process.env};
+    Object.assign(process.env,{ADS_IMPRESSION_SIGNING_KEY:'plan0124-disposable-signing-key-32-bytes',ADS_EVIDENCE_HASH_SECRET:'plan0124-disposable-evidence-key-32-bytes'});
+    try {
+      const f=await settlementFixture(100_000_000n,'cpc',false);
+      const tokens=new ImpressionTokenService();
+      const houseId='00000000-0000-4000-8000-00000000cf01',creativeId=randomUUID();
+      const [serve]=await db.insert(schema.adsServes).values({campaignId:null,creativeId:null,promoterId:f.promoter.id,
+        placementId:null,slotId:randomUUID(),slotHandle:'house-fixture',inventoryClass:'house',financialEligibility:'invalid',
+        houseCreativeId:creativeId,houseDestinationUrl:'https://example.test/house',ipHash:tokens.hashIp('192.0.2.1')}).returning();
+      const token=tokens.generateToken({servedId:serve.id,placementId:HOUSE_PLACEMENT_UUID,campaignId:houseId,
+        creativeId,promoterId:f.promoter.id,ipHash:tokens.hashIp('192.0.2.1')});
+      const delivery=new DeliveryService(db,tokens,new AuctionEngineService(),new FraudRulesService(),undefined,new EvidenceService(db,{} as any));
+      expect(await delivery.handleClick(token,'192.0.2.2','Mozilla/5.0 Chrome/130')).toBe('https://example.test/house');
+      const events=await db.select().from(schema.adsInteractions).where(eq(schema.adsInteractions.serveId,serve.id));
+      expect(events).toHaveLength(1);
+      expect(events[0]).toMatchObject({verificationVersion:0,isValid:false,financialEligibility:'invalid'});
+      const clock=jest.spyOn(Date,'now').mockReturnValue(Date.now()+59*60*1000);
+      try {expect(await delivery.handleClick(token,'192.0.2.3')).toBe('https://example.test/house');}
+      finally {clock.mockRestore();}
+      expect((await db.select().from(schema.adsInteractions).where(eq(schema.adsInteractions.serveId,serve.id)))).toHaveLength(1);
+      expect((await pool.query('select count(*)::int n from ads_settlement_claims')).rows[0].n).toBe(0);
+    } finally {process.env=prior;}
+  });
+
+  test('PLAN0123 live settings preserve approved delivery and settlement identity',async()=>{
+    const f=await settlementFixture();
+    const [before]=await db.select().from(schema.adsCampaigns).where(require('drizzle-orm').eq(schema.adsCampaigns.id,f.campaign.id));
+    const settings=new CampaignsService(db,{} as any,{} as any);
+    await settings.saveCampaign(before.id,owner,{
+      requestId:randomUUID(),expectedRevision:before.contentRevision,expectedUpdatedAt:before.updatedAt.toISOString(),
+      title:'Live settings with funded escrow',
+    },true);
+    const after=(await pool.query('select * from ads_campaigns where id=$1',[before.id])).rows[0];
+    expect(after.current_submission_id).toBe(before.currentSubmissionId);
+    expect(after.approved_submission_id).toBe(before.approvedSubmissionId);
+    expect(after.content_revision).toBe(before.contentRevision);
+    const {event}=await f.add();
+    await f.svc.settle(before.id,randomUUID(),new Date());
+    const claims=(await pool.query('select * from ads_settlement_claims where interaction_id=$1',[event.id])).rows;
+    expect(claims).toHaveLength(1);
+    expect((await pool.query('select consumed_usd_cents from ads_campaign_escrows where campaign_id=$1',[before.id])).rows[0].consumed_usd_cents).toBe('10');
+  });
   test('PLAN0101 advertiser campaign metrics are owner-scoped and returned over HTTP', async () => {
     const own = await settlementFixture(100_000_000n, 'cpc', false);
     await db.insert(schema.adsInteractions).values([

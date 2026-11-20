@@ -58,7 +58,7 @@ describe('PLAN-0048 revision and audit foundation',()=>{
   });
   it('moderation decide rejects self-review, stale submission/revision, unapproved creatives and same-reviewer manager approval',async()=>{
     const camp={...draft(),status:'paused',moderationStatus:'pending_primary_review',currentSubmissionId:submissionId,contentRevision:2};
-    const sub={id:submissionId,state:'submitted',contentRevision:2};
+    const sub={id:submissionId,campaignId:id,state:'submitted',contentRevision:2};
     const makeModeration=(c:any,submission:any=sub,creatives:any[]=[{id:'c1',reviewStatus:'approved'}])=>{
       const writes:any[]=[];
       let call=0;
@@ -87,5 +87,25 @@ describe('PLAN-0048 revision and audit foundation',()=>{
     expect(manager.c.approvedSubmissionId).toBe(submissionId);
     expect(manager.c.approvedRevision).toBe(2);
     expect(currentApproval(manager.c)).toBe(true);
+  });
+});
+
+describe('PLAN0123 live mutation isolation',()=>{
+  const live=()=>({...draft(),status:'active',moderationStatus:'approved',currentSubmissionId:submissionId,approvedSubmissionId:submissionId,approvedRevision:1,updatedAt:new Date('2026-11-20T00:00:00Z')});
+  it('rejects stale settings and invalid approval before executing work',async()=>{
+    for(const c of [live(),{...live(),approvedRevision:0},{...live(),status:'trash'}]){
+      const h=harness(c as any),work=jest.fn();
+      await expect(h.workflow.mutate(id,owner,'live',{expectedRevision:1,requestId,expectedUpdatedAt:'2026-11-19T00:00:00Z'},{title:'Updated'},work,'live')).rejects.toThrow(ConflictException);
+      expect(work).not.toHaveBeenCalled();expect(h.writes).toHaveLength(0);
+    }
+  });
+  it('audits settings changes without revoking the paid submission',async()=>{
+    const h=harness(live() as any);
+    const result=await h.workflow.mutate(id,owner,'live',{expectedRevision:1,requestId,expectedUpdatedAt:'2026-11-20T00:00:00Z'},{title:'Updated'},async()=>{h.c.title='Updated';return h.c;},'live');
+    expect(result.contentRevision).toBe(1);
+    expect(currentApproval(h.c)).toBe(true);
+    expect(h.c.status).toBe('active');
+    expect(h.writes).toHaveLength(2);
+    expect(h.writes[0].action).toBe('live');
   });
 });
