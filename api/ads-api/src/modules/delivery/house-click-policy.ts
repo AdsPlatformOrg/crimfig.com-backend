@@ -9,9 +9,17 @@ export function defaultHouseDestination(): string {
     : 'https://ads.crimfig.com';
 }
 
+function hasUnsafeDestinationChar(candidate: string): boolean {
+  for (let i = 0; i < candidate.length; i += 1) {
+    const code = candidate.charCodeAt(i);
+    if (code <= 0x20 || code === 0x7f || code === 0x5c) return true;
+  }
+  return false;
+}
+
 export function parseHouseDestination(candidate: unknown): string | null {
   if (typeof candidate !== 'string' || candidate.length > 2048 ||
-      !/^https?:\/\/[^/\\]/i.test(candidate) || /[\u0000-\u0020\u007f\\]/.test(candidate)) return null;
+      !/^https?:\/\/[^/\\]/i.test(candidate) || hasUnsafeDestinationChar(candidate)) return null;
   try {
     const url = new URL(candidate);
     if (!url.hostname || url.username || url.password || !['https:','http:'].includes(url.protocol) ||
