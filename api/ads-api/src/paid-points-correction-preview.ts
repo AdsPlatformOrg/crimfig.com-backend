@@ -397,7 +397,7 @@ export async function reconcilePaidPointsCorrections(
         where currency = 'USD'
         for update
       `);
-      let fund = ((fundRes as any).rows ?? fundRes)[0];
+      const fund = ((fundRes as any).rows ?? fundRes)[0];
 
       if (currentNet > desired) {
         const toReverse = currentNet - desired;

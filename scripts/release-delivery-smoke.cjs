@@ -1,6 +1,3 @@
-const { test } = require('node:test');
-const assert = require('node:assert/strict');
-const { createServer } = require('node:http');
 
 async function smoke({ base, origin, slot }) {
   if (!base || !origin || typeof slot !== 'string' || !/^cf-slot-[a-z0-9-]+$/.test(slot)) throw Error('Smoke fixture configuration required');
