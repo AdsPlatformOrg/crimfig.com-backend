@@ -118,3 +118,23 @@ test('unsafe legacy URL fails without outgoing request', async () => {
 test('quoted attribute text is not a meta element', () => {
   expect(hasVerificationMeta(`<div title='<meta name="crimfig-site-verification" content="${token}">'>x</div>`, token)).toBe(false);
 });
+test('recent verification attempt rejects with 429 cooldown before DNS/network or writes and safeApiError preserves only the safe cooldown text', async () => {
+  const { safeApiError } = await import('../../../api/ads-api/src/contracts/api-error');
+  const db = database({ ...site, lastVerificationAttemptAt: new Date(Date.now() - 2000) });
+  await expect(new VerificationService(db as any).verifyWebsite('owner', 'site')).rejects.toMatchObject({
+    status: 429,
+    message: expect.stringMatching(/^Verification was attempted recently\. Please wait ([1-9]|10) seconds? before retrying\.$/),
+  });
+  expect(dns.resolveTxt).not.toHaveBeenCalled();
+  expect(db.update).not.toHaveBeenCalled();
+  expect(safeApiError(429, 'Verification was attempted recently. Please wait 7 seconds before retrying.')).toMatchObject({
+    statusCode: 429,
+    code: 'RATE_LIMITED',
+    message: 'Verification was attempted recently. Please wait 7 seconds before retrying.',
+  });
+  expect(safeApiError(429, 'Verification was attempted recently. token=secret')).toMatchObject({
+    statusCode: 429,
+    code: 'RATE_LIMITED',
+    message: 'Too many requests. Please try again later.',
+  });
+});

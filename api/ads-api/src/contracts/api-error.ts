@@ -11,11 +11,17 @@ const knownMessages: Record<string, { code: string; message: string }> = {
   },
 };
 
+const verificationCooldownPattern = /^Verification was attempted recently\. Please wait ([1-9]|10) seconds? before retrying\.$/;
+
 /** Deliberately never echoes exception text, raw URLs, query values, tokens or request bodies. */
 export function safeApiError(status: number, payload: unknown, route?: string, incomingId?: unknown) {
   const source = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
   const rawMessage = typeof payload === 'string' ? payload : source.message;
-  const known = status === 409 && typeof rawMessage === 'string' ? knownMessages[rawMessage] : undefined;
+  const known = status === 409 && typeof rawMessage === 'string'
+    ? knownMessages[rawMessage]
+    : status === 429 && typeof rawMessage === 'string' && verificationCooldownPattern.test(rawMessage)
+      ? { code: 'RATE_LIMITED', message: rawMessage }
+      : undefined;
   const fieldErrors: Record<string, string[]> = {};
   if ([400, 422].includes(status) && Array.isArray(rawMessage)) {
     for (const item of rawMessage.slice(0, 30)) {

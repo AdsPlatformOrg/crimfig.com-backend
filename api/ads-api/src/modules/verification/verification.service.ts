@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Inject, NotFoundException, Logger,ConflictException } from '@nestjs/common';
+import { BadRequestException, HttpException, HttpStatus, Injectable, Inject, NotFoundException, Logger, ConflictException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -48,7 +48,10 @@ export class VerificationService {
       const elapsedMs = Date.now() - new Date(website.lastVerificationAttemptAt).getTime();
       if (elapsedMs < 10000) {
         const remainingSec = Math.ceil((10000 - elapsedMs) / 1000);
-        throw new ConflictException(`Verification was attempted recently. Please wait ${remainingSec} second${remainingSec === 1 ? '' : 's'} before retrying.`);
+        throw new HttpException(
+          `Verification was attempted recently. Please wait ${remainingSec} second${remainingSec === 1 ? '' : 's'} before retrying.`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
       }
     }
 
