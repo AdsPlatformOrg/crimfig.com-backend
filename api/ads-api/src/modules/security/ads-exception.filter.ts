@@ -25,8 +25,12 @@ export class AdsGlobalExceptionFilter implements ExceptionFilter {
       (request as Request & {requestId?:string}).requestId ?? request.headers['x-request-id']);
 
     if (status >= 500) {
+      const cause = (exception as { cause?: { code?: unknown }; code?: unknown }) ?? {};
+      const rawCode = cause.cause?.code ?? cause.code;
+      const sqlState = typeof rawCode === 'string' && /^[0-9A-Z]{5}$/.test(rawCode)
+        ? rawCode : 'unavailable';
       this.logger.error(
-        `[${request.method}] ${errorDetails.path} - Status ${status} - ${errorDetails.code} - request ${errorDetails.requestId}`,
+        `[${request.method}] ${errorDetails.path} - Status ${status} - ${errorDetails.code} - request ${errorDetails.requestId} - sqlstate ${sqlState}`,
       );
     } else if (status === 403 || status === 401) {
       this.logger.warn(

@@ -76,7 +76,7 @@ try {
     if (checked.status) throw new Error('Read-only restored snapshot reconciliation failed');
     console.log(checked.stdout.trim());
     exitCode = 0;
-  } else if (process.argv.includes('--plan0104-migration')) {
+  } else if ((process.argv.includes('--plan0104-migration') || process.argv.includes('--release-readiness'))) {
     const env = { ...process.env, DATABASE_URL: `postgresql://plan0009test:${password}@127.0.0.1:25432/plan0009_test`, DB_SSL: 'false' };
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const run = spawnSync(process.execPath, ['scripts/release-migrate.cjs', '--initialize-staging'], {
@@ -95,6 +95,14 @@ try {
     const checked = spawnSync(process.execPath, ['-e', verify], { cwd: root, windowsHide: true, encoding: 'utf8', env });
     if (checked.status !== 0) throw new Error(checked.stderr || 'Click receipt schema verification failed');
     console.log('Click receipt recording reason and linkage index verified after migration and replay.');
+    if (process.argv.includes('--release-readiness')) {
+      const readiness = spawnSync(process.execPath, ['scripts/verify-upgrade-readiness.cjs'], {
+        cwd: root, windowsHide: true, encoding: 'utf8', env,
+      });
+      if (readiness.status !== 0) throw new Error(readiness.stderr || 'Release readiness integration failed');
+      console.log(readiness.stdout.trim());
+    }
+
     exitCode = 0;
   } else if (process.argv.includes('--migrations')) {
     const env = { ...process.env, DATABASE_URL: `postgresql://plan0009test:${password}@127.0.0.1:25432/plan0009_test`, DB_SSL: 'false' };

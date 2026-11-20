@@ -40,6 +40,13 @@ const client = new Client({
     if (absent.length) missing.push({ table: table.name, columns: absent });
   }
   console.log('[DB preflight] Missing current columns:', JSON.stringify(missing));
+  const serviceName = (process.argv[2] || process.env.RAILWAY_SERVICE_NAME || '').toLowerCase().replace(/[^a-z]/g, '');
+  const service = { ads: 'ads', adsapi: 'ads', billing: 'billing', billingapi: 'billing', auth: 'auth', authapi: 'auth' }[serviceName];
+  if (!service) throw new Error('An explicit release service is required for schema preflight');
+  const { drizzle } = loadDatabase('drizzle-orm/node-postgres');
+  await current.requireServiceSchema(drizzle(client), service);
+  console.log('[DB preflight] Required service schema verified:', service);
+
   const enums = await client.query(`SELECT t.typname AS name,array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
     FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid JOIN pg_namespace n ON n.oid=t.typnamespace
     WHERE n.nspname='public' GROUP BY t.typname ORDER BY t.typname`);

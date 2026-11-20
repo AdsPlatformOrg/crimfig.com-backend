@@ -1,3 +1,4 @@
+import { requiredAdsSchema } from './required-schema';
 import { Public } from '@crimfig/shared';
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
@@ -25,16 +26,16 @@ export class HealthController {
   @ApiOperation({ summary: 'Readiness probe — DB connectivity check' })
   async readiness() {
     try {
-      await this.db.execute('SELECT 1');
+      await requiredAdsSchema(this.db);
       return {
         status: 'ready',
-        checks: { database: 'ok' },
+        checks: { database: 'ok', schema: 'ok' },
         timestamp: new Date().toISOString(),
       };
     } catch {
       throw new ServiceUnavailableException({
         status: 'not_ready',
-        checks: { database: 'fail' },
+        checks: { database: 'unavailable', schema: 'unavailable' },
         timestamp: new Date().toISOString(),
       });
     }

@@ -1,0 +1,58 @@
+name: Previous release migration upgrade
+on:
+  workflow_dispatch:
+    inputs:
+      previous_release:
+        description: Previously deployed Git revision
+        required: true
+        type: string
+jobs:
+  upgrade:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: release_test
+          POSTGRES_PASSWORD: disposable_ci_only
+          POSTGRES_DB: release_upgrade_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U release_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://release_test:disposable_ci_only@127.0.0.1:5432/release_upgrade_test
+      DB_SSL: 'false'
+      RAILWAY_ENVIRONMENT_NAME: staging
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - run: pnpm install --frozen-lockfile
+      - run: node scripts/validate-migration-registry.cjs
+      - name: Extract previously released migrations
+        env:
+          PREVIOUS_RELEASE: ${{ inputs.previous_release }}
+        run: |
+          git rev-parse --verify "$PREVIOUS_RELEASE^{commit}"
+          mkdir -p /tmp/previous-release
+          git archive "$PREVIOUS_RELEASE" database/migrations | tar -x -C /tmp/previous-release
+      - name: Initialize previous release
+        run: node scripts/initialize-upgrade-baseline.cjs
+        env:
+          RELEASE_MIGRATIONS_DIR: /tmp/previous-release/database/migrations
+      - name: Upgrade and replay candidate migrations
+        run: |
+          node scripts/release-migrate.cjs
+          node scripts/release-migrate.cjs
+
+      - name: Compile the candidate schema
+        run: pnpm --filter @crimfig/database build
+      - name: Verify real schema readiness and missing column rejection
+        run: node scripts/verify-upgrade-readiness.cjs

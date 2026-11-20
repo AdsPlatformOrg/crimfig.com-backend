@@ -9,6 +9,7 @@ const { drizzle } = load('drizzle-orm/node-postgres');
 const { migrate } = load('drizzle-orm/node-postgres/migrator');
 const { readMigrationFiles } = load('drizzle-orm/migrator');
 const folder = process.env.RELEASE_MIGRATIONS_DIR || path.resolve(__dirname, '../database/migrations');
+require('./validate-migration-registry.cjs').validateMigrationRegistry(folder);
 const migrations = readMigrationFiles({ migrationsFolder: folder });
 const connectionString = process.env.DATABASE_URL;
 const initializeStaging = process.argv.includes('--initialize-staging');

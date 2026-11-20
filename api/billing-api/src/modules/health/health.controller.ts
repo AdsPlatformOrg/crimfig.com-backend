@@ -1,3 +1,4 @@
+import { requireServiceSchema } from '@crimfig/database/schema';
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Public } from '@crimfig/shared';
@@ -24,7 +25,7 @@ export class HealthController {
   @Get('ready')
   async readiness() {
     try {
-      await this.db.execute('SELECT 1');
+      await requireServiceSchema(this.db, 'billing');
       return { status: 'ready', checks: { database: 'ok' } };
     } catch {
       throw new ServiceUnavailableException({ status: 'not_ready', checks: { database: 'fail' } });

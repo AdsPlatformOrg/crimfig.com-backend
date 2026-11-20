@@ -1,4 +1,5 @@
-import { Controller, Get, Inject } from '@nestjs/common';
+import { requireServiceSchema } from '@crimfig/database/schema';
+import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DATABASE_TOKEN } from '../database/database.module';
 import { OAuthService } from '../oauth/oauth.service';
@@ -43,7 +44,7 @@ export class HealthController {
     const redis = redisOk.status === 'fulfilled' && redisOk.value;
     const ready = db && redis;
 
-    return {
+    const result = {
       status: ready ? 'ready' : 'not_ready',
       checks: {
         database: db ? 'ok' : 'fail',
@@ -51,12 +52,14 @@ export class HealthController {
       },
       timestamp: new Date().toISOString(),
     };
+    if (!ready) throw new ServiceUnavailableException(result);
+    return result;
   }
 
   private async checkDb(): Promise<boolean> {
     try {
       // Access the underlying pool from the Drizzle instance
-      await this.db.execute('SELECT 1');
+      await requireServiceSchema(this.db, 'auth');
       return true;
     } catch {
       return false;
