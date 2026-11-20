@@ -148,3 +148,32 @@ jobs:
       - run: node scripts/send-release-alert.cjs
         env:
           RELEASE_AUTH_BASE_URL: ${{ vars.RELEASE_AUTH_BASE_URL }}
+
+  production-delivery:
+    name: Production ad delivery after deployment
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    runs-on: ubuntu-latest
+    timeout-minutes: 17
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Confirm the deployed revision serves the test image ad
+        id: delivery
+        run: node scripts/release-delivery-smoke.cjs --production-delivery
+        env:
+          RELEASE_ADS_BASE_URL: ${{ vars.PRODUCTION_ADS_BASE_URL }}
+          RELEASE_PUBLISHER_ORIGIN: ${{ vars.PRODUCTION_PUBLISHER_ORIGIN }}
+          RELEASE_ADS_SLOT: ${{ vars.PRODUCTION_ADS_SLOT }}
+          RELEASE_EXPECTED_REVISION: ${{ github.sha }}
+          RELEASE_WAIT_SECONDS: '900'
+      - name: Email production delivery outcome
+        if: '!cancelled()'
+        run: node scripts/send-release-alert.cjs "$RELEASE_ALERT_KIND"
+        env:
+          RELEASE_AUTH_BASE_URL: ${{ vars.RELEASE_AUTH_BASE_URL }}
+          RELEASE_ALERT_KIND: ${{ steps.delivery.outcome == 'success' && 'production-success' || 'production-failure' }}

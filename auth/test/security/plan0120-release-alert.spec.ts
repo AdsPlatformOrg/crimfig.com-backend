@@ -53,7 +53,26 @@ describe('release email workload identity and delivery', () => {
     await expect(controller.notify('Bearer ' + token(), { runId: '12345', revision, kind: 'test' }))
       .resolves.toEqual({ accepted: true, replayed: true });
     expect(mail.sendErrorAlertEmail).toHaveBeenCalledTimes(2);
-    expect(mail.sendErrorAlertEmail.mock.calls[1][0].recipients).toEqual(['jedaccthree@gmail.com']);
+    expect(mail.sendErrorAlertEmail.mock.calls[1][0].recipients).toEqual(policy.ADMIN_ALERTS_EMAIL);
+  });
+
+  it('accepts production status from only a production CI push', async () => {
+    const production = {
+      ref: 'refs/heads/production',
+      workflow_ref: policy.repository + '/.github/workflows/ci.yml@refs/heads/production',
+      event_name: 'push',
+    };
+    const mail = { sendErrorAlertEmail: jest.fn().mockResolvedValue({ accepted: true }) };
+    const controller = new ReleaseAlertController(mail as any);
+    const body = { runId: '12345', revision, kind: 'production-success' as const };
+    await expect(controller.notify('Bearer ' + token(), body)).rejects.toMatchObject({ status: 403 });
+    await expect(controller.notify('Bearer ' + token({ ...production, event_name: 'pull_request' }), body))
+      .rejects.toMatchObject({ status: 401 });
+    await expect(controller.notify('Bearer ' + token(production), body)).resolves.toMatchObject({ accepted: true });
+    expect(mail.sendErrorAlertEmail).toHaveBeenCalledWith(expect.objectContaining({
+      subject: 'CrimFig production ad delivery check passed',
+      recipients: policy.ADMIN_ALERTS_EMAIL,
+    }));
   });
 
   it('enforces identity and body validation over real HTTP before submitting mail', async () => {

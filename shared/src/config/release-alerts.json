@@ -1,6 +1,6 @@
 {
   "repository": "AdsPlatformOrg/crimfig.com-backend",
-  "emailRecipients": [
+  "ADMIN_ALERTS_EMAIL": [
     "jedaccthree@gmail.com"
   ],
   "maxResponseMs": 15000

@@ -63,3 +63,4 @@ Audited and hardened Adaptive Daily Budget Pacing across Billing and Ads:
 
 
 2026-11-19 | PLAN-0115 follow-up | Dashboard summary CTR uses billed clicks divided by impressions. Three mocked AnalyticsService probe cases passed: zero impressions, zero billed clicks, and distinct observed/valid/billed/hover/touch counts. No database or staging check was run.
+2026-11-20 | PLAN-0125 | Add exact-revision production delivery check and pass/fail mail using ADMIN_ALERTS_EMAIL. Four mocked delivery cases passed. Production fixture and live verification pending.

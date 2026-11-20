@@ -29,13 +29,16 @@ export async function verifyReleaseAlertIdentity(token: string, runId: string) {
     claims = await jwt.verifyAsync(token, { publicKey: String(publicKey), algorithms: ['RS256'],
       issuer, audience, maxAge: '10m' });
   } catch { throw new UnauthorizedException(); }
+  const productionWorkflow = policy.repository + '/.github/workflows/ci.yml@refs/heads/production';
   const workflows = [
+    productionWorkflow,
     policy.repository + '/.github/workflows/ci.yml@refs/heads/dev',
     policy.repository + '/.github/workflows/release-monitor.yml@refs/heads/dev',
     policy.repository + '/.github/workflows/release-monitor.yml@refs/heads/main',
   ];
   if (claims.repository !== policy.repository || claims.run_id !== runId ||
-      !workflows.includes(claims.workflow_ref) || !['refs/heads/dev', 'refs/heads/main'].includes(claims.ref) ||
+      !workflows.includes(claims.workflow_ref) || !claims.workflow_ref.endsWith('@' + claims.ref) ||
+      (claims.workflow_ref === productionWorkflow && claims.event_name !== 'push') ||
       claims.repository_owner !== policy.repository.split('/')[0] ||
       !Number.isInteger(claims.iat) || claims.iat > Math.floor(Date.now() / 1000) + 30) {
     throw new UnauthorizedException();

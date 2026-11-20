@@ -1,7 +1,7 @@
 const policy = require('../shared/src/config/release-alerts.json');
 
 async function sendAlert(kind = 'failure') {
-  if (!policy.emailRecipients.length) return { accepted: false, disabled: true };
+  if (!policy.ADMIN_ALERTS_EMAIL.length) return { accepted: false, disabled: true };
   const base = new URL(process.env.RELEASE_AUTH_BASE_URL);
   if (base.protocol !== 'https:' || base.username || base.password || base.pathname !== '/' || base.search || base.hash) {
     throw Error('Invalid release alert transport');
@@ -25,7 +25,8 @@ async function sendAlert(kind = 'failure') {
 }
 module.exports = { sendAlert };
 if (require.main === module) {
-  sendAlert(process.argv.includes('--test') ? 'test' : 'failure')
+  const kind = process.argv[2] ?? 'failure';
+  sendAlert(kind === '--test' ? 'test' : kind)
     .then(result => console.log(JSON.stringify(result)))
     .catch(() => { console.error('Release email notification could not be confirmed'); process.exitCode = 1; });
 }
