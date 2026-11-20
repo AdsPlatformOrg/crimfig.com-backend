@@ -1,3 +1,4 @@
+const { spawnSync } = require('node:child_process');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const load = createRequire(path.resolve(__dirname, '../database/package.json'));
@@ -16,7 +17,23 @@ const { requireServiceSchema } = load('@crimfig/database/schema');
   try {
     await client.connect();
     const db = drizzle(client);
-    for (const service of ['ads', 'billing', 'auth']) await requireServiceSchema(db, service);
+    for (const service of ['ads', 'billing', 'auth']) {
+      await requireServiceSchema(db, service);
+      const preflight = spawnSync(process.execPath, [path.resolve(__dirname, 'deployment-db-preflight.cjs'), service], {
+        encoding: 'utf8', windowsHide: true, timeout: 20000,
+      });
+      if (preflight.status !== 0) throw new Error(service + ' deployment preflight failed: ' + preflight.stderr);
+    }
+    const original = (await client.query('SELECT id, hash FROM drizzle.__drizzle_migrations ORDER BY created_at LIMIT 1')).rows[0];
+    try {
+      await client.query('UPDATE drizzle.__drizzle_migrations SET hash=$1 WHERE id=$2', ['invalid-fixture-hash', original.id]);
+      const rejectedHistory = spawnSync(process.execPath, [path.resolve(__dirname, 'deployment-db-preflight.cjs'), 'ads'], {
+        encoding: 'utf8', windowsHide: true, timeout: 20000,
+      });
+      if (rejectedHistory.status === 0) throw new Error('Altered applied history did not block deployment');
+    } finally {
+      await client.query('UPDATE drizzle.__drizzle_migrations SET hash=$1 WHERE id=$2', [original.hash, original.id]);
+    }
     await client.query('begin');
     await client.query('alter table adstation_slots drop column manual_review_status');
     let rejected = false;
@@ -24,6 +41,6 @@ const { requireServiceSchema } = load('@crimfig/database/schema');
     if (!rejected) throw new Error('Missing slot review column did not block readiness');
     await client.query('rollback');
     await requireServiceSchema(db, 'ads');
-    console.log(JSON.stringify({ servicesReady: ['ads', 'billing', 'auth'], missingColumnRejected: true }));
+    console.log(JSON.stringify({ servicesReady: ['ads', 'billing', 'auth'], missingColumnRejected: true, alteredHistoryRejected: true }));
   } finally { await client.query('rollback').catch(() => {}); await client.end(); }
 })().catch(error => { console.error(error.message); process.exitCode = 1; });

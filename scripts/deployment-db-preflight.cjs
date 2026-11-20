@@ -15,14 +15,25 @@ const client = new Client({
     database: process.env.DB_NAME, user: process.env.DB_USER, password: process.env.DB_PASSWORD } : {}),
 });
 (async () => {
+  const folder = path.resolve(__dirname, '../database/migrations');
+  require('./validate-migration-registry.cjs').validateMigrationRegistry(folder);
+  const { readMigrationFiles } = loadDatabase('drizzle-orm/migrator');
+  const migrations = readMigrationFiles({ migrationsFolder: folder });
   console.log('[DB preflight] Connecting with a 10-second timeout');
   await client.connect();
   await client.query('BEGIN READ ONLY');
   const ledger = await client.query("SELECT to_regclass('drizzle.__drizzle_migrations') IS NOT NULL AS present");
   if (ledger.rows[0].present) {
-    const migrations = await client.query('SELECT id, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 6');
-    console.log('[DB preflight] Migration ledger:', JSON.stringify(migrations.rows));
-  } else console.log('[DB preflight] Migration ledger absent');
+    const recentMigrations = await client.query('SELECT id, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at DESC LIMIT 6');
+    console.log('[DB preflight] Migration ledger:', JSON.stringify(recentMigrations.rows));
+  } else throw new Error('Required migration history is unavailable');
+  const applied = await client.query('SELECT hash, created_at FROM drizzle.__drizzle_migrations ORDER BY created_at');
+  if (applied.rows.length > migrations.length) throw new Error('Database migration history is newer than this release');
+  for (const [index, row] of applied.rows.entries()) {
+    if (row.hash !== migrations[index].hash || Number(row.created_at) !== migrations[index].folderMillis) {
+      throw new Error('Applied migration history differs from this release');
+    }
+  }
   const schema = await client.query(`SELECT table_name,column_name FROM information_schema.columns
     WHERE table_schema='public' AND ((table_name='ads_campaigns' AND column_name='pricing_version')
     OR table_name IN ('ads_settlement_claims','ads_settlement_carries')) ORDER BY table_name,ordinal_position`);

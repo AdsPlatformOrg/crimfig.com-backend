@@ -59,4 +59,9 @@ jobs:
       - name: Compile the candidate schema
         run: pnpm --filter @crimfig/database build
       - name: Verify real schema readiness and missing column rejection
-        run: node scripts/verify-upgrade-readiness.cjs
+        run: node scripts/verify-upgrade-readiness.cjs | tee release-upgrade-readiness.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-upgrade-readiness
+          path: release-upgrade-readiness.json
