@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
 
-test('PLAN0116 transaction rate migration preserves legacy rows and exact six-decimal snapshots', async () => {
+(process.env.PLAN0009_PG_URL ? test : test.skip)('PLAN0116 transaction rate migration preserves legacy rows and exact six-decimal snapshots', async () => {
   const url = new URL(process.env.PLAN0009_PG_URL!);
   if (url.hostname !== '127.0.0.1' || url.port !== '25432' ||
       url.pathname !== '/plan0009_test' || url.username !== 'plan0009test') {

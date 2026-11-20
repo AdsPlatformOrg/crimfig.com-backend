@@ -128,10 +128,13 @@ describe('PLAN-0047 & PLAN-0049 Supply Admission, House/Shadow Ads, Loader & GIV
                   ? [slotRecord]
                   : [websiteRecord],
               ),
+              for: jest.fn(function(this: any) { return this; }),
             })),
           })),
         })),
       };
+      db.transaction = async (fn: any) => fn(db);
+      db.execute = jest.fn();
       const adstation = new AdstationService(db);
 
       await expect(

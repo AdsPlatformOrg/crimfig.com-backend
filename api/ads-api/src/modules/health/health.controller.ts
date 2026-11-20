@@ -29,6 +29,7 @@ export class HealthController {
       await requiredAdsSchema(this.db);
       return {
         status: 'ready',
+      revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null,
         checks: { database: 'ok', schema: 'ok' },
         timestamp: new Date().toISOString(),
       };

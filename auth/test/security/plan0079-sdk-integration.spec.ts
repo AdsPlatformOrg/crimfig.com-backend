@@ -1,7 +1,5 @@
 import { DeliveryService } from '../../../api/ads-api/src/modules/delivery/delivery.service';
-import { createRequire } from 'module';
-import { resolve } from 'path';
-const {JSDOM}=createRequire(resolve('../frontend/web/ads/package.json'))('jsdom');
+const {JSDOM}=require('jsdom');
 const tick=async()=>{await new Promise(done=>setImmediate(done));await new Promise(done=>setImmediate(done));};
 describe('PLAN0079 actual generated SDK DOM integration with synthetic nonbillable delivery',()=>{
  const previous={...process.env};afterEach(()=>{process.env={...previous};});

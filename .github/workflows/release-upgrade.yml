@@ -65,3 +65,36 @@ jobs:
         with:
           name: release-upgrade-readiness
           path: release-upgrade-readiness.json
+
+  fx-migration:
+    name: Isolated legacy FX migration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: plan0009test
+          POSTGRES_PASSWORD: disposable_ci_only
+          POSTGRES_DB: plan0009_test
+        ports: ['25432:5432']
+        options: >-
+          --health-cmd "pg_isready -U plan0009test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PLAN0009_PG_URL: postgresql://plan0009test:disposable_ci_only@127.0.0.1:25432/plan0009_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @crimfig/shared build && pnpm --filter @crimfig/database build
+      - run: node node_modules/jest/bin/jest.js --config auth/jest.config.js --runInBand --runTestsByPath auth/test/security/plan0116-fx-postgres.spec.ts --json --outputFile=fx-migration-results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: legacy-fx-migration
+          path: fx-migration-results.json

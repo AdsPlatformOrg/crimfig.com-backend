@@ -1,3 +1,4 @@
+import { PaystackBrokerClient } from '../../../api/billing-api/src/modules/providers/paystack-broker.client';
 import { calculateRevenueDistribution, PUBLISHER_REVENUE_SHARE_RATIO, CRIMFIG_BASE_REVENUE_RATIO, MARKETING_COMMISSION_POOL_RATIO } from '../../../api/ads-api/src/modules/billing/billing.constants';
 import * as billingConstants from '../../../api/ads-api/src/modules/billing/billing.constants';
 import { PaystackService } from '../../../api/billing-api/src/modules/providers/paystack.service';
@@ -37,7 +38,20 @@ describe('55/30/15 revenue distribution', () => {
 
 describe('Paystack authorization deactivation (no network)', () => {
   let previous: string | undefined;
-  beforeEach(() => { previous = process.env.PAYSTACK_SECRET_KEY; process.env.PAYSTACK_SECRET_KEY = 'sk_test_fixture_only'; });
+  const previousMode = process.env.PAYSTACK_MODE;
+  beforeEach(() => {
+    previous = process.env.PAYSTACK_SECRET_KEY;
+    process.env.PAYSTACK_SECRET_KEY = 'sk_test_fixture_only';
+    process.env.PAYSTACK_MODE = 'test';
+    // This suite tests PaystackService's request and response contract. Signed
+    // broker transport has its own independent boundary tests.
+    jest.spyOn(PaystackBrokerClient.prototype, 'assertConfigured').mockReturnValue({} as any);
+    jest.spyOn(PaystackBrokerClient.prototype, 'request').mockImplementation((url, init) => global.fetch(url, init));
+  });
+  afterEach(() => {
+    if (previousMode === undefined) delete process.env.PAYSTACK_MODE;
+    else process.env.PAYSTACK_MODE = previousMode;
+  });
   afterEach(() => { jest.restoreAllMocks(); if (previous === undefined) delete process.env.PAYSTACK_SECRET_KEY; else process.env.PAYSTACK_SECRET_KEY = previous; });
 
   it('sends one bounded POST and accepts only an explicit confirmation', async () => {

@@ -1,29 +1,41 @@
+import { PaystackBrokerClient } from '../../../api/billing-api/src/modules/providers/paystack-broker.client';
 import { PaystackService } from '../../../api/billing-api/src/modules/providers/paystack.service';
 
 describe('Transfer provider request boundary (no network)', () => {
   const reference = 'wd_1234567890123456789012345678901234567890';
   let previous: string | undefined;
-  beforeEach(() => { previous = process.env.PAYSTACK_SECRET_KEY; process.env.PAYSTACK_SECRET_KEY = 'sk_test_fixture_only'; });
+  const previousMode = process.env.PAYSTACK_MODE;
+  beforeEach(() => {
+    previous = process.env.PAYSTACK_SECRET_KEY;
+    process.env.PAYSTACK_SECRET_KEY = 'sk_test_fixture_only';
+    process.env.PAYSTACK_MODE = 'test';
+    // This suite tests PaystackService's request and response contract. Signed
+    // broker transport has its own independent boundary tests.
+    jest.spyOn(PaystackBrokerClient.prototype, 'assertConfigured').mockReturnValue({} as any);
+    jest.spyOn(PaystackBrokerClient.prototype, 'request').mockImplementation((url, init) => global.fetch(url, init));
+  });
+  afterEach(() => {
+    if (previousMode === undefined) delete process.env.PAYSTACK_MODE;
+    else process.env.PAYSTACK_MODE = previousMode;
+  });
   afterEach(() => { jest.restoreAllMocks(); if (previous === undefined) delete process.env.PAYSTACK_SECRET_KEY; else process.env.PAYSTACK_SECRET_KEY = previous; });
-  it('sends one bound NGN transfer with timeout and redirect rejection', async () => {
-    const fetch = jest.spyOn(global, 'fetch').mockResolvedValue(new Response(JSON.stringify({status:true,data:{reference,status:'pending'}})));
-    await new PaystackService().initiateTransfer({reference,amountKobo:50000,recipientCode:'RCP_fixture'});
-    expect(fetch).toHaveBeenCalledTimes(1);
-    const [url, init] = fetch.mock.calls[0]; expect(url).toBe('https://api.paystack.co/transfer');
-    expect(init?.redirect).toBe('error'); expect(init?.signal).toBeDefined();
-    expect(JSON.parse(init?.body as string)).toMatchObject({reference,currency:'NGN',amount:50000,recipient:'RCP_fixture'});
+  it('blocks direct Billing payouts before contacting the provider', async () => {
+    const fetch = jest.spyOn(global, 'fetch');
+    await expect(new PaystackService().initiateTransfer({reference,amountKobo:50000,recipientCode:'RCP_fixture'}))
+      .rejects.toThrow('Direct Billing payouts are disabled');
+    expect(fetch).not.toHaveBeenCalled();
   });
   it('rejects malformed request before sending', async () => {
     const fetch = jest.spyOn(global,'fetch');
     await expect(new PaystackService().initiateTransfer({reference,amountKobo:0.5,recipientCode:'RCP_fixture'})).rejects.toThrow();
     expect(fetch).not.toHaveBeenCalled();
   });
-  it('does not retry uncertain transfer creation', async () => {
+  it('never dispatches a direct payout even when transport is unavailable', async () => {
     const fetch = jest.spyOn(global,'fetch').mockRejectedValue(Error('timeout'));
     await expect(new PaystackService().initiateTransfer({reference,amountKobo:50000,recipientCode:'RCP_fixture'})).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
   });
-  it.each([{status:false,data:{reference}}, {status:true,data:{reference:'foreign'}}, {status:'true',data:{reference}}])('rejects an invalid transfer acknowledgement %j',async body=>{
+  it.each([{status:false,data:{reference}}, {status:true,data:{reference:'foreign'}}, {status:'true',data:{reference}}])('blocks direct dispatch regardless of an untrusted acknowledgement %j',async body=>{
     jest.spyOn(global,'fetch').mockResolvedValue(new Response(JSON.stringify(body)));
     await expect(new PaystackService().initiateTransfer({reference,amountKobo:50000,recipientCode:'RCP_fixture'})).rejects.toThrow();
   });

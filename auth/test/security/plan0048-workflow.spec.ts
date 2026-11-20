@@ -66,7 +66,7 @@ describe('PLAN-0048 revision and audit foundation',()=>{
       const tx:any={execute:jest.fn(),select:jest.fn(()=>{call++;if(call===1)return chain([c]);if(call===2)return chain([]);if(call===3)return chain(submission?[submission]:[]);return chain(creatives);}),
         update:jest.fn(()=>({set:(patch:any)=>({where:()=>({returning:async()=>[{...Object.assign(c,patch)}]})})})),
         insert:jest.fn(()=>({values:(row:any)=>{writes.push(row);return {returning:async()=>[row],then:(r:any)=>Promise.resolve([row]).then(r)};}}))};
-      const service=new ModerationService({transaction:async(fn:any)=>fn(tx)} as any);
+      const service=new ModerationService({transaction:async(fn:any)=>fn(tx)} as any, { rolesFor: () => ['ads_reviewer', 'ads_manager'] } as any);
       jest.spyOn((service as any).workflow,'snapshot').mockImplementation(async(_tx:any,row:any)=>({campaign:{...row},stacks:[],creatives:[],targets:[]}));
       return {service,writes,c};
     };

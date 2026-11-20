@@ -46,6 +46,7 @@ export class HealthController {
 
     const result = {
       status: ready ? 'ready' : 'not_ready',
+      revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null,
       checks: {
         database: db ? 'ok' : 'fail',
         redis: redis ? 'ok' : 'fail',

@@ -86,6 +86,12 @@ function setup(fail = false) {
       db,
       {} as any,
       { getBucket: () => bucket } as any,
+      {
+        isConfigured: () => true,
+        getPrimaryAdapter: () => ({ provider: 'firebase' }),
+        putObject: ({key, body}: any) => bucket.file(key).save(body),
+        deleteObject: (key: string) => bucket.file(key).delete(),
+      } as any,
     ),
     db,
     outside,

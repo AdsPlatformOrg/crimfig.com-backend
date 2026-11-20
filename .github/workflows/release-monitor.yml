@@ -1,0 +1,40 @@
+name: Staging runtime monitor
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+permissions:
+  contents: read
+jobs:
+  monitor:
+    name: Staging runtime health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node scripts/release-delivery-smoke.cjs --monitor | tee runtime-smoke.json
+        env:
+          RELEASE_ADS_BASE_URL: ${{ vars.RELEASE_ADS_BASE_URL }}
+          RELEASE_PUBLISHER_ORIGIN: ${{ vars.RELEASE_PUBLISHER_ORIGIN }}
+          RELEASE_ADS_SLOT: ${{ vars.RELEASE_ADS_SLOT }}
+          RELEASE_AUTH_BASE_URL: ${{ vars.RELEASE_AUTH_BASE_URL }}
+          RELEASE_BILLING_BASE_URL: ${{ vars.RELEASE_BILLING_BASE_URL }}
+          RELEASE_REPORT_EMAIL: ${{ vars.RELEASE_REPORT_EMAIL }}
+          RELEASE_REPORT_PASSWORD: ${{ secrets.RELEASE_REPORT_PASSWORD }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: runtime-smoke
+          path: runtime-smoke.json
+      - name: Email runtime failure
+        if: failure()
+        run: node scripts/send-release-alert.cjs
+        env:
+          RELEASE_AUTH_BASE_URL: ${{ vars.RELEASE_AUTH_BASE_URL }}

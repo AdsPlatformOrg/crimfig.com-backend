@@ -111,15 +111,15 @@ describe('Ads object ownership and workflow boundaries', () => {
   it('private media requires an owner match and public media requires approved active binding before bucket access', async () => {
     const bucket = { getBucket: jest.fn() };
     const owner = database([[]]);
-    await expect(new UploadsService(owner.db, {} as any, bucket as any).getMediaStream('file-key', 'intruder')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(new UploadsService(owner.db, {} as any, bucket as any, {} as any).getMediaStream('file-key', 'intruder')).rejects.toBeInstanceOf(NotFoundException);
     expect(owner.predicates[0].params).toEqual(expect.arrayContaining(['file-key', 'intruder', 'ready']));
     const publicAsset = database([[{ ownerId: 'owner', cdnUrl: '/api/v1/uploads/media/file-key' }], []]);
-    await expect(new UploadsService(publicAsset.db, {} as any, bucket as any).getMediaStream('file-key')).rejects.toBeInstanceOf(NotFoundException);
+    await expect(new UploadsService(publicAsset.db, {} as any, bucket as any, {} as any).getMediaStream('file-key')).rejects.toBeInstanceOf(NotFoundException);
     expect(publicAsset.predicates[1].params).toEqual(expect.arrayContaining(['owner', 'active', 'approved', '/api/v1/uploads/media/file-key']));
     expect(bucket.getBucket).not.toHaveBeenCalled();
   });
 
-  it('manager approval and emergency override never bypass funded activation', async () => {
+  it('manager approval and emergency override approve without performing financial operations', async () => {
     const campId = '11111111-1111-4111-8111-111111111111', subId = '22222222-2222-4222-8222-222222222222', reqId = '33333333-3333-4333-8333-333333333333';
     for (const method of ['reviewCampaignManager', 'emergencyOverride'] as const) {
       const camp = { id: campId, advertiserId: 'owner', moderationStatus: 'pending_manager_approval', status: 'paused', currentSubmissionId: subId, contentRevision: 1, primaryReviewerId: 'primary-reviewer' };
@@ -128,10 +128,14 @@ describe('Ads object ownership and workflow boundaries', () => {
       db.execute = jest.fn();
       db.transaction = (fn: any) => fn(db);
       db.update = () => ({ set: (value: any) => { values.push(value); return { where: () => ({ returning: async () => [{ ...camp, ...value }] }) }; } });
-      const service = new ModerationService(db);
+      const service = new ModerationService(db, { rolesFor: () => ['ads_reviewer', 'ads_manager'] } as any);
+      if (method === 'emergencyOverride') (service as any).staffGrants = { rolesFor: () => ['super_admin'] };
       const result: any = await service[method](campId, { reviewerId: 'manager', decision: 'approved', overrideReason: 'Documented emergency fixture reason', expectedRevision: 1, submissionId: subId, requestId: reqId });
-      expect(values.at(-1)).toMatchObject({ status: 'paused', moderationStatus: 'approved', approvedSubmissionId: subId, approvedRevision: 1 });
-      expect(result.live).toBe(false);
+      expect(values.at(-1)).toMatchObject({ status: 'active', moderationStatus: 'approved', approvedSubmissionId: subId, approvedRevision: 1 });
+      expect(result.live).toBe(true);
+      const financialTables = ['billing_transactions', 'ads_campaign_escrows', 'billing_wallets'];
+      const { getTableName } = require('drizzle-orm');
+      expect(db.insert.mock.calls.some(([table]: any[]) => financialTables.includes(getTableName(table)))).toBe(false);
     }
   });
 
@@ -141,13 +145,13 @@ describe('Ads object ownership and workflow boundaries', () => {
       const { db } = database([[{ id: campId, advertiserId: 'owner' }]]);
       db.execute = jest.fn();
       db.transaction = (fn: any) => fn(db);
-      await expect(new ModerationService(db)[method](campId, { reviewerId: 'owner', decision: 'approved', expectedRevision: 1, submissionId: subId, requestId: reqId })).rejects.toBeInstanceOf(BadRequestException);
+      await expect(new ModerationService(db, { rolesFor: () => ['ads_reviewer', 'ads_manager'] } as any)[method](campId, { reviewerId: 'owner', decision: 'approved', expectedRevision: 1, submissionId: subId, requestId: reqId })).rejects.toBeInstanceOf(BadRequestException);
       expect(db.insert).not.toHaveBeenCalled();
     }
     const { db } = database([[{ campaignId: campId }], [{ id: campId, advertiserId: 'owner' }]]);
     db.execute = jest.fn();
     db.transaction = (fn: any) => fn(db);
-    await expect(new ModerationService(db).reviewCreative('creative', { reviewerId: 'owner', decision: 'approved', expectedRevision: 1, submissionId: subId, requestId: reqId })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(new ModerationService(db, { rolesFor: () => ['ads_reviewer', 'ads_manager'] } as any).reviewCreative('creative', { reviewerId: 'owner', decision: 'approved', expectedRevision: 1, submissionId: subId, requestId: reqId })).rejects.toBeInstanceOf(BadRequestException);
     expect(db.insert).not.toHaveBeenCalled();
   });
 });

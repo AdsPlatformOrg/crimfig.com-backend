@@ -26,7 +26,7 @@ export class HealthController {
   async readiness() {
     try {
       await requireServiceSchema(this.db, 'billing');
-      return { status: 'ready', checks: { database: 'ok' } };
+      return { status: 'ready', revision: process.env.RAILWAY_GIT_COMMIT_SHA ?? null, checks: { database: 'ok' } };
     } catch {
       throw new ServiceUnavailableException({ status: 'not_ready', checks: { database: 'fail' } });
     }

@@ -46,19 +46,10 @@ describe('PLAN-0038 type-aware creative copy', () => {
     });
   });
 
-  it('keeps a headline required for text ads and defaults their CTA', async () => {
-    await expect((service() as any).validateCreative(txWith(), 'advertiser-1', {
-      adType: 'text',
-      destinationUrl: 'https://example.com/offer',
-    })).rejects.toBeInstanceOf(BadRequestException);
-
-    const result = await (service() as any).validateCreative(txWith(), 'advertiser-1', {
-      adType: 'text',
-      headline: 'A clear offer',
-      destinationUrl: 'https://example.com/offer',
-    });
-    expect(result.headline).toBe('A clear offer');
-    expect(result.ctaText).toBe('Learn More');
+  it('requires legacy text creatives to be replaced before saving', async () => {
+    await expect((service() as any).validateCreative({}, 'advertiser-1', {
+      adType: 'text', headline: 'Existing text', destinationUrl: 'https://example.com/offer',
+    })).rejects.toThrow('Replace legacy ads with an image');
   });
 
   it('accepts optional copy on an image ad', async () => {

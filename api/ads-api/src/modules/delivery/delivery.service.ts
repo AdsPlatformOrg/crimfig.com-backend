@@ -387,7 +387,7 @@ export class DeliveryService {
     }
     state.timer=setTimeout(function(){state.closed=true;state.controller.abort();collapseSlot();},15000);
     var headers={Accept:'application/json'};
-    if(consent!=='denied'&&navigator.globalPrivacyControl!==true&&typeof window.crimfigCpcConsent==='function'){
+    if(consent!=='denied'&&typeof window.crimfigCpcConsent==='function'&&typeof navigator==='object'&&navigator.globalPrivacyControl!==true){
       try{
         var permission=window.crimfigCpcConsent();
         if(permission&&permission.state==='granted'&&typeof permission.proof==='string'&&permission.proof.length===111
