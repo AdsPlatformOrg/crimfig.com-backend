@@ -1,0 +1,7 @@
+{
+  "repository": "AdsPlatformOrg/crimfig.com-backend",
+  "emailRecipients": [
+    "jedaccthree@gmail.com"
+  ],
+  "maxResponseMs": 15000
+}
