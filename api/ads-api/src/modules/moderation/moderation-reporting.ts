@@ -44,9 +44,10 @@ export function queueSubmission(type: string, id: SQL, stage: string): SQL {
 }
 
 export function matchesReviewSubmission(campaign: any, submission: any, type: string, id: string): boolean {
-  if (!submission || submission.state !== 'submitted' || submission.campaignId !== campaign.id ||
+  if (!submission || submission.state !== 'submitted' ||
       submission.contentRevision !== campaign.contentRevision || campaign.submissionIntentId) return false;
-  if (submission.id === campaign.currentSubmissionId) return true;
+  if (submission.id === campaign.currentSubmissionId && (submission.campaignId === undefined || submission.campaignId === campaign.id)) return true;
+  if (submission.campaignId !== campaign.id) return false;
   const ids = submission.snapshot?.scope?.[type === 'creative' ? 'creativeIds' : type === 'stack' ? 'stackIds' : ''];
   return campaign.moderationStatus === 'approved' && campaign.currentSubmissionId === campaign.approvedSubmissionId &&
     campaign.approvedRevision === campaign.contentRevision && Array.isArray(ids) && ids.includes(id);

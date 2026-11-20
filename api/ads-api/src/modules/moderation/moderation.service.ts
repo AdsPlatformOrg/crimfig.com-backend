@@ -195,8 +195,11 @@ export class ModerationService {
       if(campaign.advertiserId===actorId)throw new ForbiddenException('Owners cannot claim their own campaigns.');
       const [prior]=await tx.select().from(adsCampaignMutations).where(and(eq(adsCampaignMutations.campaignId,campaignId),eq(adsCampaignMutations.actorId,actorId),eq(adsCampaignMutations.requestId,params.requestId))).limit(1);
       if(prior){if(prior.purgedAt||prior.fingerprint!==hash)throw new ConflictException('Claim request identity changed or archived.');return prior.result;}
-      const [claimSubmission] = await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,params.submissionId)).limit(1);
-      if(!matchesReviewSubmission(campaign,claimSubmission,type,id)||campaign.contentRevision!==params.expectedRevision) throw new ConflictException('This claim submission changed. Reload details.');
+      if(campaign.contentRevision!==params.expectedRevision||campaign.submissionIntentId)throw new ConflictException('This claim submission changed. Reload details.');
+      if(campaign.currentSubmissionId!==params.submissionId){
+        const [claimSubmission] = await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,params.submissionId)).limit(1);
+        if(!matchesReviewSubmission(campaign,claimSubmission,type,id)) throw new ConflictException('This claim submission changed. Reload details.');
+      }
       const table=type==='campaign'?adsCampaigns:type==='creative'?adsCreatives:adsCreativeStacks;
       const [target]=await tx.select().from(table).where(and(eq(table.id,id),'campaignId' in table?eq(table.campaignId,campaignId):eq(table.id,campaignId),queueMembership(type,sql`${table.id}`,params.stage))).limit(1);
       if(!target)throw new ConflictException('This review is no longer pending.');
@@ -425,13 +428,7 @@ export class ModerationService {
         return prior.result;
       }
 
-      const [submission] = await tx
-        .select()
-        .from(adsCampaignSubmissions)
-        .where(eq(adsCampaignSubmissions.id, params.submissionId))
-        .limit(1);
       if (
-        !matchesReviewSubmission(c,submission,targetType,targetId) ||
         c.contentRevision !== params.expectedRevision ||
         c.submissionIntentId ||
         ['suspended', 'trash', 'cancelled', 'completed'].includes(c.status)
@@ -439,8 +436,26 @@ export class ModerationService {
         throw new ConflictException('This submission changed. Reload before reviewing.');
       }
 
+      let scopedSubmission: typeof adsCampaignSubmissions.$inferSelect | undefined;
+      if (c.currentSubmissionId !== params.submissionId) {
+        const [found] = await tx
+          .select()
+          .from(adsCampaignSubmissions)
+          .where(eq(adsCampaignSubmissions.id, params.submissionId))
+          .limit(1);
+        if (!matchesReviewSubmission(c, found, targetType, targetId)) {
+          throw new ConflictException('This submission changed. Reload before reviewing.');
+        }
+        scopedSubmission = found;
+      }
+
       if(stage !== 'override' && params.reasonCode && !knownReviewReason(params.reasonCode)) throw new BadRequestException('Unsupported rejection reason. Use a listed code or omit the code and provide a custom explanation.');
 
+      const submission = scopedSubmission ?? (await tx
+        .select()
+        .from(adsCampaignSubmissions)
+        .where(eq(adsCampaignSubmissions.id, params.submissionId))
+        .limit(1))[0];
       if (submission?.state !== 'submitted' || submission.contentRevision !== c.contentRevision) {
         throw new ConflictException('This review is no longer current.');
       }

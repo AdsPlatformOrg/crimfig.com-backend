@@ -10,12 +10,13 @@ describe('PLAN-0048 stale receipt and funding guards — failures first',()=>{
   it.each([undefined,null,0,-1,1.5,NaN])('does not authorize an approval with malformed content revision %s',revision=>{
     expect(currentApproval({...current(),contentRevision:revision,approvedRevision:revision})).toBe(false);
   });
-  it.each([{currentSubmissionId:requestId},{contentRevision:3},{status:'draft'},{submissionIntentId:requestId}])('rejects an old decision replay after a submission change: %j',async patch=>{
+  it.each([{currentSubmissionId:requestId},{contentRevision:3},{status:'draft'},{submissionIntentId:requestId}])('rejects a new decision after the submission changes: %j',async patch=>{
     jest.spyOn(CampaignWorkflow.prototype,'lock').mockResolvedValue({...current(),...patch});
-    const tx:any={select:jest.fn(),insert:jest.fn(),update:jest.fn()};const db:any={transaction:(fn:any)=>fn(tx)};
+    const q:any={from:()=>q,where:()=>q,limit:async()=>[]};
+    const tx:any={select:jest.fn(()=>q),insert:jest.fn(),update:jest.fn()};const db:any={transaction:(fn:any)=>fn(tx)};
     const service=new ModerationService(db, { rolesFor: () => ['ads_reviewer', 'ads_manager'] } as any);
     await expect(service.reviewCampaignPrimary(campaignId,params)).rejects.toThrow(ConflictException);
-    expect(tx.select).not.toHaveBeenCalled();expect(tx.insert).not.toHaveBeenCalled();expect(tx.update).not.toHaveBeenCalled();
+    expect(tx.select).toHaveBeenCalled();expect(tx.insert).not.toHaveBeenCalled();expect(tx.update).not.toHaveBeenCalled();
   });
   it.each(['paused','trash'] as const)('cannot %s or release funding while submission confirmation is pending',async target=>{
     const c={...current(),submissionIntentId:requestId};const q:any={from:()=>q,where:()=>q,for:async()=>[c]};
@@ -25,7 +26,7 @@ describe('PLAN-0048 stale receipt and funding guards — failures first',()=>{
   });
   it('allows a matching decision replay for the same current submission without repeating its mutation',async()=>{
     const c=current();jest.spyOn(CampaignWorkflow.prototype,'lock').mockResolvedValue(c);
-    const saved={campaign:c,decision:{id:'original'},live:false};const hash=fingerprint({stage:'primary',creativeId:null,...params});
+    const saved={campaign:c,decision:{id:'original'},live:false};const hash=fingerprint({stage:'primary',targetType:'campaign',targetId:campaignId,...params});
     const q:any={from:()=>q,where:()=>q,limit:async()=>[{fingerprint:hash,result:saved}]};const tx:any={select:()=>q,insert:jest.fn(),update:jest.fn()};
     const service=new ModerationService({transaction:(fn:any)=>fn(tx)} as any, { rolesFor: () => ['ads_reviewer', 'ads_manager'] } as any);
     await expect(service.reviewCampaignPrimary(campaignId,params)).resolves.toEqual(saved);expect(tx.insert).not.toHaveBeenCalled();expect(tx.update).not.toHaveBeenCalled();
