@@ -48,14 +48,12 @@ async function reporting({ base, authBase, email, password }) {
   }
 }
 
-async function smoke({ base, origin, slot, authBase, billingBase, email, password, revision }) {
+async function delivery({ base, origin, slot }) {
   if (!base || !origin || typeof slot !== 'string' || !/^cf-slot-[a-z0-9-]+$/.test(slot)) {
     throw Error('Smoke fixture configuration required');
   }
   const url = safeOrigin(base);
   const publisher = safeOrigin(origin);
-  if (revision && !/^[0-9a-f]{40}$/.test(revision)) throw Error('Invalid expected release revision');
-  const ready = await readiness(url, revision);
   const request = new URL('/api/v1/delivery/ad/' + encodeURIComponent(slot), url);
   request.searchParams.set('domain', new URL(publisher).hostname);
   request.searchParams.set('consent', 'unknown');
@@ -66,7 +64,14 @@ async function smoke({ base, origin, slot, authBase, billingBase, email, passwor
   const body = await response.json();
   if (!response.ok || body.status !== 'success' || !body.data?.impToken ||
       !['image', 'text', 'video'].includes(body.data.adType)) throw Error('Delivery smoke failed');
-  const result = { readiness: ready, delivery: response.status, adType: body.data.adType };
+  return { delivery: response.status, adType: body.data.adType };
+}
+
+async function smoke({ base, origin, slot, authBase, billingBase, email, password, revision }) {
+  const url = safeOrigin(base);
+  if (revision && !/^[0-9a-f]{40}$/.test(revision)) throw Error('Invalid expected release revision');
+  const ready = await readiness(url, revision);
+  const result = { readiness: ready, ...await delivery({ base, origin, slot }) };
   if (authBase || billingBase) {
     if (!authBase || !billingBase) throw Error('Both Auth and Billing smoke URLs required');
     result.auth = await readiness(authBase, revision);
@@ -102,11 +107,10 @@ if (require.main === module) {
   };
   (async () => {
     if (process.argv.includes('--monitor')) {
-      const response = await fetch(new URL('/api/v1/health/ready', safeOrigin(options.base)), {
-        redirect: 'error', signal: AbortSignal.timeout(10000),
-      });
-      options.revision = (await response.json()).revision;
-      if (!response.ok) throw Error('Runtime readiness unavailable');
+      const result = await delivery(options);
+      if (result.adType !== 'image') throw Error('Expected staging image ad');
+      console.log('Staging ad delivery passed');
+      return;
     }
     if (!options.revision || !options.authBase || !options.billingBase || !options.email || !options.password) {
       throw Error('Full release smoke configuration required');
@@ -117,5 +121,8 @@ if (require.main === module) {
     const durationMs = Date.now() - started;
     if (durationMs > policy.maxResponseMs) throw Error('Release smoke latency limit exceeded');
     console.log(JSON.stringify({ revision: options.revision, durationMs, ...result }));
-  })().catch(() => { console.error('Release acceptance did not pass'); process.exitCode = 1; });
+  })().catch(() => {
+    console.error(process.argv.includes('--monitor') ? 'Staging ad delivery check failed' : 'Release acceptance did not pass');
+    process.exitCode = 1;
+  });
 }
