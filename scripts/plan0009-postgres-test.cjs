@@ -171,6 +171,7 @@ try {
     ...(process.argv.includes('--plan0129') ? ['--testNamePattern','PLAN0129|PLAN0130|PLAN0079 owner-scoped','--json','--outputFile=../docs/reviews/plan-0129/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0110') ? ['--testNamePattern','PLAN0110'] : []),
     ...(process.argv.includes('--plan0122') ? ['--testNamePattern','PLAN0122'] : []),
+    ...(process.argv.includes('--plan0131') ? ['--testNamePattern','PLAN0131|PLAN0121 staff meta'] : []),
     ...(process.argv.includes('--plan0121') ? ['--testNamePattern','PLAN0121|PLAN0080 website policy HTTP'] : []),
     ...(process.argv.includes('--plan0116-funding') ? ['--testNamePattern','PLAN0116 funding'] : []),
     ...(process.argv.includes('--plan0113') ? ['--testNamePattern','PLAN0113'] : []),
