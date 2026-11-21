@@ -1124,8 +1124,21 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect((await get('from=2026-02-30',owner)).status).toBe(400);
       expect((await get('role=admin',owner)).status).toBe(400);
       expect((await get('compare=yes',owner)).status).toBe(400);
-      await f.add();
+      const [website] = await db.insert(schema.adsPromoterWebsites).values({
+        promoterId: f.promoter.id, domain: 'settled-counts.example.test',
+        url: 'https://settled-counts.example.test', verificationToken: randomUUID(),
+        verificationMethod: 'dns_txt',
+      }).returning();
+      const { serve } = await f.add();
+      await db.update(schema.adsServes).set({ websiteId: website.id }).where(eq(schema.adsServes.id, serve.id));
+      const promoters = new PromotersService(db);
+      expect(await promoters.getWebsites(f.promoter.id)).toEqual([expect.objectContaining({
+        id: website.id, impressionCount: '0', clickCount: '0',
+      })]);
       await f.svc.settle(f.campaign.id,randomUUID(),new Date());
+      expect(await promoters.getWebsites(f.promoter.id)).toEqual([expect.objectContaining({
+        id: website.id, impressionCount: cpm ? '1' : '0', clickCount: cpm ? '0' : '1',
+      })]);
       const fractional=(await get(range,owner)).body.data;
       expect(fractional.totals).toMatchObject({spend:price.toString(),posted:cpm?'0':'100000000',
         billableImpressions:cpm?'1':'0',billableClicks:cpm?'0':'1'});

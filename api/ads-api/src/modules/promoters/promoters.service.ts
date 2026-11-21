@@ -321,25 +321,30 @@ export class PromotersService {
       .orderBy(desc(adsPromoterWebsites.createdAt));
     if(!websites.length)return [];
     const checks=await this.db.select().from(adsSupplyStateHistory).where(and(eq(adsSupplyStateHistory.entityType,'website'),inArray(adsSupplyStateHistory.entityId,websites.map(site=>site.id)),inArray(adsSupplyStateHistory.dimension,['ownership_check_html_meta','ownership_check_dns_txt']))).orderBy(desc(adsSupplyStateHistory.createdAt)).limit(5000);
-    const impressionCounts = await this.db.execute<{ website_id: string; impressions: string }>(sql`
-      SELECT serve.website_id, count(DISTINCT interaction.id)::text AS impressions
+    const settledCounts = await this.db.execute<{ website_id: string; impressions: string; clicks: string }>(sql`
+      SELECT serve.website_id,
+        (count(DISTINCT interaction.id) FILTER (WHERE interaction.type = 'viewable_impression'))::text AS impressions,
+        (count(DISTINCT interaction.id) FILTER (WHERE interaction.type = 'click'))::text AS clicks
       FROM ads_serves serve
       JOIN ads_interactions interaction ON interaction.serve_id = serve.id
         AND interaction.promoter_id = serve.promoter_id
-        AND interaction.type = 'viewable_impression' AND interaction.is_valid
+        AND interaction.is_valid
       JOIN ads_settlement_claims claim ON claim.serve_id = serve.id
         AND claim.interaction_id = interaction.id AND claim.promoter_id = serve.promoter_id
       JOIN ads_settlement_batches batch ON batch.id = claim.batch_id AND batch.status = 'completed'
       WHERE serve.promoter_id = ${promoterId}
         AND serve.website_id IN (${sql.join(websites.map(site => sql`${site.id}`), sql`, `)})
-        AND serve.inventory_class = 'paid' AND serve.delivery_mode = 'normal' AND serve.pricing_model = 'cpm'
+        AND serve.inventory_class = 'paid' AND serve.delivery_mode = 'normal'
+        AND ((serve.pricing_model = 'cpm' AND interaction.type = 'viewable_impression')
+          OR (serve.pricing_model = 'cpc' AND interaction.type = 'click'))
       GROUP BY serve.website_id
     `);
-    const impressionsByWebsite = new Map(impressionCounts.rows.map(row => [row.website_id, row.impressions]));
+    const countsByWebsite = new Map(settledCounts.rows.map(row => [row.website_id, row]));
     return websites.map(website => ({
       ...website,
       ownershipChecks: ownershipMethodStatuses(website, checks),
-      impressionCount: impressionsByWebsite.get(website.id) ?? '0',
+      impressionCount: countsByWebsite.get(website.id)?.impressions ?? '0',
+      clickCount: countsByWebsite.get(website.id)?.clicks ?? '0',
     }));
   }
 
