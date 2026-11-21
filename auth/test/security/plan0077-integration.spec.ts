@@ -76,7 +76,7 @@ run('PLAN0077 real local HTTP + PostgreSQL moderation (no Redis/provider boundar
   expect(c.current_submission_id).toBe(c.approved_submission_id);expect(c.target_hours).toBeNull();
   expect((await pool.query('select review_status from ads_creatives where id=$1',[ids.creative])).rows[0].review_status).toBe('approved');
 
-  const [asset]=await db.insert(schema.adsMediaAssets).values({ownerId:owner,storageKey:randomUUID(),cdnUrl:'https://example.test/new.webp',mimeType:'image/webp',bytes:1000,sha256:'a'.repeat(64),status:'ready'}).returning();
+  const [asset]=await db.insert(schema.adsMediaAssets).values({ownerId:owner,storageKey:randomUUID(),cdnUrl:'https://example.test/new.webp',mimeType:'image/webp',width:300,height:250,bytes:1000,sha256:'a'.repeat(64),status:'ready'}).returning();
   const newAd=await campaignService.addCreative(ids.campaign,owner,{adStackId:ids.stack,adType:'image',adFormat:'card',destinationUrl:'https://example.test',mediaAssetId:asset.id},control(),true);
   expect(newAd.reviewStatus).toBe('pending');
   const queue=await service.getQueue('reviewer');

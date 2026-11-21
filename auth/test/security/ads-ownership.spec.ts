@@ -26,7 +26,9 @@ function database(rows: any[][]) {
     }),
     insert: jest.fn(() => ({ values: jest.fn((value: any) => ({ returning: async () => [{ id: 'record', ...value }] })) })),
     update: jest.fn(),
+    execute:jest.fn(async()=>({rows:[]})),
   };
+  db.transaction=jest.fn(async(work:any)=>work(db));
   return { db, predicates };
 }
 

@@ -330,6 +330,13 @@
       "when": 1794956400001,
       "tag": "0046_adstation_direct_slot_gating",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1794956400002,
+      "tag": "0048_slot_retirement",
+      "breakpoints": true
     }
   ]
 }

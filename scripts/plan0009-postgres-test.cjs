@@ -168,6 +168,7 @@ try {
     ...(process.argv.includes('--plan0104') ? ['--testNamePattern','PLAN0104|PLAN0102 daily reports|PLAN0103 network and legacy|PLAN0101 advertiser','--json','--outputFile=../docs/reviews/plan-0104/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0123-billing') ? ['--testNamePattern','PLAN0123'] : []),
     ...(process.argv.includes('--plan0124') ? ['--testNamePattern','PLAN0124'] : []),
+    ...(process.argv.includes('--plan0129') ? ['--testNamePattern','PLAN0129|PLAN0130|PLAN0079 owner-scoped','--json','--outputFile=../docs/reviews/plan-0129/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0110') ? ['--testNamePattern','PLAN0110'] : []),
     ...(process.argv.includes('--plan0122') ? ['--testNamePattern','PLAN0122'] : []),
     ...(process.argv.includes('--plan0121') ? ['--testNamePattern','PLAN0121|PLAN0080 website policy HTTP'] : []),

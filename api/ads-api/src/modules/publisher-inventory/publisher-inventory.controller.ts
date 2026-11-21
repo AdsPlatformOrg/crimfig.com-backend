@@ -1,7 +1,7 @@
 import { documentAdsController } from '../../contracts/ads-contract';
-import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, ParseUUIDPipe, Patch, Post, Req } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, IsUUID, IsISO8601, MaxLength, ArrayMaxSize,IsInt,Min,Max } from 'class-validator';
 import { PromotersService } from '../promoters/promoters.service';
 import { SetupChecksService } from './setup-checks.service';
 import { CreateSetupCheckDto } from './create-setup-check.dto';
@@ -9,10 +9,11 @@ import { availablePublisherAdTypes } from '../../../../billing-api/src/modules/e
 import { PublisherSlotsService, UpdateAdstationSlotDto } from './publisher-slots.service';
 
 export class CreateSlotDto {
-  @IsString()
+  @IsUUID()
   websiteId: string;
 
   @IsString()
+  @MaxLength(150)
   name: string;
 
   @IsIn(['consideration', 'direct', 'network', 'hybrid'])
@@ -27,11 +28,11 @@ export class CreateSlotDto {
   slotDeliveryPreference?: string;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt() @Min(50) @Max(3840)
   width?: number;
 
   @IsOptional()
-  @IsNumber()
+  @IsInt() @Min(50) @Max(2160)
   height?: number;
 
   @IsOptional()
@@ -45,6 +46,21 @@ export class CreateSlotDto {
   @IsOptional()
   @IsArray()
   allowedPresetIds?: string[];
+}
+
+export class ManagedCreateSlotDto extends CreateSlotDto {
+  @IsUUID() requestId!:string;
+}
+export class ManagedSlotControlDto {
+  @IsUUID() requestId!:string;
+  @IsISO8601() expectedUpdatedAt!:string;
+}
+export class ManagedUpdateSlotDto extends ManagedSlotControlDto {
+  @IsOptional() @IsInt() @Min(50) @Max(3840) width?:number|null;
+  @IsOptional() @IsInt() @Min(50) @Max(2160) height?:number|null;
+  @IsOptional() @IsString() @MaxLength(150) name?:string;
+  @IsOptional() @IsIn(['draft','testing','active','paused','disabled']) lifecycleStatus?:'draft'|'testing'|'active'|'paused'|'disabled';
+  @IsOptional() @IsArray() @ArrayMaxSize(9) @IsString({each:true}) allowedPresetIds?:string[];
 }
 
 @ApiTags('Publisher Inventory')
@@ -71,7 +87,7 @@ export class PublisherInventoryController {
   }
   @Get('websites/:websiteId/slots')
   @ApiOperation({ summary: 'List publisher slots for website' })
-  async getSlots(@Req() req: any, @Param('websiteId') websiteId: string) {
+  async getSlots(@Req() req: any, @Param('websiteId',new ParseUUIDPipe()) websiteId: string) {
     const userId = req.user.sub;
     const promoter = await this.promotersService.getOrCreatePromoter(
       userId,
@@ -93,6 +109,25 @@ export class PublisherInventoryController {
     );
     const slot = await this.publisherSlots.createSlot(promoter.id, dto);
     return { status: 'success', data: slot };
+  }
+
+  @Post('slots/managed')
+  @ApiOperation({summary:'Create an owner-scoped slot with an immutable retry receipt'})
+  async managedCreateSlot(@Req() req:any,@Body() dto:ManagedCreateSlotDto){
+    const promoter=await this.promotersService.getExistingPromoter(req.user.sub);
+    return {status:'success',data:await this.publisherSlots.managedMutation(promoter.id,'create',undefined,dto)};
+  }
+  @Patch('slots/:slotId/managed')
+  @ApiOperation({summary:'Update slot settings with stale-edit and retry protection'})
+  async managedUpdateSlot(@Req() req:any,@Param('slotId',new ParseUUIDPipe()) slotId:string,@Body() dto:ManagedUpdateSlotDto){
+    const promoter=await this.promotersService.getExistingPromoter(req.user.sub);
+    return {status:'success',data:await this.publisherSlots.managedMutation(promoter.id,'update',slotId,dto)};
+  }
+  @Delete('slots/:slotId/managed')
+  @ApiOperation({summary:'Retire a slot without deleting historical delivery or financial references'})
+  async managedRetireSlot(@Req() req:any,@Param('slotId',new ParseUUIDPipe()) slotId:string,@Body() dto:ManagedSlotControlDto){
+    const promoter=await this.promotersService.getExistingPromoter(req.user.sub);
+    return {status:'success',data:await this.publisherSlots.managedMutation(promoter.id,'retire',slotId,dto)};
   }
 
   @Patch('slots/:slotId')

@@ -129,7 +129,11 @@ export class AdstationService extends PublisherSlotsService {
    * Enforces: CANNOT bind direct campaign to a Consideration Slot! (PLAN-0018 Section 2.1)
    */
   async createDirectCampaign(promoterId: string, dto: CreateDirectCampaignDto) {
-    const [website] = await this.db
+    return this.db.transaction(async tx=>{
+      await tx.execute(sql`set local lock_timeout='5s'`);
+      await tx.execute(sql`set local statement_timeout='8s'`);
+
+    const [website] = await tx
       .select()
       .from(adsPromoterWebsites)
       .where(
@@ -138,14 +142,14 @@ export class AdstationService extends PublisherSlotsService {
           eq(adsPromoterWebsites.promoterId, promoterId),
         ),
       )
-      .limit(1);
+      .for('share').limit(1);
 
     if (!website) {
       throw new NotFoundException('Promoter website not found or unauthorized');
     }
 
     if (dto.slotId) {
-      const [slot] = await this.db
+      const [slot] = await tx
         .select()
         .from(adstationSlots)
         .where(
@@ -155,11 +159,13 @@ export class AdstationService extends PublisherSlotsService {
             eq(adstationSlots.websiteId, dto.websiteId),
           ),
         )
-        .limit(1);
+        .for('share').limit(1);
 
       if (!slot) {
         throw new NotFoundException('AdStation slot not found or unauthorized');
       }
+
+      if (slot.retiredAt) throw new ForbiddenException('Retired slots cannot accept direct deals.');
 
       if (slot.isConsiderationSlot || slot.slotType === 'consideration') {
         throw new BadRequestException(
@@ -168,7 +174,7 @@ export class AdstationService extends PublisherSlotsService {
       }
     }
 
-    const [campaign] = await this.db
+    const [campaign] = await tx
       .insert(adstationDirectCampaigns)
       .values({
         promoterId,
@@ -187,6 +193,7 @@ export class AdstationService extends PublisherSlotsService {
       .returning();
 
     return campaign;
+    });
   }
 
   async submitDirectSlotForReview(promoterId: string, slotId: string) {
@@ -213,6 +220,8 @@ export class AdstationService extends PublisherSlotsService {
       if (slot.slotType !== 'direct') {
         throw new BadRequestException('Only Direct Ad Slots use AdStation direct review submission.');
       }
+
+      if(slot.retiredAt)throw new ForbiddenException('Retired slots cannot be submitted for review.');
 
       if (slot.lifecycleStatus === 'suspended') {
         throw new ForbiddenException('Suspended slots cannot be submitted for review.');

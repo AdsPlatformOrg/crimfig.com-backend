@@ -648,6 +648,8 @@ export class AdsOperationsService {
         return { message: `Slot is already in ${targetLifecycle} lifecycle`, slot };
       }
 
+      if(slot.retiredAt)throw new BadRequestException('Retired slots cannot be resumed.');
+
       const [website] = await tx
         .select()
         .from(adsPromoterWebsites)
@@ -749,6 +751,7 @@ export class AdsOperationsService {
       if (slot.slotType !== 'direct') {
         throw new BadRequestException('Direct slot review applies only to slots with slotType "direct".');
       }
+      if(slot.retiredAt)throw new BadRequestException('Retired slots cannot be reviewed or resumed.');
 
       const [website] = await tx
         .select()

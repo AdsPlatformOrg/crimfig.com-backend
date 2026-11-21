@@ -5,6 +5,8 @@ import { campaignListOrder } from './campaign-list-sort';
 import { paidDeliveryReadiness } from '../delivery/paid-delivery-policy';
 import { CampaignWorkflow, campaignCapabilities, assertEditableCampaign, currentApproval, controlRequired, fingerprint, type MutationControl } from './campaign-workflow';
 import { imageSpecsView } from "../uploads/prepared-image";
+import {validateCreativeSizePolicy,type CreativeSizePolicy} from '../uploads/creative-size-policy';
+import {isApprovedImagePreset} from '../uploads/image-ad-presets';
 import { createHash } from "crypto";
 import {
   allDay,
@@ -77,6 +79,8 @@ export interface StackSettingsInput {
 }
 
 export interface CreativeInput {
+  sizePolicy?:CreativeSizePolicy;
+  allowedPresetIds?:string[];
   adStackId?: string;
   adType?: AdType;
   headline?: string | null;
@@ -662,6 +666,8 @@ export class CampaignsService {
     mediaFormat: "image" | "gif" | "video";
     width?: number | null;
     height?: number | null;
+    sizePolicy?:CreativeSizePolicy;
+    allowedPresetIds?:string|null;
   }> {
     const destinationUrl = partial && !input.destinationUrl?.trim() ? "" : assertHttpUrl(input.destinationUrl);
     const adFormat = (input.adFormat || "card") as AdFormat;
@@ -750,9 +756,11 @@ export class CampaignsService {
         mediaFormat: "image",
       };
     }
-    if (!asset && partial && !input.mediaAssetId && !input.imageUrl && !input.videoUrl) return {
-      adType, headline, bodyText, ctaText, destinationUrl, adFormat, imageUrl: null, videoUrl: null, posterUrl: null, mediaAssetId: null, mediaFormat: 'image',
-    };
+    if (!asset && partial && !input.mediaAssetId && !input.imageUrl && !input.videoUrl) {
+      const sizePolicy=input.sizePolicy??'dynamic';
+      if(!['legacy','dynamic','single','selected'].includes(sizePolicy)||input.allowedPresetIds!==undefined&&(!Array.isArray(input.allowedPresetIds)||input.allowedPresetIds.length>9||input.allowedPresetIds.some(id=>!isApprovedImagePreset(id))))throw new BadRequestException('Choose a supported image size policy.');
+      return {adType,headline,bodyText,ctaText,destinationUrl,adFormat,imageUrl:null,videoUrl:null,posterUrl:null,mediaAssetId:null,mediaFormat:'image',sizePolicy,allowedPresetIds:sizePolicy==='legacy'||sizePolicy==='dynamic'?null:JSON.stringify(input.allowedPresetIds??[])};
+    }
     if (!asset) throw new BadRequestException(`A validated ${adType} asset is required.`);
     if (adType === "image" && asset.bytes > 300000)
       throw new BadRequestException(
@@ -785,6 +793,7 @@ export class CampaignsService {
       videoUrl: adType === "video" ? asset.cdnUrl : null,
       posterUrl: asset.thumbnailUrl || null,
       mediaAssetId: asset.id,
+      ...(adType==='image'?validateCreativeSizePolicy(input.sizePolicy,input.allowedPresetIds,asset):{}),
       width: asset.width,
       height: asset.height,
       mediaFormat:
@@ -833,6 +842,7 @@ export class CampaignsService {
           "Choose a valid ad stack for this campaign.",
         );
       const validated = await this.validateCreative(tx, advertiserId, input);
+      if(input.sizePolicy==='legacy')throw new BadRequestException('New ads use Dynamic Ad or an explicit approved-size restriction.');
       const [creative] = await tx
         .insert(adsCreatives)
         .values({
@@ -847,6 +857,7 @@ export class CampaignsService {
           videoUrl: validated.videoUrl,
           posterUrl: validated.posterUrl,
           mediaAssetId: validated.mediaAssetId,
+          sizePolicy:validated.sizePolicy,allowedPresetIds:validated.allowedPresetIds,width:validated.width,height:validated.height,
           adFormat: validated.adFormat,
           mediaFormat: validated.mediaFormat,
           reviewStatus: "pending",
@@ -892,6 +903,8 @@ export class CampaignsService {
       if (!live) this.assertEditable(campaign);
 
       const merged: CreativeInput = {
+        sizePolicy:input.sizePolicy??existing.creative.sizePolicy as CreativeSizePolicy,
+        allowedPresetIds:input.allowedPresetIds??parseJsonArray(existing.creative.allowedPresetIds,[]),
         adStackId: input.adStackId || existing.creative.adStackId,
         adType: (input.adType || existing.creative.adType) as AdType,
         headline: input.headline ?? existing.creative.headline,
@@ -934,6 +947,7 @@ export class CampaignsService {
           videoUrl: validated.videoUrl,
           posterUrl: validated.posterUrl,
           mediaAssetId: validated.mediaAssetId,
+          sizePolicy:validated.sizePolicy,allowedPresetIds:validated.allowedPresetIds,width:validated.width,height:validated.height,
           adFormat: validated.adFormat,
           mediaFormat: validated.mediaFormat,
           reviewStatus: "pending" as const,
@@ -1074,9 +1088,11 @@ export class CampaignsService {
           keptStacks.add(row.id);await this.locations.replaceTargets(tx,'stack',row.id,geo.targets);
           if(!Array.isArray(stack.ads)||stack.ads.length>100) throw new BadRequestException('Invalid ads.');
           for(const ad of stack.ads) {
-            if(!ad||typeof ad!=='object'||Object.keys(ad).some(k=>!['id','adType','headline','bodyText','ctaText','destinationUrl','adFormat','mediaAssetId'].includes(k))) throw new BadRequestException('Invalid ad fields.');
+            if(!ad||typeof ad!=='object'||Object.keys(ad).some(k=>!['id','adType','headline','bodyText','ctaText','destinationUrl','adFormat','mediaAssetId','sizePolicy','allowedPresetIds'].includes(k))) throw new BadRequestException('Invalid ad fields.');
             if(ad.id&&(!oldAds.some((a:any)=>a.id===ad.id&&a.status!=='archived')||keptAds.has(ad.id))) throw new BadRequestException('Choose a current creative in this campaign.');
-            const valid=await this.validateCreative(tx,owner,ad,true);
+            const previous=oldAds.find((item:any)=>item.id===ad.id);
+            if(!previous&&ad.sizePolicy==='legacy')throw new BadRequestException('New ads cannot use a legacy size policy.');
+            const valid=await this.validateCreative(tx,owner,{...ad,sizePolicy:ad.sizePolicy??previous?.sizePolicy??'dynamic',allowedPresetIds:ad.allowedPresetIds??parseJsonArray(previous?.allowedPresetIds,[])},true);
             const values={...valid,campaignId:id,adStackId:row.id,status:'active' as const};
             const [saved]=ad.id?await tx.update(adsCreatives).set({...values,updatedAt:new Date()}).where(eq(adsCreatives.id,ad.id)).returning():await tx.insert(adsCreatives).values(values).returning();keptAds.add(saved.id);
           }
@@ -1132,7 +1148,7 @@ export class CampaignsService {
         .from(adsCreatives)
         .where(and(eq(adsCreatives.campaignId, campaignId), sql`${adsCreatives.status} <> 'archived'`));
       if (creatives.some(c => !stacks.some(s => s.id === c.adStackId))) throw new BadRequestException('An ad points to an unavailable stack.');
-      for (const creative of creatives) await this.validateCreative(tx, advertiserId, { ...creative, adType:creative.adType, adFormat:creative.adFormat, mediaAssetId:creative.mediaAssetId??undefined, imageUrl:creative.imageUrl??undefined,videoUrl:creative.videoUrl??undefined });
+      for (const creative of creatives) await this.validateCreative(tx, advertiserId, { ...creative, sizePolicy:creative.sizePolicy as CreativeSizePolicy,allowedPresetIds:parseJsonArray(creative.allowedPresetIds,[]),adType:creative.adType, adFormat:creative.adFormat, mediaAssetId:creative.mediaAssetId??undefined, imageUrl:creative.imageUrl??undefined,videoUrl:creative.videoUrl??undefined });
       for (const stack of stacks) {
         const stackCreatives = creatives.filter(
           (c) => c.adStackId === stack.id,

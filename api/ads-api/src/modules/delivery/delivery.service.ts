@@ -4,6 +4,7 @@ import { cpcVisitorContinuity } from './cpc-visitor-continuity';
 import { matchesDeviceTarget } from './device-targeting';
 import { responsiveImageBounds } from './image-sizing';
 import { APPROVED_IMAGE_AD_PRESETS, selectGeneralSlotImage } from '../uploads/image-ad-presets';
+import {intersectCreativeSlotSizes} from '../uploads/creative-size-policy';
 import { adsPublicOrigin } from '@crimfig/shared';
 import {houseProgramRequested} from '../cfig/cfig-allocation';
 import { assertEventReplay, assertInstanceBinding } from './interaction-binding';
@@ -1397,6 +1398,7 @@ export class DeliveryService {
           imageUrl: adsCreatives.imageUrl,
           preparation: adsMediaAssets.preparation,
           imageBytes: adsMediaAssets.bytes,
+          sizePolicy:adsCreatives.sizePolicy,creativePresetIds:adsCreatives.allowedPresetIds,
           videoUrl: adsCreatives.videoUrl,
           posterUrl: adsCreatives.posterUrl,
           adType: adsCreatives.adType,
@@ -1495,6 +1497,7 @@ export class DeliveryService {
         imageUrl: adsCreatives.imageUrl,
         preparation: adsMediaAssets.preparation,
         imageBytes: adsMediaAssets.bytes,
+        sizePolicy:adsCreatives.sizePolicy,creativePresetIds:adsCreatives.allowedPresetIds,
         videoUrl: adsCreatives.videoUrl,
         posterUrl: adsCreatives.posterUrl,
         adType: adsCreatives.adType,
@@ -1612,12 +1615,16 @@ export class DeliveryService {
       if (requestedLayout !== 'general' && candidate.format !== requestedLayout && (canonicalSlot || candidate.adType !== 'video'))
         return reject('CREATIVE_FORMAT_MISMATCH');
       if (candidate.adType === 'image') {
+        const sizingSlot=intersectCreativeSlotSizes(canonicalSlot??{allowedPresetIds:JSON.stringify(APPROVED_IMAGE_AD_PRESETS.filter(preset=>requestedLayout==='banner'?preset.ratioDecimal>=3:preset.ratioDecimal<3).map(preset=>preset.id))},candidate.sizePolicy,candidate.creativePresetIds);
+        if(!sizingSlot)return reject('CREATIVE_SIZE_POLICY_MISMATCH');
         const general = requestedLayout === 'general' && canonicalSlot
           ? selectGeneralSlotImage(candidate.preparation?.renditions ?? [{
               url: candidate.imageUrl, bytes: candidate.imageBytes, width: candidate.width, height: candidate.height,
-            }], canonicalSlot)
+            }], sizingSlot)
           : null;
+        const restricted=candidate.sizePolicy==='single'||candidate.sizePolicy==='selected';
         const rendition = requestedLayout === 'general' ? general
+          : restricted?selectGeneralSlotImage((candidate.preparation?.renditions??[{url:candidate.imageUrl,bytes:candidate.imageBytes,width:candidate.width,height:candidate.height}]).filter((image:any)=>image.bytes<=imageCap),sizingSlot)
           : selectImageRendition(candidate, requestedLayout, imageCap);
         if (general) candidate.renderPresetId = general.presetId;
         if (!rendition) return reject('CREATIVE_RENDITION_INCOMPATIBLE');
@@ -1746,7 +1753,11 @@ export class DeliveryService {
       (winningCreative as any).adType === 'image' &&
       winningCreative === placement
     ) {
-      const rendition = selectImageRendition(
+      const restricted=(winningCreative as any).sizePolicy==='single'||(winningCreative as any).sizePolicy==='selected';
+      const restriction=intersectCreativeSlotSizes({allowedPresetIds:null},(winningCreative as any).sizePolicy,(winningCreative as any).creativePresetIds);
+      const rendition = restricted
+        ? restriction&&selectGeneralSlotImage(((winningCreative as any).preparation?.renditions??[{url:winningCreative.imageUrl,width:(winningCreative as any).width,height:(winningCreative as any).height,bytes:(winningCreative as any).imageBytes}]).filter((image:any)=>image.bytes<=Math.min((placement as any).imageMaxBytes??250000,300000)),restriction)
+        : selectImageRendition(
         winningCreative,
         (winningCreative as any).adFormat || 'card',
         Math.min((placement as any).imageMaxBytes ?? 250000, 300000),

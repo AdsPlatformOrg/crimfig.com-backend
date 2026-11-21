@@ -2,11 +2,12 @@
   "service": "ads",
   "contractVersion": 1,
   "dialect": "3.0",
-  "sha256": "2dafb4f9794c09c0fd9c512a17e4b7e1dfd973288cf65367d55f338894a12b76",
+  "sha256": "88e49ff6b82b7417752f3689ec029c428df8d8a9258392affb769d2c6cb54afe",
   "operations": [
     "DELETE /api/v1/campaigns/{id}/ad-stacks/{stackId}",
     "DELETE /api/v1/campaigns/{id}/ad-stacks/{stackId}/live",
     "DELETE /api/v1/campaigns/{id}/creatives/{creativeId}",
+    "DELETE /api/v1/publisher/slots/{slotId}/managed",
     "DELETE /api/v1/uploads/{assetId}",
     "GET /api/v1/admin/ads/auction-decisions",
     "GET /api/v1/admin/ads/auction-decisions/{requestId}",
@@ -48,6 +49,7 @@
     "PATCH /api/v1/campaigns/{id}/creatives/{creativeId}/status",
     "PATCH /api/v1/campaigns/{id}/live-settings",
     "PATCH /api/v1/publisher/slots/{slotId}",
+    "PATCH /api/v1/publisher/slots/{slotId}/managed",
     "POST /api/v1/admin/ads/moderation/campaigns/{id}/decision",
     "POST /api/v1/admin/ads/moderation/campaigns/{id}/emergency-override",
     "POST /api/v1/admin/ads/moderation/campaigns/{id}/manager-approval",
@@ -84,6 +86,7 @@
     "POST /api/v1/campaigns/{id}/creatives/submit-addition",
     "POST /api/v1/campaigns/{id}/submit-review",
     "POST /api/v1/publisher/slots",
+    "POST /api/v1/publisher/slots/managed",
     "POST /api/v1/publisher/slots/{slotId}/check-installation",
     "POST /api/v1/publisher/websites/{websiteId}/setup-checks",
     "POST /api/v1/uploads/direct",
@@ -94,6 +97,6 @@
     "PUT /api/v1/campaigns/{id}/creatives/{creativeId}/submit-replacement",
     "PUT /api/v1/campaigns/{id}/status"
   ],
-  "sourceSha256": "f803e73a4020336d7b50370b4b0d70b45effefe383ba925cb4cbdb1d020dae8a",
+  "sourceSha256": "c8c73701db98031662b8fed46b3b97704838b731e60b5002d406ad9ca9ada551",
   "generator": "openapi-typescript@7.13.0"
 }

@@ -27,6 +27,14 @@
             "nullable": true,
             "type": "string"
           },
+          "allowedPresetIds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 9,
+            "nullable": true,
+            "type": "array"
+          },
           "bodyText": {
             "maxLength": 2000,
             "nullable": true,
@@ -75,6 +83,16 @@
           },
           "requestId": {
             "format": "uuid",
+            "type": "string"
+          },
+          "sizePolicy": {
+            "enum": [
+              "legacy",
+              "dynamic",
+              "single",
+              "selected"
+            ],
+            "nullable": true,
             "type": "string"
           },
           "videoUrl": {
@@ -533,6 +551,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "allowedPresetIds": {
+                                "nullable": true,
+                                "type": "string"
+                              },
                               "bodyText": {
                                 "nullable": true,
                                 "type": "string"
@@ -623,6 +645,15 @@
                                   "pending_manager_approval",
                                   "approved",
                                   "rejected"
+                                ],
+                                "type": "string"
+                              },
+                              "sizePolicy": {
+                                "enum": [
+                                  "legacy",
+                                  "dynamic",
+                                  "single",
+                                  "selected"
                                 ],
                                 "type": "string"
                               },
@@ -1084,6 +1115,10 @@
                           ],
                           "type": "string"
                         },
+                        "allowedPresetIds": {
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "bodyText": {
                           "nullable": true,
                           "type": "string"
@@ -1174,6 +1209,15 @@
                             "pending_manager_approval",
                             "approved",
                             "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "sizePolicy": {
+                          "enum": [
+                            "legacy",
+                            "dynamic",
+                            "single",
+                            "selected"
                           ],
                           "type": "string"
                         },
@@ -1526,6 +1570,10 @@
                                       ],
                                       "type": "string"
                                     },
+                                    "allowedPresetIds": {
+                                      "nullable": true,
+                                      "type": "string"
+                                    },
                                     "bodyText": {
                                       "nullable": true,
                                       "type": "string"
@@ -1616,6 +1664,15 @@
                                         "pending_manager_approval",
                                         "approved",
                                         "rejected"
+                                      ],
+                                      "type": "string"
+                                    },
+                                    "sizePolicy": {
+                                      "enum": [
+                                        "legacy",
+                                        "dynamic",
+                                        "single",
+                                        "selected"
                                       ],
                                       "type": "string"
                                     },
@@ -2077,6 +2134,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "allowedPresetIds": {
+                                "nullable": true,
+                                "type": "string"
+                              },
                               "bodyText": {
                                 "nullable": true,
                                 "type": "string"
@@ -2167,6 +2228,15 @@
                                   "pending_manager_approval",
                                   "approved",
                                   "rejected"
+                                ],
+                                "type": "string"
+                              },
+                              "sizePolicy": {
+                                "enum": [
+                                  "legacy",
+                                  "dynamic",
+                                  "single",
+                                  "selected"
                                 ],
                                 "type": "string"
                               },
@@ -2534,6 +2604,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "allowedPresetIds": {
+                                "nullable": true,
+                                "type": "string"
+                              },
                               "bodyText": {
                                 "nullable": true,
                                 "type": "string"
@@ -2624,6 +2698,15 @@
                                   "pending_manager_approval",
                                   "approved",
                                   "rejected"
+                                ],
+                                "type": "string"
+                              },
+                              "sizePolicy": {
+                                "enum": [
+                                  "legacy",
+                                  "dynamic",
+                                  "single",
+                                  "selected"
                                 ],
                                 "type": "string"
                               },
@@ -3085,6 +3168,10 @@
                           ],
                           "type": "string"
                         },
+                        "allowedPresetIds": {
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "bodyText": {
                           "nullable": true,
                           "type": "string"
@@ -3175,6 +3262,15 @@
                             "pending_manager_approval",
                             "approved",
                             "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "sizePolicy": {
+                          "enum": [
+                            "legacy",
+                            "dynamic",
+                            "single",
+                            "selected"
                           ],
                           "type": "string"
                         },
@@ -3593,6 +3689,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "allowedPresetIds": {
+                                "nullable": true,
+                                "type": "string"
+                              },
                               "bodyText": {
                                 "nullable": true,
                                 "type": "string"
@@ -3683,6 +3783,15 @@
                                   "pending_manager_approval",
                                   "approved",
                                   "rejected"
+                                ],
+                                "type": "string"
+                              },
+                              "sizePolicy": {
+                                "enum": [
+                                  "legacy",
+                                  "dynamic",
+                                  "single",
+                                  "selected"
                                 ],
                                 "type": "string"
                               },
@@ -4144,6 +4253,10 @@
                           ],
                           "type": "string"
                         },
+                        "allowedPresetIds": {
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "bodyText": {
                           "nullable": true,
                           "type": "string"
@@ -4234,6 +4347,15 @@
                             "pending_manager_approval",
                             "approved",
                             "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "sizePolicy": {
+                          "enum": [
+                            "legacy",
+                            "dynamic",
+                            "single",
+                            "selected"
                           ],
                           "type": "string"
                         },
@@ -4580,6 +4702,10 @@
                               ],
                               "type": "string"
                             },
+                            "allowedPresetIds": {
+                              "nullable": true,
+                              "type": "string"
+                            },
                             "bodyText": {
                               "nullable": true,
                               "type": "string"
@@ -4670,6 +4796,15 @@
                                 "pending_manager_approval",
                                 "approved",
                                 "rejected"
+                              ],
+                              "type": "string"
+                            },
+                            "sizePolicy": {
+                              "enum": [
+                                "legacy",
+                                "dynamic",
+                                "single",
+                                "selected"
                               ],
                               "type": "string"
                             },
@@ -5131,6 +5266,10 @@
                         ],
                         "type": "string"
                       },
+                      "allowedPresetIds": {
+                        "nullable": true,
+                        "type": "string"
+                      },
                       "bodyText": {
                         "nullable": true,
                         "type": "string"
@@ -5221,6 +5360,15 @@
                           "pending_manager_approval",
                           "approved",
                           "rejected"
+                        ],
+                        "type": "string"
+                      },
+                      "sizePolicy": {
+                        "enum": [
+                          "legacy",
+                          "dynamic",
+                          "single",
+                          "selected"
                         ],
                         "type": "string"
                       },
@@ -5567,6 +5715,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "allowedPresetIds": {
+                                "nullable": true,
+                                "type": "string"
+                              },
                               "bodyText": {
                                 "nullable": true,
                                 "type": "string"
@@ -5657,6 +5809,15 @@
                                   "pending_manager_approval",
                                   "approved",
                                   "rejected"
+                                ],
+                                "type": "string"
+                              },
+                              "sizePolicy": {
+                                "enum": [
+                                  "legacy",
+                                  "dynamic",
+                                  "single",
+                                  "selected"
                                 ],
                                 "type": "string"
                               },
@@ -6118,6 +6279,10 @@
                           ],
                           "type": "string"
                         },
+                        "allowedPresetIds": {
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "bodyText": {
                           "nullable": true,
                           "type": "string"
@@ -6208,6 +6373,15 @@
                             "pending_manager_approval",
                             "approved",
                             "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "sizePolicy": {
+                          "enum": [
+                            "legacy",
+                            "dynamic",
+                            "single",
+                            "selected"
                           ],
                           "type": "string"
                         },
@@ -6691,6 +6865,10 @@
                     ],
                     "type": "string"
                   },
+                  "allowedPresetIds": {
+                    "nullable": true,
+                    "type": "string"
+                  },
                   "bodyText": {
                     "nullable": true,
                     "type": "string"
@@ -6784,6 +6962,15 @@
                     ],
                     "type": "string"
                   },
+                  "sizePolicy": {
+                    "enum": [
+                      "legacy",
+                      "dynamic",
+                      "single",
+                      "selected"
+                    ],
+                    "type": "string"
+                  },
                   "status": {
                     "type": "string"
                   },
@@ -6851,6 +7038,10 @@
                                   "image",
                                   "video"
                                 ],
+                                "type": "string"
+                              },
+                              "allowedPresetIds": {
+                                "nullable": true,
                                 "type": "string"
                               },
                               "bodyText": {
@@ -6943,6 +7134,15 @@
                                   "pending_manager_approval",
                                   "approved",
                                   "rejected"
+                                ],
+                                "type": "string"
+                              },
+                              "sizePolicy": {
+                                "enum": [
+                                  "legacy",
+                                  "dynamic",
+                                  "single",
+                                  "selected"
                                 ],
                                 "type": "string"
                               },
@@ -7404,6 +7604,10 @@
                           ],
                           "type": "string"
                         },
+                        "allowedPresetIds": {
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "bodyText": {
                           "nullable": true,
                           "type": "string"
@@ -7494,6 +7698,15 @@
                             "pending_manager_approval",
                             "approved",
                             "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "sizePolicy": {
+                          "enum": [
+                            "legacy",
+                            "dynamic",
+                            "single",
+                            "selected"
                           ],
                           "type": "string"
                         },
@@ -7832,6 +8045,10 @@
                           ],
                           "type": "string"
                         },
+                        "allowedPresetIds": {
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "bodyText": {
                           "nullable": true,
                           "type": "string"
@@ -7922,6 +8139,15 @@
                             "pending_manager_approval",
                             "approved",
                             "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "sizePolicy": {
+                          "enum": [
+                            "legacy",
+                            "dynamic",
+                            "single",
+                            "selected"
                           ],
                           "type": "string"
                         },
@@ -8388,6 +8614,10 @@
                                 ],
                                 "type": "string"
                               },
+                              "allowedPresetIds": {
+                                "nullable": true,
+                                "type": "string"
+                              },
                               "bodyText": {
                                 "nullable": true,
                                 "type": "string"
@@ -8478,6 +8708,15 @@
                                   "pending_manager_approval",
                                   "approved",
                                   "rejected"
+                                ],
+                                "type": "string"
+                              },
+                              "sizePolicy": {
+                                "enum": [
+                                  "legacy",
+                                  "dynamic",
+                                  "single",
+                                  "selected"
                                 ],
                                 "type": "string"
                               },
@@ -8939,6 +9178,10 @@
                           ],
                           "type": "string"
                         },
+                        "allowedPresetIds": {
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "bodyText": {
                           "nullable": true,
                           "type": "string"
@@ -9029,6 +9272,15 @@
                             "pending_manager_approval",
                             "approved",
                             "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "sizePolicy": {
+                          "enum": [
+                            "legacy",
+                            "dynamic",
+                            "single",
+                            "selected"
                           ],
                           "type": "string"
                         },
@@ -9820,10 +10072,13 @@
             "type": "string"
           },
           "height": {
+            "maximum": 2160,
+            "minimum": 50,
             "nullable": true,
-            "type": "number"
+            "type": "integer"
           },
           "name": {
+            "maxLength": 150,
             "type": "string"
           },
           "responsive": {
@@ -9844,11 +10099,14 @@
             "type": "string"
           },
           "websiteId": {
+            "format": "uuid",
             "type": "string"
           },
           "width": {
+            "maximum": 3840,
+            "minimum": 50,
             "nullable": true,
-            "type": "number"
+            "type": "integer"
           }
         },
         "required": [
@@ -9954,6 +10212,144 @@
           "expectedRevision",
           "requestId",
           "status"
+        ],
+        "type": "object"
+      },
+      "ManagedCreateSlotDto": {
+        "properties": {
+          "allowedAdTypes": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "allowedPresetIds": {
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "format": {
+            "nullable": true,
+            "type": "string"
+          },
+          "height": {
+            "maximum": 2160,
+            "minimum": 50,
+            "nullable": true,
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 150,
+            "type": "string"
+          },
+          "requestId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "responsive": {
+            "nullable": true,
+            "type": "boolean"
+          },
+          "slotDeliveryPreference": {
+            "nullable": true,
+            "type": "string"
+          },
+          "slotType": {
+            "enum": [
+              "consideration",
+              "direct",
+              "network",
+              "hybrid"
+            ],
+            "type": "string"
+          },
+          "websiteId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "width": {
+            "maximum": 3840,
+            "minimum": 50,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "websiteId",
+          "name",
+          "slotType",
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "ManagedSlotControlDto": {
+        "properties": {
+          "expectedUpdatedAt": {
+            "type": "string"
+          },
+          "requestId": {
+            "format": "uuid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId",
+          "expectedUpdatedAt"
+        ],
+        "type": "object"
+      },
+      "ManagedUpdateSlotDto": {
+        "properties": {
+          "allowedPresetIds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 9,
+            "nullable": true,
+            "type": "array"
+          },
+          "expectedUpdatedAt": {
+            "type": "string"
+          },
+          "height": {
+            "maximum": 2160,
+            "minimum": 50,
+            "nullable": true,
+            "type": "integer"
+          },
+          "lifecycleStatus": {
+            "enum": [
+              "draft",
+              "testing",
+              "active",
+              "paused",
+              "disabled"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 150,
+            "nullable": true,
+            "type": "string"
+          },
+          "requestId": {
+            "format": "uuid",
+            "type": "string"
+          },
+          "width": {
+            "maximum": 3840,
+            "minimum": 50,
+            "nullable": true,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requestId",
+          "expectedUpdatedAt"
         ],
         "type": "object"
       },
@@ -10478,6 +10874,10 @@
                           ],
                           "type": "string"
                         },
+                        "allowedPresetIds": {
+                          "nullable": true,
+                          "type": "string"
+                        },
                         "bodyText": {
                           "nullable": true,
                           "type": "string"
@@ -10590,6 +10990,15 @@
                             "pending_manager_approval",
                             "approved",
                             "rejected"
+                          ],
+                          "type": "string"
+                        },
+                        "sizePolicy": {
+                          "enum": [
+                            "legacy",
+                            "dynamic",
+                            "single",
+                            "selected"
                           ],
                           "type": "string"
                         },
@@ -10769,6 +11178,10 @@
                                     ],
                                     "type": "string"
                                   },
+                                  "allowedPresetIds": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
                                   "bodyText": {
                                     "nullable": true,
                                     "type": "string"
@@ -10859,6 +11272,15 @@
                                       "pending_manager_approval",
                                       "approved",
                                       "rejected"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "sizePolicy": {
+                                    "enum": [
+                                      "legacy",
+                                      "dynamic",
+                                      "single",
+                                      "selected"
                                     ],
                                     "type": "string"
                                   },
@@ -11320,6 +11742,10 @@
                               ],
                               "type": "string"
                             },
+                            "allowedPresetIds": {
+                              "nullable": true,
+                              "type": "string"
+                            },
                             "bodyText": {
                               "nullable": true,
                               "type": "string"
@@ -11410,6 +11836,15 @@
                                 "pending_manager_approval",
                                 "approved",
                                 "rejected"
+                              ],
+                              "type": "string"
+                            },
+                            "sizePolicy": {
+                              "enum": [
+                                "legacy",
+                                "dynamic",
+                                "single",
+                                "selected"
                               ],
                               "type": "string"
                             },
@@ -12015,6 +12450,10 @@
                                     ],
                                     "type": "string"
                                   },
+                                  "allowedPresetIds": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
                                   "bodyText": {
                                     "nullable": true,
                                     "type": "string"
@@ -12105,6 +12544,15 @@
                                       "pending_manager_approval",
                                       "approved",
                                       "rejected"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "sizePolicy": {
+                                    "enum": [
+                                      "legacy",
+                                      "dynamic",
+                                      "single",
+                                      "selected"
                                     ],
                                     "type": "string"
                                   },
@@ -12566,6 +13014,10 @@
                               ],
                               "type": "string"
                             },
+                            "allowedPresetIds": {
+                              "nullable": true,
+                              "type": "string"
+                            },
                             "bodyText": {
                               "nullable": true,
                               "type": "string"
@@ -12656,6 +13108,15 @@
                                 "pending_manager_approval",
                                 "approved",
                                 "rejected"
+                              ],
+                              "type": "string"
+                            },
+                            "sizePolicy": {
+                              "enum": [
+                                "legacy",
+                                "dynamic",
+                                "single",
+                                "selected"
                               ],
                               "type": "string"
                             },
@@ -13057,6 +13518,10 @@
                                     ],
                                     "type": "string"
                                   },
+                                  "allowedPresetIds": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
                                   "bodyText": {
                                     "nullable": true,
                                     "type": "string"
@@ -13147,6 +13612,15 @@
                                       "pending_manager_approval",
                                       "approved",
                                       "rejected"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "sizePolicy": {
+                                    "enum": [
+                                      "legacy",
+                                      "dynamic",
+                                      "single",
+                                      "selected"
                                     ],
                                     "type": "string"
                                   },
@@ -13608,6 +14082,10 @@
                               ],
                               "type": "string"
                             },
+                            "allowedPresetIds": {
+                              "nullable": true,
+                              "type": "string"
+                            },
                             "bodyText": {
                               "nullable": true,
                               "type": "string"
@@ -13698,6 +14176,15 @@
                                 "pending_manager_approval",
                                 "approved",
                                 "rejected"
+                              ],
+                              "type": "string"
+                            },
+                            "sizePolicy": {
+                              "enum": [
+                                "legacy",
+                                "dynamic",
+                                "single",
+                                "selected"
                               ],
                               "type": "string"
                             },
@@ -14014,6 +14501,10 @@
                         ],
                         "type": "string"
                       },
+                      "allowedPresetIds": {
+                        "nullable": true,
+                        "type": "string"
+                      },
                       "bodyText": {
                         "nullable": true,
                         "type": "string"
@@ -14104,6 +14595,15 @@
                           "pending_manager_approval",
                           "approved",
                           "rejected"
+                        ],
+                        "type": "string"
+                      },
+                      "sizePolicy": {
+                        "enum": [
+                          "legacy",
+                          "dynamic",
+                          "single",
+                          "selected"
                         ],
                         "type": "string"
                       },
@@ -14234,6 +14734,10 @@
                                     ],
                                     "type": "string"
                                   },
+                                  "allowedPresetIds": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
                                   "bodyText": {
                                     "nullable": true,
                                     "type": "string"
@@ -14324,6 +14828,15 @@
                                       "pending_manager_approval",
                                       "approved",
                                       "rejected"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "sizePolicy": {
+                                    "enum": [
+                                      "legacy",
+                                      "dynamic",
+                                      "single",
+                                      "selected"
                                     ],
                                     "type": "string"
                                   },
@@ -14785,6 +15298,10 @@
                               ],
                               "type": "string"
                             },
+                            "allowedPresetIds": {
+                              "nullable": true,
+                              "type": "string"
+                            },
                             "bodyText": {
                               "nullable": true,
                               "type": "string"
@@ -14875,6 +15392,15 @@
                                 "pending_manager_approval",
                                 "approved",
                                 "rejected"
+                              ],
+                              "type": "string"
+                            },
+                            "sizePolicy": {
+                              "enum": [
+                                "legacy",
+                                "dynamic",
+                                "single",
+                                "selected"
                               ],
                               "type": "string"
                             },
@@ -15234,6 +15760,10 @@
                               ],
                               "type": "string"
                             },
+                            "allowedPresetIds": {
+                              "nullable": true,
+                              "type": "string"
+                            },
                             "bodyText": {
                               "nullable": true,
                               "type": "string"
@@ -15324,6 +15854,15 @@
                                 "pending_manager_approval",
                                 "approved",
                                 "rejected"
+                              ],
+                              "type": "string"
+                            },
+                            "sizePolicy": {
+                              "enum": [
+                                "legacy",
+                                "dynamic",
+                                "single",
+                                "selected"
                               ],
                               "type": "string"
                             },
@@ -15746,6 +16285,10 @@
                         ],
                         "type": "string"
                       },
+                      "allowedPresetIds": {
+                        "nullable": true,
+                        "type": "string"
+                      },
                       "bodyText": {
                         "nullable": true,
                         "type": "string"
@@ -15836,6 +16379,15 @@
                           "pending_manager_approval",
                           "approved",
                           "rejected"
+                        ],
+                        "type": "string"
+                      },
+                      "sizePolicy": {
+                        "enum": [
+                          "legacy",
+                          "dynamic",
+                          "single",
+                          "selected"
                         ],
                         "type": "string"
                       },
@@ -15957,6 +16509,10 @@
                                         ],
                                         "type": "string"
                                       },
+                                      "allowedPresetIds": {
+                                        "nullable": true,
+                                        "type": "string"
+                                      },
                                       "bodyText": {
                                         "nullable": true,
                                         "type": "string"
@@ -16047,6 +16603,15 @@
                                           "pending_manager_approval",
                                           "approved",
                                           "rejected"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "sizePolicy": {
+                                        "enum": [
+                                          "legacy",
+                                          "dynamic",
+                                          "single",
+                                          "selected"
                                         ],
                                         "type": "string"
                                       },
@@ -16508,6 +17073,10 @@
                                   ],
                                   "type": "string"
                                 },
+                                "allowedPresetIds": {
+                                  "nullable": true,
+                                  "type": "string"
+                                },
                                 "bodyText": {
                                   "nullable": true,
                                   "type": "string"
@@ -16598,6 +17167,15 @@
                                     "pending_manager_approval",
                                     "approved",
                                     "rejected"
+                                  ],
+                                  "type": "string"
+                                },
+                                "sizePolicy": {
+                                  "enum": [
+                                    "legacy",
+                                    "dynamic",
+                                    "single",
+                                    "selected"
                                   ],
                                   "type": "string"
                                 },
@@ -17014,6 +17592,10 @@
                                     ],
                                     "type": "string"
                                   },
+                                  "allowedPresetIds": {
+                                    "nullable": true,
+                                    "type": "string"
+                                  },
                                   "bodyText": {
                                     "nullable": true,
                                     "type": "string"
@@ -17104,6 +17686,15 @@
                                       "pending_manager_approval",
                                       "approved",
                                       "rejected"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "sizePolicy": {
+                                    "enum": [
+                                      "legacy",
+                                      "dynamic",
+                                      "single",
+                                      "selected"
                                     ],
                                     "type": "string"
                                   },
@@ -17565,6 +18156,10 @@
                               ],
                               "type": "string"
                             },
+                            "allowedPresetIds": {
+                              "nullable": true,
+                              "type": "string"
+                            },
                             "bodyText": {
                               "nullable": true,
                               "type": "string"
@@ -17655,6 +18250,15 @@
                                 "pending_manager_approval",
                                 "approved",
                                 "rejected"
+                              ],
+                              "type": "string"
+                            },
+                            "sizePolicy": {
+                              "enum": [
+                                "legacy",
+                                "dynamic",
+                                "single",
+                                "selected"
                               ],
                               "type": "string"
                             },
@@ -17988,6 +18592,10 @@
                                         ],
                                         "type": "string"
                                       },
+                                      "allowedPresetIds": {
+                                        "nullable": true,
+                                        "type": "string"
+                                      },
                                       "bodyText": {
                                         "nullable": true,
                                         "type": "string"
@@ -18078,6 +18686,15 @@
                                           "pending_manager_approval",
                                           "approved",
                                           "rejected"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "sizePolicy": {
+                                        "enum": [
+                                          "legacy",
+                                          "dynamic",
+                                          "single",
+                                          "selected"
                                         ],
                                         "type": "string"
                                       },
@@ -18539,6 +19156,10 @@
                                   ],
                                   "type": "string"
                                 },
+                                "allowedPresetIds": {
+                                  "nullable": true,
+                                  "type": "string"
+                                },
                                 "bodyText": {
                                   "nullable": true,
                                   "type": "string"
@@ -18629,6 +19250,15 @@
                                     "pending_manager_approval",
                                     "approved",
                                     "rejected"
+                                  ],
+                                  "type": "string"
+                                },
+                                "sizePolicy": {
+                                  "enum": [
+                                    "legacy",
+                                    "dynamic",
+                                    "single",
+                                    "selected"
                                   ],
                                   "type": "string"
                                 },
@@ -18946,6 +19576,10 @@
                               ],
                               "type": "string"
                             },
+                            "allowedPresetIds": {
+                              "nullable": true,
+                              "type": "string"
+                            },
                             "bodyText": {
                               "nullable": true,
                               "type": "string"
@@ -19039,6 +19673,15 @@
                               ],
                               "type": "string"
                             },
+                            "sizePolicy": {
+                              "enum": [
+                                "legacy",
+                                "dynamic",
+                                "single",
+                                "selected"
+                              ],
+                              "type": "string"
+                            },
                             "status": {
                               "type": "string"
                             },
@@ -19086,6 +19729,10 @@
                                       "image",
                                       "video"
                                     ],
+                                    "type": "string"
+                                  },
+                                  "allowedPresetIds": {
+                                    "nullable": true,
                                     "type": "string"
                                   },
                                   "bodyText": {
@@ -19178,6 +19825,15 @@
                                       "pending_manager_approval",
                                       "approved",
                                       "rejected"
+                                    ],
+                                    "type": "string"
+                                  },
+                                  "sizePolicy": {
+                                    "enum": [
+                                      "legacy",
+                                      "dynamic",
+                                      "single",
+                                      "selected"
                                     ],
                                     "type": "string"
                                   },
@@ -19910,6 +20566,14 @@
             "nullable": true,
             "type": "string"
           },
+          "allowedPresetIds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 9,
+            "nullable": true,
+            "type": "array"
+          },
           "bodyText": {
             "maxLength": 2000,
             "nullable": true,
@@ -19959,6 +20623,16 @@
           },
           "requestId": {
             "format": "uuid",
+            "type": "string"
+          },
+          "sizePolicy": {
+            "enum": [
+              "legacy",
+              "dynamic",
+              "single",
+              "selected"
+            ],
+            "nullable": true,
             "type": "string"
           },
           "videoUrl": {
@@ -20228,6 +20902,12 @@
                         ],
                         "type": "string"
                       },
+                      "allowedPresetIds": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
                       "bodyText": {
                         "type": "string"
                       },
@@ -20246,6 +20926,15 @@
                       },
                       "mediaAssetId": {
                         "format": "uuid",
+                        "type": "string"
+                      },
+                      "sizePolicy": {
+                        "enum": [
+                          "legacy",
+                          "dynamic",
+                          "single",
+                          "selected"
+                        ],
                         "type": "string"
                       }
                     },
@@ -31805,6 +32494,144 @@
         "x-ads-roles": []
       }
     },
+    "/api/v1/publisher/slots/managed": {
+      "post": {
+        "operationId": "PublisherInventory_managedCreateSlot",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedCreateSlotDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_createSlotResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      }
+    },
     "/api/v1/publisher/slots/{slotId}": {
       "patch": {
         "operationId": "PublisherInventory_updateSlot",
@@ -32235,6 +33062,298 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PublisherInventory_getSlotEmbedResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      }
+    },
+    "/api/v1/publisher/slots/{slotId}/managed": {
+      "delete": {
+        "operationId": "PublisherInventory_managedRetireSlot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slotId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedSlotControlDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_createSlotResponse"
+                }
+              }
+            },
+            "description": ""
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdsApiError"
+                }
+              }
+            },
+            "description": "Sanitized API error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "",
+        "tags": [
+          "Publisher Inventory"
+        ],
+        "x-ads-roles": []
+      },
+      "patch": {
+        "operationId": "PublisherInventory_managedUpdateSlot",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slotId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManagedUpdateSlotDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublisherInventory_createSlotResponse"
                 }
               }
             },

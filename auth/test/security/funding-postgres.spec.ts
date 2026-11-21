@@ -1,4 +1,5 @@
 import { VerificationService } from '../../../api/ads-api/src/modules/verification/verification.service';
+import {AdminHouseAdsController} from '../../../api/ads-api/src/modules/delivery/admin-house-ads.controller';
 import { AuthService } from '../../src/modules/auth/auth.service';
 import { applyEventCashRebates, restoreOverturnedEventCash } from '../../../api/ads-api/src/event-cash-rebate-reconciliation';
 import { CronJobRegistry, CronLeaseLostError } from '../../../api/ads-api/src/modules/scheduling/cron-job-registry';
@@ -1146,6 +1147,67 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect((await pool.query('select preferred_locale from users where id=$1',[owner])).rows[0].preferred_locale).toBe(locale);
       expect((await pool.query('select preferred_locale from users where id=$1',[other])).rows[0].preferred_locale).toBe('en');
     }
+  });
+
+  test('PLAN0130 inactive House registration uses owned ready assets and creates no ad or financial events',async()=>{
+    const manifest=JSON.parse(readFileSync(resolve(__dirname,'../../../../frontend/assets/house-ads/plan0130/manifest.json'),'utf8'));
+    const admin=new AdminHouseAdsController(db),first=manifest.assets[0];
+    await expect(admin.createHouseCreative({title:'Foreign asset',headline:'',bodyText:'',imageAssetId:randomUUID(),imageUrl:'https://ads.crimfig.com/api/v1/uploads/media/missing',isActive:false},{user:{sub:owner}})).rejects.toThrow('ready asset');
+    expect((await pool.query('select count(*)::int n from ads_house_creatives')).rows[0].n).toBe(0);
+    for(const sample of manifest.assets){
+      const [asset]=await db.insert(schema.adsMediaAssets).values({ownerId:owner,storageKey:sample.sha256,cdnUrl:`/api/v1/uploads/media/${sample.sha256}`,mimeType:sample.mime,bytes:sample.bytes,width:sample.width,height:sample.height,sha256:sample.sha256,status:'ready'}).returning();
+      const created=await admin.createHouseCreative({title:`PLAN0130 ${sample.family}/${sample.preset}`,headline:'',bodyText:'',imageAssetId:asset.id,imageUrl:`https://ads.crimfig.com${asset.cdnUrl}`,targetPreset:sample.preset,width:sample.width,height:sample.height,isActive:false},{user:{sub:owner}});
+      expect(created.data).toMatchObject({isActive:false,targetPreset:sample.preset,width:sample.width,height:sample.height,imageAssetId:asset.id});
+    }
+    expect((await pool.query('select count(*)::int n from ads_house_creatives')).rows[0].n).toBe(27);
+    for(const table of ['ads_serves','ads_interactions','billing_transactions','ads_settlement_claims'])expect((await pool.query(`select count(*)::int n from ${table}`)).rows[0].n).toBe(0);
+  });
+
+  test('PLAN0129 managed slot HTTP enforces guards, DTOs and immutable replay receipts',async()=>{
+    const [promoter]=await db.insert(schema.adsPromoters).values({userId:owner,type:'WEBSITE'}).returning();
+    const [site]=await db.insert(schema.adsPromoterWebsites).values({promoterId:promoter.id,url:'https://managed.example.test',domain:'managed.example.test',verificationToken:randomUUID(),verificationMethod:'dns_txt',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'approved'}).returning();
+    @Module({controllers:[PublisherInventoryController],providers:[{provide:PublisherSlotsService,useValue:new PublisherSlotsService(db)},{provide:PromotersService,useValue:new PromotersService(db)},{provide:SetupChecksService,useValue:{}}]})class ManagedSlotFixture{}
+    const jwt=new JwtService({secret:'plan0129-local-http-only-key'}),grants={rolesFor:()=>[]} as unknown as AdsStaffGrants;
+    const app=await NestFactory.create(ManagedSlotFixture,{logger:false});app.setGlobalPrefix('api/v1');app.useGlobalPipes(new ValidationPipe({transform:true,whitelist:true}));app.useGlobalGuards(new AdsAccessGuard(jwt,new Reflector(),db,grants));await app.listen(0,'127.0.0.1');
+    const request=async(path:string,method:string,body:any,actor=owner)=>{const response=await fetch((await app.getUrl())+'/api/v1/publisher/'+path,{method,headers:{'Content-Type':'application/json',...(actor?{Authorization:'Bearer '+jwt.sign({sub:actor,email:'fixture@example.test',type:'access'},{expiresIn:'2m'})}:{})},body:JSON.stringify(body),signal:AbortSignal.timeout(10000)});return {status:response.status,body:await response.json() as any};};
+    const input={requestId:randomUUID(),websiteId:site.id,name:'HTTP slot',slotType:'network',format:'general',allowedAdTypes:['image'],allowedPresetIds:[]};
+    try{
+      expect((await request('slots/managed','POST',input,'')).status).toBe(401);
+      expect((await request('slots/managed','POST',{...input,requestId:'invalid'})).status).toBe(400);
+      const created=await request('slots/managed','POST',input);expect(created.status).toBe(201);
+      const replay=await request('slots/managed','POST',input);expect(replay.body.data.id).toBe(created.body.data.id);
+      const slot=created.body.data,path=`slots/${slot.id}/managed`,control={requestId:randomUUID(),expectedUpdatedAt:slot.updatedAt};
+      expect((await request(path,'PATCH',{...control,expectedUpdatedAt:'2000-01-01T00:00:00Z',name:'Stale'})).status).toBe(409);
+      const updated=await request(path,'PATCH',{...control,name:'Updated HTTP slot'});expect(updated.status).toBe(200);
+      const retired=await request(path,'DELETE',{requestId:randomUUID(),expectedUpdatedAt:updated.body.data.updatedAt});expect(retired.status).toBe(200);expect(retired.body.data.retiredAt).toBeTruthy();
+    }finally{await app.close();}
+  });
+
+  test('PLAN0129 managed slots preserve ownership, retry identity, stale-edit isolation and retired history',async()=>{
+    const f=await settlementFixture(100_000_000n,'cpc',false);
+    const [site]=await db.insert(schema.adsPromoterWebsites).values({promoterId:f.promoter.id,url:'https://slots.example.test',domain:'slots.example.test',verificationToken:randomUUID(),verificationMethod:'dns_txt',verificationStatus:'verified',verificationExpiresAt:new Date(Date.now()+86400000),policyStatus:'approved'}).returning();
+    const service=new PublisherSlotsService(db),create={requestId:randomUUID(),websiteId:site.id,name:'Article placement',slotType:'network',format:'general',allowedPresetIds:[],allowedAdTypes:['image'],responsive:true};
+    await expect(service.managedMutation(randomUUID(),'create',undefined,create)).rejects.toThrow('unauthorized');
+    await expect(service.managedMutation(f.promoter.id,'create',undefined,{...create,name:'   '})).rejects.toThrow('slot name');
+    await expect(service.managedMutation(f.promoter.id,'create',undefined,{...create,allowedPresetIds:['unapproved']})).rejects.toThrow('approved image sizes');
+    const [first,replayed]=await Promise.all([service.managedMutation(f.promoter.id,'create',undefined,create),service.managedMutation(f.promoter.id,'create',undefined,create)]);
+    expect(first.id).toBe(replayed.id);expect(first.presetPolicy).toBe('auto_any_approved');expect(first.allowedPresetIds).toBeNull();
+    expect((await pool.query('select count(*)::int n from adstation_slots where website_id=$1',[site.id])).rows[0].n).toBe(1);
+    await expect(service.managedMutation(f.promoter.id,'create',undefined,{...create,name:'Changed request'})).rejects.toThrow('different changes');
+    const edit={requestId:randomUUID(),expectedUpdatedAt:new Date(first.updatedAt).toISOString(),name:'Article updated'};
+    await expect(service.managedMutation(randomUUID(),'update',first.id,edit)).rejects.toThrow('unauthorized');
+    await expect(service.managedMutation(f.promoter.id,'update',first.id,{...edit,expectedUpdatedAt:'2000-01-01T00:00:00Z'})).rejects.toThrow('Reload');
+    const results=await Promise.allSettled([service.managedMutation(f.promoter.id,'update',first.id,edit),service.managedMutation(f.promoter.id,'update',first.id,{...edit,requestId:randomUUID(),name:'Competing edit'})]);
+    expect(results.filter(item=>item.status==='fulfilled')).toHaveLength(1);expect(results.filter(item=>item.status==='rejected')).toHaveLength(1);
+    const [current]=await db.select().from(schema.adstationSlots).where(eq(schema.adstationSlots.id,first.id));
+    const retire={requestId:randomUUID(),expectedUpdatedAt:new Date(current.updatedAt).toISOString()};
+    const retired=await service.managedMutation(f.promoter.id,'retire',first.id,retire);
+    expect(retired.retiredAt).toBeTruthy();expect(retired.lifecycleStatus).toBe('disabled');expect(retired.isActive).toBe(false);
+    expect((await service.managedMutation(f.promoter.id,'retire',first.id,retire)).id).toBe(first.id);
+    await expect(service.updateSlot(f.promoter.id,first.id,{lifecycleStatus:'active'})).rejects.toThrow('Retired');
+    expect((await db.select().from(schema.adsSupplyStateHistory).where(eq(schema.adsSupplyStateHistory.entityId,first.id))).length).toBeGreaterThan(2);
+    expect((await pool.query('select count(*)::int n from adstation_slots where id=$1',[first.id])).rows[0].n).toBe(1);
+    const next=await service.managedMutation(f.promoter.id,'create',undefined,{...create,requestId:randomUUID()});expect(next.slotTagId).not.toBe(first.slotTagId);
   });
 
   test('PLAN0124 fresh House clicks stay non-payable; expired clicks only navigate',async()=>{

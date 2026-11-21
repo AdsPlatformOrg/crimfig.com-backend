@@ -159,6 +159,8 @@ export class CreateCampaignDto {
 }
 
 export class AddCreativeDto extends MutationDto {
+  @IsOptional() @IsIn(['legacy','dynamic','single','selected']) sizePolicy?:'legacy'|'dynamic'|'single'|'selected';
+  @IsOptional() @IsArray() @ArrayMaxSize(9) @IsString({each:true}) allowedPresetIds?:string[];
   @IsOptional()
   @IsUUID()
   adStackId?: string;
@@ -210,6 +212,8 @@ export class AddCreativeDto extends MutationDto {
 }
 
 export class ReplaceCreativeDto extends MutationDto {
+  @IsOptional() @IsIn(['legacy','dynamic','single','selected']) sizePolicy?:'legacy'|'dynamic'|'single'|'selected';
+  @IsOptional() @IsArray() @ArrayMaxSize(9) @IsString({each:true}) allowedPresetIds?:string[];
   @IsOptional()
   @IsUUID()
   adStackId?: string;
@@ -586,6 +590,7 @@ export class CampaignsController {
         adFormat: dto.adFormat,
         mediaFormat: dto.mediaFormat,
         mediaAssetId: dto.mediaAssetId,
+        sizePolicy:dto.sizePolicy,allowedPresetIds:dto.allowedPresetIds,
       }, dto),
     };
   }

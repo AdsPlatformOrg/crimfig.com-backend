@@ -40,7 +40,7 @@ const imageSpecs = optionalObject({ width: nullable(num()), height: nullable(num
 const creative = object({ id: str(), campaignId: str(), adStackId: nullable(str()), adType: enumeration('text', 'image', 'video'),
   headline: nullable(str()), bodyText: nullable(str()), ctaText: nullable(str()), destinationUrl: str(),
   adFormat: format, mediaFormat: nullable(enumeration('image', 'gif', 'video')), imageUrl: nullable(str()), videoUrl: nullable(str()),
-  posterUrl: nullable(str()), mediaAssetId: nullable(str()), reviewStatus: enumeration('pending', 'pending_manager_approval', 'approved', 'rejected'),
+  posterUrl: nullable(str()), mediaAssetId: nullable(str()),sizePolicy:enumeration('legacy','dynamic','single','selected'),allowedPresetIds:nullable(str()), reviewStatus: enumeration('pending', 'pending_manager_approval', 'approved', 'rejected'),
   rejectionReason: nullable(str()), imageSpecs: nullable(imageSpecs), status: str() }, ['id', 'campaignId', 'destinationUrl']);
 const stackSettings = optionalObject({ geoMode: enumeration('inherit', 'global', 'targeted'), locations: array(json()),
   targetDevices: array(str()), targetHours: array(num()), schedule: scheduleSchema });
@@ -95,7 +95,7 @@ const publisherSlot = object({ id: str(), websiteId: str(), slotTagId: str(), na
 const responses: Record<string, Record<string, Schema>> = {
   PublisherInventoryController: {
     createSetupCheck: json(), getSetupCheck: json(), getSlots: array(publisherSlot),
-    createSlot: publisherSlot, updateSlot: publisherSlot,
+    createSlot: publisherSlot, updateSlot: publisherSlot, managedCreateSlot:publisherSlot,managedUpdateSlot:publisherSlot,managedRetireSlot:publisherSlot,
     getSlotEmbed: object({ sdkSnippet: str(), slotSnippet: str(), htmlSnippet: str(), nextJsSnippet: str() }),
     checkSlotInstallation: json(), getSlotDiagnostics: json(),
   },
@@ -190,7 +190,7 @@ export function documentValidatedDto(dto: AnyConstructor) {
     }
     if (dto.name==='SaveCampaignDto' && property==='stacks') schema=array(object({
       id:{type:'string',format:'uuid'},name:str(),geoMode:enumeration('inherit','global','targeted'),locations:array(str()),targetDevices:array(str()),schedule:scheduleSchema,
-      ads:array(object({id:{type:'string',format:'uuid'},adType:enumeration('text','image','video'),headline:str(),bodyText:str(),ctaText:str(),destinationUrl:str(),adFormat:format,mediaAssetId:{type:'string',format:'uuid'}},['adType','destinationUrl']))
+      ads:array(object({id:{type:'string',format:'uuid'},adType:enumeration('text','image','video'),headline:str(),bodyText:str(),ctaText:str(),destinationUrl:str(),adFormat:format,mediaAssetId:{type:'string',format:'uuid'},sizePolicy:enumeration('legacy','dynamic','single','selected'),allowedPresetIds:array(str())},['adType','destinationUrl']))
     },['name','ads']));
     for (const [rule, key] of [['min', 'minimum'], ['max', 'maximum'], ['minLength', 'minLength'], ['maxLength', 'maxLength'], ['arrayMaxSize', 'maxItems']] as const) {
       const meta = rules.find(m => m.name === rule);

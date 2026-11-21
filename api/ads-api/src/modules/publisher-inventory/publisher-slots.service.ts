@@ -1,7 +1,7 @@
 import { availablePublisherAdTypes } from '../../../../billing-api/src/modules/ecosystem/creative-slot-policy';
 import { readinessReport, websiteReadiness, installationReadiness } from '../delivery/readiness-report';
 import { slotDeliveryDiagnostics } from '../delivery/paid-delivery-policy';
-import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -30,8 +30,8 @@ export interface UpdateAdstationSlotDto {
   format?: string;
   slotDeliveryPreference?: string;
   lifecycleStatus?: 'draft' | 'testing' | 'active' | 'paused' | 'disabled';
-  width?: number;
-  height?: number;
+  width?: number|null;
+  height?: number|null;
   responsive?: boolean;
   allowedAdTypes?: string[];
   allowedPresetIds?: string[];
@@ -57,6 +57,50 @@ function slotPresetPolicy(ids?: string[]) {
 export class PublisherSlotsService {
   constructor(@Inject(DATABASE_TOKEN) protected readonly db: NodePgDatabase<typeof schema>) {}
 
+  /** Managed pages use immutable audit receipts for retry-safe, owner-bound mutations. */
+  async managedMutation(promoterId:string,operation:'create'|'update'|'retire',slotId:string|undefined,input:any) {
+    const {requestId,expectedUpdatedAt,...payload}=input;
+    if(typeof requestId!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId))throw new BadRequestException('A valid request ID is required.');
+    if(payload.name!==undefined&&(typeof payload.name!=='string'||!payload.name.trim()||payload.name.trim().length>150))throw new BadRequestException('Enter a slot name of 1 to 150 characters.');
+    const canonical=(value:any):any=>Array.isArray(value)?value.map(canonical):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,canonical(value[key])])):value;
+    const fingerprint=crypto.createHash('sha256').update(JSON.stringify(canonical({promoterId,operation,slotId:slotId??null,payload,expectedUpdatedAt:expectedUpdatedAt??null}))).digest('hex');
+    return this.db.transaction(async tx=>{
+      await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`slot-request:${requestId}`},0))`);
+      const [receipt]=await tx.select().from(adsSupplyStateHistory).where(and(eq(adsSupplyStateHistory.requestId,requestId),eq(adsSupplyStateHistory.dimension,'slot_mutation'))).limit(1);
+      if(receipt){let saved:any;try{saved=JSON.parse(receipt.reason??'');}catch{throw new ConflictException('Mutation receipt is unavailable.');}
+        if(saved.promoterId!==promoterId||saved.fingerprint!==fingerprint)throw new ConflictException('Request ID was already used for different changes.');
+        return saved.result;
+      }
+      const service=new PublisherSlotsService(tx as any);let result:any;
+      if(operation==='create')result=await service.createSlot(promoterId,payload);
+      else{
+        const [scope]=await tx.select({websiteId:adstationSlots.websiteId}).from(adstationSlots).where(and(eq(adstationSlots.id,slotId!),eq(adstationSlots.promoterId,promoterId))).limit(1);
+        if(!scope)throw new NotFoundException('Ad slot not found or unauthorized');
+        if(operation==='retire')await tx.select({id:adsPromoterWebsites.id}).from(adsPromoterWebsites).where(eq(adsPromoterWebsites.id,scope.websiteId)).for('update').limit(1);
+        const [slot]=await tx.select().from(adstationSlots).where(and(eq(adstationSlots.id,slotId!),eq(adstationSlots.promoterId,promoterId))).for('update').limit(1);
+        if(!slot)throw new NotFoundException('Ad slot not found or unauthorized');
+        if(slot.retiredAt)throw new ConflictException('Retired slots cannot be changed or resumed.');
+        if(!expectedUpdatedAt||!Number.isFinite(Date.parse(expectedUpdatedAt))||new Date(slot.updatedAt).getTime()!==Date.parse(expectedUpdatedAt))throw new ConflictException('This slot changed. Reload before saving.');
+        if(operation==='retire'){
+          const commitments=await tx.select({id:schema.adstationDirectCampaigns.id}).from(schema.adstationDirectCampaigns).where(and(eq(schema.adstationDirectCampaigns.slotId,slot.id),eq(schema.adstationDirectCampaigns.status,'active'))).limit(1);
+          if(commitments.length)throw new ConflictException('Close active direct commitments before retiring this slot.');
+          if(['network','consideration','hybrid'].includes(slot.slotType)){
+            const dependencies=await tx.select({id:schema.adstationDirectCampaigns.id}).from(schema.adstationDirectCampaigns).where(and(eq(schema.adstationDirectCampaigns.websiteId,slot.websiteId),eq(schema.adstationDirectCampaigns.status,'active'))).limit(1);
+            const siblings=await tx.select().from(adstationSlots).where(eq(adstationSlots.websiteId,slot.websiteId));
+            if(dependencies.length&&!siblings.some(item=>item.id!==slot.id&&!item.retiredAt&&item.isActive&&item.lifecycleStatus==='active'&&['network','consideration','hybrid'].includes(item.slotType)&&(item.installationStatus==='verified'||item.isConsiderationVerified)))throw new ConflictException('Keep an eligible network slot while direct commitments are active.');
+          }
+          result=await service.updateSlot(promoterId,slot.id,{lifecycleStatus:'disabled'});
+          const [retired]=await tx.update(adstationSlots).set({retiredAt:new Date()}).where(eq(adstationSlots.id,slot.id)).returning();result=retired;
+        }else result=await service.updateSlot(promoterId,slot.id,payload);
+      }
+      const [owner]=await tx.select({userId:schema.adsPromoters.userId}).from(schema.adsPromoters).where(eq(schema.adsPromoters.id,promoterId)).limit(1);
+      await tx.insert(adsSupplyStateHistory).values({entityType:'slot',entityId:result.id,dimension:'slot_mutation',toState:'applied',actorId:owner?.userId,actorRole:'promoter',requestId,
+        reason:JSON.stringify({version:1,promoterId,operation,fingerprint,result})});
+      return result;
+    });
+  }
+
   /**
    * List slots for a promoter website
    */
@@ -72,6 +116,7 @@ export class PublisherSlotsService {
       )
       .limit(1);
 
+    if(!website)throw new NotFoundException('Promoter website not found or unauthorized');
     const slots = await this.db
       .select()
       .from(adstationSlots)
@@ -223,6 +268,7 @@ export class PublisherSlotsService {
         throw new NotFoundException('AdStation slot not found or unauthorized');
       }
 
+      if (slot.retiredAt) throw new ConflictException('Retired slots cannot be changed or resumed.');
       if (slot.lifecycleStatus === 'suspended') {
         throw new ForbiddenException(
           'This ad slot is suspended by compliance moderation and cannot be modified or resumed without admin reinstatement.',
@@ -264,6 +310,10 @@ export class PublisherSlotsService {
           throw new BadRequestException('Invalid slot lifecycle status');
         }
 
+        if(dto.lifecycleStatus==='active'&&slot.slotType!=='direct'){
+          const [website]=await tx.select().from(adsPromoterWebsites).where(eq(adsPromoterWebsites.id,slot.websiteId)).for('share').limit(1);
+          if(!website||!website.isActive||website.isSuspended||website.verificationStatus!=='verified'||!website.verificationExpiresAt||website.verificationExpiresAt<=new Date()||website.policyStatus!=='approved')throw new ForbiddenException('Reverify and obtain website policy approval before resuming this slot.');
+        }
         if (slot.slotType === 'direct') {
           if (dto.lifecycleStatus === 'active') {
             if (hasMaterialEdit) {
@@ -341,7 +391,7 @@ export class PublisherSlotsService {
           manualReviewStatus: nextManualReviewStatus,
           approvedRevision: nextApprovedRevision,
           policyRevision: (slot.policyRevision || 1) + (hasMaterialEdit ? 1 : 0),
-          updatedAt: new Date(),
+          updatedAt: new Date(Math.max(Date.now(),new Date(slot.updatedAt).getTime()+1)),
         })
         .where(eq(adstationSlots.id, slotId))
         .returning();
@@ -468,6 +518,7 @@ export class PublisherSlotsService {
       throw new NotFoundException('AdStation slot not found or unauthorized');
     }
 
+    if(slot.retiredAt)throw new ConflictException('Retired slots cannot be installation-certified.');
     const [website] = await tx
       .select()
       .from(adsPromoterWebsites)

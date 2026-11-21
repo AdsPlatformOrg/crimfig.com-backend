@@ -62,6 +62,8 @@ export const adsCreatives = pgTable(
     mediaFormat: creativeMediaFormatEnum('media_format').notNull().default('image'),
     adFormat: adFormatEnum('ad_format').notNull().default('card'),
     mediaAssetId: uuid('media_asset_id'),
+    sizePolicy: varchar('size_policy',{length:16}).notNull().default('legacy'),
+    allowedPresetIds: text('allowed_preset_ids'),
     imageUrl: text('image_url'),
     videoUrl: text('video_url'),
     posterUrl: text('poster_url'),
