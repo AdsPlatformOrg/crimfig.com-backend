@@ -409,6 +409,38 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     expect((await pool.query('select id, slot_tag_id from adstation_slots order by id')).rows).toEqual(beforeSlots.rows);
   });
 
+  test('PLAN0131 owners can switch verification methods without losing good proof on alternate failure', async () => {
+    const [promoter] = await db.insert(schema.adsPromoters).values({ userId: owner, type: 'WEBSITE' }).returning();
+    const token = randomUUID();
+    const expiry = new Date(Date.now() + 86400000);
+    const [site] = await db.insert(schema.adsPromoterWebsites).values({
+      promoterId: promoter.id, domain: 'publisher.example.test', url: 'https://publisher.example.test',
+      verificationToken: token, verificationMethod: 'dns_txt', verificationStatus: 'verified',
+      verificationExpiresAt: expiry, policyStatus: 'approved',
+    }).returning();
+    const proofModule = require('../../../api/ads-api/src/modules/verification/website-proof');
+    const fetchProof = jest.spyOn(proofModule, 'fetchWebsiteProof').mockResolvedValueOnce('<head></head>')
+      .mockResolvedValue('<head><meta name="crimfig-site-verification" content="' + token + '"></head>');
+    try {
+      const service = new VerificationService(db);
+      await expect(service.verifyWebsite(promoter.id, site.id, 'other')).rejects.toThrow('Unsupported verification method');
+      await expect(service.verifyWebsite(randomUUID(), site.id, 'html_meta')).rejects.toThrow('Website not found');
+      expect(fetchProof).not.toHaveBeenCalled();
+      await expect(service.verifyWebsite(promoter.id, site.id, 'html_meta')).resolves.toMatchObject({
+        isVerified: false, status: 'verified',
+        website: { verificationMethod: 'dns_txt', verificationExpiresAt: expiry, policyStatus: 'approved' },
+      });
+      await expect(service.verifyWebsite(promoter.id, site.id, 'html_meta')).rejects.toThrow('attempted recently');
+      await pool.query('update ads_promoter_websites set last_verification_attempt_at = null where id = $1', [site.id]);
+      await expect(service.verifyWebsite(promoter.id, site.id, 'html_meta')).resolves.toMatchObject({
+        isVerified: true, status: 'verified',
+        website: { verificationMethod: 'html_file_and_meta_tag', policyStatus: 'approved' },
+      });
+    } finally {
+      fetchProof.mockRestore();
+    }
+  });
+
   test('PLAN0121 staff meta retest records ownership evidence without clearing deactivation', async () => {
     const [promoter] = await db.insert(schema.adsPromoters).values({ userId: owner, type: 'WEBSITE' }).returning();
     const token = randomUUID();

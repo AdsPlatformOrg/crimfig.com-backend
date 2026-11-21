@@ -170,6 +170,7 @@ try {
     ...(process.argv.includes('--plan0124') ? ['--testNamePattern','PLAN0124'] : []),
     ...(process.argv.includes('--plan0110') ? ['--testNamePattern','PLAN0110'] : []),
     ...(process.argv.includes('--plan0122') ? ['--testNamePattern','PLAN0122'] : []),
+    ...(process.argv.includes('--plan0131') ? ['--testNamePattern','PLAN0131|PLAN0121 staff meta'] : []),
     ...(process.argv.includes('--plan0121') ? ['--testNamePattern','PLAN0121|PLAN0080 website policy HTTP'] : []),
     ...(process.argv.includes('--plan0116-funding') ? ['--testNamePattern','PLAN0116 funding'] : []),
     ...(process.argv.includes('--plan0113') ? ['--testNamePattern','PLAN0113'] : []),

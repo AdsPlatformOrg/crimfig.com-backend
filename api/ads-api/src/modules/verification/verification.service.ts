@@ -20,8 +20,11 @@ export class VerificationService {
   /**
    * Verify domain ownership via DNS TXT record or HTML meta tag / file
    */
-  async verifyWebsite(promoterId: string, websiteId: string) {
-    return this.checkWebsite(promoterId, websiteId);
+  async verifyWebsite(promoterId: string, websiteId: string, method?: unknown) {
+    if (method !== undefined && method !== 'dns_txt' && method !== 'html_meta') {
+      throw new BadRequestException('Unsupported verification method');
+    }
+    return this.checkWebsite(promoterId, websiteId, undefined, method);
   }
 
   async retestWebsite(websiteId: string, method: unknown, actorId: string) {
@@ -32,7 +35,7 @@ export class VerificationService {
     return this.checkWebsite(row.promoterId, websiteId, { method, actorId });
   }
 
-  private async checkWebsite(promoterId: string, websiteId: string, staff?: { method: 'dns_txt' | 'html_meta'; actorId: string }) {
+  private async checkWebsite(promoterId: string, websiteId: string, staff?: { method: 'dns_txt' | 'html_meta'; actorId: string }, ownerMethod?: 'dns_txt' | 'html_meta') {
     const [website] = await this.db
       .select()
       .from(adsPromoterWebsites)
@@ -56,7 +59,8 @@ export class VerificationService {
     }
 
     const token = website.verificationToken;
-    const method = staff ? (staff.method === 'dns_txt' ? 'dns_txt' : 'html_file_and_meta_tag') : website.verificationMethod;
+    const requestedMethod = staff?.method ?? ownerMethod;
+    const method = requestedMethod === 'html_meta' ? 'html_file_and_meta_tag' : requestedMethod ?? website.verificationMethod;
     let isVerified = false;
     let errorMessage: string | null = null;
 
@@ -101,14 +105,14 @@ export class VerificationService {
       if (current.lastVerificationAttemptAt?.getTime() !== website.lastVerificationAttemptAt?.getTime()) {
         throw new ConflictException('Another verification attempt finished. Reload and try again.');
       }
-      const preserveProof = Boolean(staff && !isVerified && current.verificationStatus === 'verified' &&
+      const preserveProof = Boolean((staff || (ownerMethod && method !== current.verificationMethod)) && !isVerified && current.verificationStatus === 'verified' &&
         current.verificationExpiresAt && current.verificationExpiresAt.getTime() > Date.now());
       // Ownership proof cannot erase a concurrent staff rejection or suspension.
       const nextPolicyStatus=isVerified&&current.policyStatus==='unverified'?'testing':current.policyStatus;
       const now=new Date();
       const [saved]=await tx.update(adsPromoterWebsites).set({
         verificationStatus:isVerified?'verified':preserveProof?'verified':'failed',verifiedAt:isVerified?now:preserveProof?current.verifiedAt:null,
-        ...(staff && isVerified ? { verificationMethod: method } : {}),
+        ...(requestedMethod && isVerified ? { verificationMethod: method } : {}),
         verificationExpiresAt:isVerified?new Date(now.getTime()+30*86400000):preserveProof?current.verificationExpiresAt:null,
         policyStatus:nextPolicyStatus,lastVerificationAttemptAt:now,verificationErrorMessage:errorMessage,
         verificationFailures:isVerified?0:(current.verificationFailures||0)+1,updatedAt:now,
