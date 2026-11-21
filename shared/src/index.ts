@@ -122,3 +122,10 @@ export * from './financial-security/provider-broker';
 export * from './monitoring/request-diagnostics';
 
 export * from './config/public-origins';
+export {
+  isApiDocsEnabled,
+  resolveApiEnvironment,
+  registerApiWelcomeRoute,
+  applyOpenApiAuthRequirements,
+} from './http/api-surface';
+export type { ApiWelcomeOptions, OpenApiAuthOptions } from './http/api-surface';

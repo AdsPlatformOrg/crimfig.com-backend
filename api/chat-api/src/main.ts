@@ -1,4 +1,9 @@
-import { dashboardOrigins } from '@crimfig/shared';
+import {
+  dashboardOrigins,
+  isApiDocsEnabled,
+  registerApiWelcomeRoute,
+  applyOpenApiAuthRequirements,
+} from '@crimfig/shared';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -38,19 +43,34 @@ async function bootstrap() {
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.setGlobalPrefix('api');
 
-  if (process.env.NODE_ENV !== 'production') {
-    const document = SwaggerModule.createDocument(
+  const docsEnabled = isApiDocsEnabled(process.env.NODE_ENV === 'production');
+  if (docsEnabled) {
+    const document = applyOpenApiAuthRequirements(
       app,
-      new DocumentBuilder()
-        .setTitle('CrimFig Chat API')
-        .setDescription('Realtime WebSockets, Presence & Messaging Microservice')
-        .setVersion('1.0')
-        .addBearerAuth()
-        .build(),
+      SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder()
+          .setTitle('CrimFig Chat API')
+          .setDescription('Realtime WebSockets, Presence & Messaging Microservice')
+          .setVersion('1.0')
+          .addBearerAuth()
+          .build(),
+      ),
+      { globalPrefix: 'api', defaultVersion: '1', defaultRequireBearerAuth: false },
     );
-    SwaggerModule.setup('api/docs', app, document);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
     logger.log(`📖 Chat Swagger docs: http://localhost:${process.env.PORT || 3003}/api/docs`);
   }
+
+  registerApiWelcomeRoute(app, {
+    service: 'CrimFig Chat API',
+    code: 'chat-api',
+    description: 'Realtime WebSockets, Presence & Messaging Microservice',
+    version: '1.0',
+    docsEnabled,
+  });
 
   const port = process.env.PORT || 3003;
   await app.listen(port);

@@ -1,4 +1,9 @@
-import { dashboardOrigins } from '@crimfig/shared';
+import {
+  dashboardOrigins,
+  isApiDocsEnabled,
+  registerApiWelcomeRoute,
+  applyOpenApiAuthRequirements,
+} from '@crimfig/shared';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -26,17 +31,34 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
-  if (process.env.NODE_ENV !== 'production') {
-    const document = SwaggerModule.createDocument(
+  const docsEnabled = isApiDocsEnabled(process.env.NODE_ENV === 'production');
+  if (docsEnabled) {
+    const document = applyOpenApiAuthRequirements(
       app,
-      new DocumentBuilder()
-        .setTitle('CrimFig Notifications API')
-        .setDescription('Push, In-App & Event Notifications Dispatch Microservice')
-        .setVersion('1.0')
-        .build(),
+      SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder()
+          .setTitle('CrimFig Notifications API')
+          .setDescription('Push, In-App & Event Notifications Dispatch Microservice')
+          .setVersion('1.0')
+          .addBearerAuth()
+          .build(),
+      ),
+      { globalPrefix: 'api', defaultVersion: null, defaultRequireBearerAuth: false },
     );
-    SwaggerModule.setup('api/docs', app, document);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
   }
+
+  registerApiWelcomeRoute(app, {
+    service: 'CrimFig Notifications API',
+    code: 'notifications-api',
+    description: 'Push, In-App & Event Notifications Dispatch Microservice',
+    version: '1.0',
+    healthPath: '/api/health',
+    docsEnabled,
+  });
 
   const port = process.env.PORT || 3006;
   await app.listen(port);

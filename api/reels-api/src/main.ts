@@ -1,4 +1,9 @@
-import { dashboardOrigins } from '@crimfig/shared';
+import {
+  dashboardOrigins,
+  isApiDocsEnabled,
+  registerApiWelcomeRoute,
+  applyOpenApiAuthRequirements,
+} from '@crimfig/shared';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -26,17 +31,34 @@ async function bootstrap() {
 
   app.setGlobalPrefix('api');
 
-  if (process.env.NODE_ENV !== 'production') {
-    const document = SwaggerModule.createDocument(
+  const docsEnabled = isApiDocsEnabled(process.env.NODE_ENV === 'production');
+  if (docsEnabled) {
+    const document = applyOpenApiAuthRequirements(
       app,
-      new DocumentBuilder()
-        .setTitle('CrimFig Reels API')
-        .setDescription('Short-Form Video & Creator Feed Microservice')
-        .setVersion('1.0')
-        .build(),
+      SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder()
+          .setTitle('CrimFig Reels API')
+          .setDescription('Short-Form Video & Creator Feed Microservice')
+          .setVersion('1.0')
+          .addBearerAuth()
+          .build(),
+      ),
+      { globalPrefix: 'api', defaultVersion: null, defaultRequireBearerAuth: false },
     );
-    SwaggerModule.setup('api/docs', app, document);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
   }
+
+  registerApiWelcomeRoute(app, {
+    service: 'CrimFig Reels API',
+    code: 'reels-api',
+    description: 'Short-Form Video & Creator Feed Microservice',
+    version: '1.0',
+    healthPath: '/api/health',
+    docsEnabled,
+  });
 
   const port = process.env.PORT || 3007;
   await app.listen(port);

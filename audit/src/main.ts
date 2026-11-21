@@ -2,6 +2,11 @@ import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
+import {
+  isApiDocsEnabled,
+  registerApiWelcomeRoute,
+  applyOpenApiAuthRequirements,
+} from '@crimfig/shared';
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType, Logger, ShutdownSignal } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
@@ -45,19 +50,34 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
 
   // Swagger Documentation
-  if (!config.IS_PRODUCTION) {
-    const document = SwaggerModule.createDocument(
+  const docsEnabled = isApiDocsEnabled(config.IS_PRODUCTION);
+  if (docsEnabled) {
+    const document = applyOpenApiAuthRequirements(
       app,
-      new DocumentBuilder()
-        .setTitle('CrimFig Audit API')
-        .setDescription('Centralized Audit & Compliance Event Logging Microservice')
-        .setVersion('1.0')
-        .addBearerAuth()
-        .build(),
+      SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder()
+          .setTitle('CrimFig Audit API')
+          .setDescription('Centralized Audit & Compliance Event Logging Microservice')
+          .setVersion('1.0')
+          .addBearerAuth()
+          .build(),
+      ),
+      { globalPrefix: 'api', defaultVersion: '1', defaultRequireBearerAuth: false },
     );
-    SwaggerModule.setup('api/docs', app, document);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
     logger.log(`📖 Audit Swagger docs: http://localhost:${config.PORT}/api/docs`);
   }
+
+  registerApiWelcomeRoute(app, {
+    service: 'CrimFig Audit API',
+    code: 'audit-api',
+    description: 'Centralized Audit & Compliance Event Logging Microservice',
+    version: '1.0',
+    docsEnabled,
+  });
 
   await app.listen(config.PORT);
   logger.log(`🚀 CrimFig Audit API running on port ${config.PORT}`);

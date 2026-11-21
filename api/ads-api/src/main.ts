@@ -1,4 +1,10 @@
-import {errorMonitorBoundary,DurableErrorMonitorSink} from '@crimfig/shared';
+import {
+  errorMonitorBoundary,
+  DurableErrorMonitorSink,
+  isApiDocsEnabled,
+  registerApiWelcomeRoute,
+  applyOpenApiAuthRequirements,
+} from '@crimfig/shared';
 import { adsCorsOptions } from './modules/security/ads-cors';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
@@ -41,19 +47,34 @@ async function bootstrap() {
 
   configureAdsApi(app);
 
-  if (process.env.NODE_ENV !== 'production') {
-    const document = SwaggerModule.createDocument(
+  const docsEnabled = isApiDocsEnabled(process.env.NODE_ENV === 'production');
+  if (docsEnabled) {
+    const document = applyOpenApiAuthRequirements(
       app,
-      new DocumentBuilder()
-        .setTitle('CrimFig Ads API')
-        .setDescription('Ads Campaign Management & Delivery Microservice')
-        .setVersion('1.0')
-        .addBearerAuth()
-        .build(),
+      SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder()
+          .setTitle('CrimFig Ads API')
+          .setDescription('Ads Campaign Management & Delivery Microservice')
+          .setVersion('1.0')
+          .addBearerAuth()
+          .build(),
+      ),
+      { globalPrefix: 'api', defaultVersion: '1', defaultRequireBearerAuth: true },
     );
-    SwaggerModule.setup('api/docs', app, document);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
     logger.log(`📖 Ads Swagger docs: http://localhost:${process.env.PORT || 3004}/api/docs`);
   }
+
+  registerApiWelcomeRoute(app, {
+    service: 'CrimFig Ads API',
+    code: 'ads-api',
+    description: 'Ads Campaign Management & Delivery Microservice',
+    version: '1.0',
+    docsEnabled,
+  });
 
   const port = process.env.PORT || 3004;
   await app.listen(port);

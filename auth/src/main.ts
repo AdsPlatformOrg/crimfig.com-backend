@@ -1,6 +1,11 @@
-import {errorMonitorBoundary} from '@crimfig/shared';
+import {
+  errorMonitorBoundary,
+  dashboardOrigins,
+  isApiDocsEnabled,
+  registerApiWelcomeRoute,
+  applyOpenApiAuthRequirements,
+} from '@crimfig/shared';
 import {ErrorMonitorService} from './modules/error-monitor/error-monitor.service';
-import { dashboardOrigins } from '@crimfig/shared';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -74,20 +79,35 @@ async function bootstrap() {
   app.setGlobalPrefix('api');
 
   // ─── Swagger (dev + staging only) ─────────────────────────────────────────
-  if (!config.IS_PRODUCTION) {
-    const document = SwaggerModule.createDocument(
+  const docsEnabled = isApiDocsEnabled(config.IS_PRODUCTION);
+  if (docsEnabled) {
+    const document = applyOpenApiAuthRequirements(
       app,
-      new DocumentBuilder()
-        .setTitle('CrimFig Auth API')
-        .setDescription('OAuth2/OIDC, JWT, MFA, Organization & Consent management')
-        .setVersion('1.0')
-        .addBearerAuth()
-        .addCookieAuth('crimfig_rt')
-        .build(),
+      SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder()
+          .setTitle('CrimFig Auth API')
+          .setDescription('OAuth2/OIDC, JWT, MFA, Organization & Consent management')
+          .setVersion('1.0')
+          .addBearerAuth()
+          .addCookieAuth('crimfig_rt')
+          .build(),
+      ),
+      { globalPrefix: 'api', defaultVersion: '1', defaultRequireBearerAuth: false },
     );
-    SwaggerModule.setup('api/docs', app, document);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
     logger.log(`📖 Swagger docs: http://localhost:${config.PORT}/api/docs`);
   }
+
+  registerApiWelcomeRoute(app, {
+    service: 'CrimFig Auth API',
+    code: 'auth-api',
+    description: 'OAuth2/OIDC, JWT, MFA, Organization & Consent management',
+    version: '1.0',
+    docsEnabled,
+  });
 
   await app.listen(config.PORT);
   logger.log(`🚀 CrimFig Auth API running — port ${config.PORT} [${config.NODE_ENV}]`);

@@ -1,4 +1,11 @@
-import {errorMonitorBoundary,DurableErrorMonitorSink} from '@crimfig/shared';
+import {
+  errorMonitorBoundary,
+  DurableErrorMonitorSink,
+  dashboardOrigins,
+  isApiDocsEnabled,
+  registerApiWelcomeRoute,
+  applyOpenApiAuthRequirements,
+} from '@crimfig/shared';
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 dotenv.config();
@@ -8,7 +15,6 @@ import { ValidationPipe, VersioningType, Logger, ShutdownSignal } from '@nestjs/
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
-import { dashboardOrigins } from '@crimfig/shared';
 
 const logger = new Logger('BillingBootstrap');
 
@@ -42,19 +48,34 @@ async function bootstrap() {
   app.enableVersioning({ type: VersioningType.URI, defaultVersion: '1' });
   app.setGlobalPrefix('api');
 
-  if (process.env.NODE_ENV !== 'production') {
-    const document = SwaggerModule.createDocument(
+  const docsEnabled = isApiDocsEnabled(process.env.NODE_ENV === 'production');
+  if (docsEnabled) {
+    const document = applyOpenApiAuthRequirements(
       app,
-      new DocumentBuilder()
-        .setTitle('CrimFig Billing & Payments API')
-        .setDescription('Multi-provider Wallets, FX Rates, Saved Cards, Subscriptions & Payouts Microservice')
-        .setVersion('1.0')
-        .addBearerAuth()
-        .build(),
+      SwaggerModule.createDocument(
+        app,
+        new DocumentBuilder()
+          .setTitle('CrimFig Billing & Payments API')
+          .setDescription('Multi-provider Wallets, FX Rates, Saved Cards, Subscriptions & Payouts Microservice')
+          .setVersion('1.0')
+          .addBearerAuth()
+          .build(),
+      ),
+      { globalPrefix: 'api', defaultVersion: '1', defaultRequireBearerAuth: true },
     );
-    SwaggerModule.setup('api/docs', app, document);
+    SwaggerModule.setup('api/docs', app, document, {
+      swaggerOptions: { persistAuthorization: true },
+    });
     logger.log(`📖 Billing Swagger docs: http://localhost:${process.env.PORT || 3008}/api/docs`);
   }
+
+  registerApiWelcomeRoute(app, {
+    service: 'CrimFig Billing & Payments API',
+    code: 'billing-api',
+    description: 'Multi-provider Wallets, FX Rates, Saved Cards, Subscriptions & Payouts Microservice',
+    version: '1.0',
+    docsEnabled,
+  });
 
   const port = process.env.PORT || 3008;
   await app.listen(port);
