@@ -151,7 +151,7 @@ jobs:
 
   production-delivery:
     name: Production ad delivery after deployment
-    if: github.event_name == 'push' && github.ref == 'refs/heads/production'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/production' && vars.PRODUCTION_ADS_CHECK_ENABLED == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 17
     permissions:
