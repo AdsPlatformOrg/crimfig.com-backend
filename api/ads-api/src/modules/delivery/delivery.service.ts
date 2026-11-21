@@ -20,6 +20,7 @@ import { resolvedSchedule, scheduleMatches } from '../campaigns/daily-schedule';
 import {
   Injectable,
   Inject,
+  BadRequestException,
   NotFoundException,
   ForbiddenException,
   ConflictException,
@@ -253,7 +254,7 @@ export class DeliveryService {
   }
 
   if (typeof window !== 'undefined' && window.__cfLoaderV2) { window.__cfLoaderV2.scan(); return; }
-  var instances = new Map(), lazySlots=new Map();
+  var instances = new Map(), lazySlots=new Map(), widthWaiters=new Map();
   function eventIdentity() { return window.crypto && window.crypto.randomUUID ? window.crypto.randomUUID() : undefined; }
   // PLAN-0066 F4: runtime and pageview identities exist only for the first (owning) runtime; duplicate includes return earlier.
   var SDK_VERSION = 'cf-sdk/2';
@@ -354,13 +355,42 @@ export class DeliveryService {
     observer.observe(container);document.addEventListener('visibilitychange',changed);window.addEventListener('blur',changed);window.addEventListener('focus',update);
     container.__cfCleanup=cleanup;
   }
+  function slotContentWidth(parent) {
+    if(!parent || !parent.getClientRects().length)return 0;
+    var style=window.getComputedStyle(parent);
+    return Math.max(0,Math.min(3840,Math.floor(parent.clientWidth-(parseFloat(style.paddingLeft)||0)-(parseFloat(style.paddingRight)||0))));
+  }
+  function stopWaitingForWidth(element){
+    var cleanup=widthWaiters.get(element);
+    if(cleanup){cleanup();widthWaiters.delete(element);}
+  }
   function dispose(element){
+    stopWaitingForWidth(element);
     var lazy=lazySlots.get(element);if(lazy){lazy.disconnect();lazySlots.delete(element);}
-    var state=instances.get(element);if(state){state.closed=true;state.controller.abort();clearTimeout(state.timer);if(state.assetCancel)state.assetCancel();instances.delete(element);}
+    var state=instances.get(element);if(state){state.closed=true;state.controller.abort();clearTimeout(state.timer);if(state.assetCancel)state.assetCancel();if(state.stopFit)state.stopFit();instances.delete(element);}
     element.querySelectorAll('*').forEach(function(child){if(child.__cfCleanup)child.__cfCleanup();if(child.tagName==='VIDEO')child.pause();});
   }
   function requestSlot(element,token,base,consent){
-    if(instances.has(element)||lazySlots.has(element))return;
+    if(instances.has(element)||lazySlots.has(element)||widthWaiters.has(element))return;
+    var parent=element.getAttribute('data-ad-format')==='general'?element.parentElement:null;
+    var measuredWidth=parent?slotContentWidth(parent):null;
+    if(parent&&!measuredWidth){
+      var observer=null, waitTimer=0;
+      function checkWidth(){
+        waitTimer=0;
+        if(!element.isConnected){stopWaitingForWidth(element);return;}
+        if(!slotContentWidth(element.parentElement))return;
+        stopWaitingForWidth(element);requestSlot(element,token,base,consent);
+      }
+      function retry(){
+        if(slotContentWidth(element.parentElement)){if(waitTimer){clearTimeout(waitTimer);waitTimer=0;}checkWidth();return;}
+        if(!waitTimer)waitTimer=setTimeout(checkWidth,16);
+      }
+      if('ResizeObserver' in window){observer=new window.ResizeObserver(retry);observer.observe(parent);}
+      window.addEventListener('resize',retry);
+      widthWaiters.set(element,function(){if(waitTimer)clearTimeout(waitTimer);if(observer)observer.disconnect();window.removeEventListener('resize',retry);});
+      return;
+    }
     if('IntersectionObserver' in window && element.getBoundingClientRect().top>window.innerHeight+200){
       var lazy=new IntersectionObserver(function(entries){if(entries.some(function(e){return e.isIntersecting;})){lazy.disconnect();lazySlots.delete(element);requestSlot(element,token,base,consent);}},{rootMargin:'200px'});
       lazySlots.set(element,lazy);lazy.observe(element);return;
@@ -369,7 +399,7 @@ export class DeliveryService {
     if(!element.__cfSizing)element.__cfSizing={height:element.style.height||'',padding:element.style.padding||'',margin:element.style.margin||''};
     element.style.height=element.__cfSizing.height;element.style.padding=element.__cfSizing.padding;element.style.margin=element.__cfSizing.margin;
     var reservedHeight=Number(element.getAttribute('data-cf-height'));
-    element.style.minHeight=(reservedHeight>0&&reservedHeight<=1200?reservedHeight:90)+'px';element.style.display='block';
+    element.style.minHeight=(reservedHeight>0&&reservedHeight<=1200?reservedHeight:parent?0:90)+'px';element.style.display='block';
     element.setAttribute('data-cf-state','loading');
     function collapseSlot() {
       if(state.assetCancel)state.assetCancel();
@@ -395,18 +425,36 @@ export class DeliveryService {
       }catch(error){/* Optional continuity is unavailable. */}
     }
     var query='?domain='+encodeURIComponent(window.location.hostname)+'&consent='+(consent==='granted'||consent==='denied'?consent:'unknown');
+    if(measuredWidth)query+='&containerWidth='+measuredWidth;
     fetch(base+'/api/v1/delivery/ad/'+encodeURIComponent(token)+query,{credentials:'omit',signal:state.controller.signal,headers:headers,
       redirect:headers['X-CF-CPC-Consent']?'error':'follow',cache:headers['X-CF-CPC-Consent']?'no-store':'default'})
       .then(function(res){if(!res.ok)throw new Error('Ad unavailable');return res.json();})
       .then(function(data){if(state.closed||instances.get(element)!==state||!element.isConnected)return;
         if(!data||!data.data){state.closed=true;clearTimeout(state.timer);collapseSlot();return;}
         var ad=data.data;
+        if(parent&&ad.adType==='image'&&(!Number.isSafeInteger(ad.width)||ad.width>slotContentWidth(parent)))throw new Error('Creative no longer fits');
         ad.__cf=claimsFor(element,token,state.generation);
         if(!ad.impToken||!['text','image','video'].includes(ad.adType)||ad.adType==='image'&&!resolvedMedia(ad.imageUrl,base)||ad.adType==='video'&&!resolvedMedia(ad.videoUrl,base))throw new Error('Invalid creative');
         return renderAdCard(element,ad,'publisher_network',base,state).then(function(){
           if(state.closed||instances.get(element)!==state||!element.isConnected)return;
+          if(parent&&ad.adType==='image'&&ad.width>slotContentWidth(parent)){clearTimeout(state.timer);state.closed=true;collapseSlot();return;}
           clearTimeout(state.timer);state.closed=true;
           element.style.minHeight='0px';element.style.height='';element.setAttribute('data-cf-state','rendered');
+          if(parent&&ad.adType==='image'){
+            var lastFitWidth=-1, lastDisplay=element.style.display;
+            function fit(){
+              if(!element.isConnected)return;
+              var currentWidth=slotContentWidth(parent);
+              if(currentWidth===lastFitWidth)return;
+              lastFitWidth=currentWidth;
+              var nextDisplay=ad.width<=currentWidth?'block':'none';
+              if(nextDisplay!==lastDisplay){lastDisplay=nextDisplay;element.style.display=nextDisplay;}
+            }
+            var fitObserver=null;
+            if('ResizeObserver' in window){fitObserver=new window.ResizeObserver(fit);fitObserver.observe(parent);}
+            window.addEventListener('resize',fit);
+            state.stopFit=function(){if(fitObserver)fitObserver.disconnect();window.removeEventListener('resize',fit);};
+          }
           sendRenderBeacon(ad,base);
           sendImpressionBeacon(ad,base);
           trackViewability(element.firstElementChild||element,ad,ad.adType==='video'?2:1,base);
@@ -416,6 +464,7 @@ export class DeliveryService {
   function initSlots(){
     if(typeof document==='undefined'||typeof window==='undefined')return;
     instances.forEach(function(state,element){if(!element.isConnected)dispose(element);});
+    widthWaiters.forEach(function(cleanup,element){if(!element.isConnected)stopWaitingForWidth(element);});
     lazySlots.forEach(function(observer,element){if(!element.isConnected)dispose(element);});
     document.querySelectorAll('ins.crimfig-pub-slot').forEach(function(slot){
       var token=slot.getAttribute('data-ad-slot')||slot.getAttribute('data-cf-placement');
@@ -433,6 +482,10 @@ export class DeliveryService {
     var activeBase = slotApiBase || apiBase;
     var slotFormat=container.getAttribute('data-ad-format');
     var imageFormat=(slotFormat==='general'?ad.format:slotFormat)||ad.format||'banner';
+    if(slotFormat==='general'&&ad.adType==='image'){
+      var matchingFormat=Object.keys(imageFormats).find(function(format){return imageFormats[format].width===ad.width&&imageFormats[format].height===ad.height;});
+      if(matchingFormat)imageFormat=matchingFormat;
+    }
     var limits=Object.prototype.hasOwnProperty.call(imageFormats,imageFormat)?imageFormats[imageFormat]:imageFormats.banner;
     var bounds=imageBounds(ad.width,ad.height,limits.width,limits.height);
     var assets=[];
@@ -582,6 +635,164 @@ export class DeliveryService {
       }
     }
 
+    function attachRatingOverlay(hostCard, servedAd, rateBase) {
+      if (!hostCard || !servedAd || !servedAd.impToken) return;
+      function makeIcon(pathD, color) {
+        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('width', '13');
+        svg.setAttribute('height', '13');
+        svg.setAttribute('aria-hidden', 'true');
+        svg.setAttribute('data-cf-icon-color', color);
+        svg.style.cssText = 'display:inline-block;flex-shrink:0;';
+        var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        p.setAttribute('d', pathD);
+        p.setAttribute('fill', color);
+        svg.appendChild(p);
+        return svg;
+      }
+      var trigger = document.createElement('button');
+      trigger.type = 'button';
+      trigger.setAttribute('data-cf-rating-trigger', 'true');
+      trigger.setAttribute('aria-label', 'Ads by CrimFig — Rate this advert');
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.style.cssText = 'position:absolute;top:4px;right:4px;z-index:6;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;border:1px solid rgba(255,255,255,0.22);background:rgba(23,27,42,0.84);color:#FFFFFF;font:600 10px/1.2 Poppins,Arial,sans-serif;cursor:pointer;opacity:0.78;transition:opacity 0.15s ease;';
+      var dot = document.createElement('span');
+      dot.textContent = 'i';
+      dot.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:999px;background:#D4143A;color:#FFFFFF;font-size:9px;font-weight:700;';
+      var attrLabel = document.createElement('span');
+      attrLabel.setAttribute('data-cf-attribution-label', 'true');
+      attrLabel.textContent = 'Ads by CrimFig';
+      attrLabel.style.display = 'none';
+      trigger.appendChild(dot);
+      trigger.appendChild(attrLabel);
+
+      var overlay = document.createElement('div');
+      overlay.setAttribute('data-cf-rating-overlay', 'true');
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-label', 'Rate this advert');
+      overlay.tabIndex = -1;
+      overlay.style.cssText = "display:none;position:absolute;inset:0;z-index:10;background:rgba(23,27,42,0.96);color:#FFFFFF;font-family:'Poppins',Arial,Helvetica,sans-serif;padding:6px 8px;box-sizing:border-box;flex-direction:column;align-items:center;justify-content:center;gap:5px;text-align:center;overflow:hidden;";
+      overlay.addEventListener('click', function(ev) { ev.stopPropagation(); });
+
+      var brandHeader = document.createElement('div');
+      brandHeader.style.cssText = 'font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#94a3b8;line-height:1.1;';
+      brandHeader.textContent = 'Ads by CrimFig';
+      var titleEl = document.createElement('div');
+      titleEl.setAttribute('data-cf-rating-title', 'true');
+      titleEl.style.cssText = 'font-size:12px;font-weight:700;color:#FFFFFF;line-height:1.2;';
+      titleEl.textContent = 'Rate this advert:';
+
+      var choicesRow = document.createElement('div');
+      choicesRow.setAttribute('data-cf-rating-choices', 'true');
+      choicesRow.style.cssText = 'display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px;';
+
+      var statusEl = document.createElement('div');
+      statusEl.setAttribute('data-cf-rating-status', 'true');
+      statusEl.style.cssText = 'font-size:10px;color:#cbd5e1;min-height:12px;line-height:1.2;';
+
+      var closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.setAttribute('data-cf-rating-close', 'true');
+      closeBtn.textContent = 'Cancel';
+      closeBtn.style.cssText = 'padding:3px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.24);background:transparent;color:#e2e8f0;font:600 11px/1.2 Poppins,Arial,sans-serif;cursor:pointer;';
+
+      var selectedRating = null;
+      var ratingOptions = [
+        { id: 'love', label: 'Love it', color: '#D4143A', pathD: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z' },
+        { id: 'like', label: 'Like it', color: '#2563EB', pathD: 'M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L13.17 1 6.59 7.59C6.22 7.95 6 8.45 6 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z' },
+        { id: 'dislike', label: 'Dislike it', color: '#DC2626', pathD: 'M22 3h-4v12h4V3zM15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L10.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2z' }
+      ];
+      var optionButtons = [];
+      ratingOptions.forEach(function(opt) {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.setAttribute('data-cf-rate', opt.id);
+        btn.setAttribute('aria-pressed', 'false');
+        btn.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#FFFFFF;font:600 11px/1.2 Poppins,Arial,sans-serif;cursor:pointer;';
+        btn.appendChild(makeIcon(opt.pathD, opt.color));
+        var labelSpan = document.createElement('span');
+        labelSpan.textContent = opt.label;
+        btn.appendChild(labelSpan);
+        btn.addEventListener('click', function(ev) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          selectedRating = opt.id;
+          optionButtons.forEach(function(pair) {
+            var active = pair.id === opt.id;
+            pair.el.setAttribute('aria-pressed', active ? 'true' : 'false');
+            pair.el.style.borderColor = active ? opt.color : 'rgba(255,255,255,0.2)';
+            pair.el.style.background = active ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.08)';
+          });
+          statusEl.textContent = 'Thanks for rating this advert.';
+          closeBtn.textContent = 'Close';
+          sendBeaconPost(rateBase + '/api/v1/delivery/rating', withClaims(servedAd, {
+            eventId: eventIdentity(),
+            occurredAt: new Date().toISOString(),
+            impToken: servedAd.impToken,
+            rating: opt.id
+          }));
+        });
+        optionButtons.push({ id: opt.id, el: btn });
+        choicesRow.appendChild(btn);
+      });
+
+      function dismissOverlay() {
+        if (selectedRating === 'dislike') {
+          overlay.setAttribute('data-cf-disliked-hidden', 'true');
+          overlay.innerHTML = '';
+          var hiddenNotice = document.createElement('div');
+          hiddenNotice.style.cssText = 'font-size:11px;font-weight:600;color:#cbd5e1;padding:4px 8px;';
+          hiddenNotice.textContent = 'Thanks for your feedback — this ad has been hidden.';
+          overlay.appendChild(hiddenNotice);
+          overlay.style.display = 'flex';
+          trigger.style.display = 'none';
+          trigger.setAttribute('aria-expanded', 'false');
+          return;
+        }
+        overlay.style.display = 'none';
+        trigger.setAttribute('aria-expanded', 'false');
+      }
+
+      closeBtn.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        dismissOverlay();
+      });
+      overlay.addEventListener('keydown', function(ev) {
+        if (ev.key === 'Escape') {
+          ev.preventDefault();
+          ev.stopPropagation();
+          dismissOverlay();
+        }
+      });
+
+      function showAttribution() { attrLabel.style.display = 'inline'; trigger.style.opacity = '1'; }
+      function hideAttribution() { if (document.activeElement !== trigger) { attrLabel.style.display = 'none'; trigger.style.opacity = '0.78'; } }
+      hostCard.addEventListener('pointerenter', showAttribution);
+      hostCard.addEventListener('mouseenter', showAttribution);
+      hostCard.addEventListener('pointerleave', hideAttribution);
+      hostCard.addEventListener('mouseleave', hideAttribution);
+      trigger.addEventListener('focus', showAttribution);
+      trigger.addEventListener('blur', hideAttribution);
+      trigger.addEventListener('click', function(ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        if (overlay.getAttribute('data-cf-disliked-hidden') === 'true') return;
+        overlay.style.display = 'flex';
+        trigger.setAttribute('aria-expanded', 'true');
+      });
+
+      overlay.appendChild(brandHeader);
+      overlay.appendChild(titleEl);
+      overlay.appendChild(choicesRow);
+      overlay.appendChild(statusEl);
+      overlay.appendChild(closeBtn);
+      hostCard.appendChild(trigger);
+      hostCard.appendChild(overlay);
+    }
+
+    attachRatingOverlay(card, ad, activeBase);
     container.innerHTML = '';
     container.appendChild(card);
     function engagement(type){sendBeaconPost(activeBase+'/api/v1/delivery/interaction',withClaims(ad,{eventId:eventIdentity(),occurredAt:new Date().toISOString(),impToken:ad.impToken,type:type,source:'embed'}));}
@@ -843,6 +1054,7 @@ export class DeliveryService {
    * Never debits advertiser budgets or credits promoter earnings/points.
    */
   private async serveHouseOrShadowAd(params: {
+    containerWidth?: number;
     requestId: string;
     serveBefore?:number;
     parentOpportunityId?:string;
@@ -949,6 +1161,7 @@ export class DeliveryService {
               const width = candidate.renditionWidth ?? candidate.width;
               const height = candidate.renditionHeight ?? candidate.height;
               if (!preset || width !== preset.width || height !== preset.height) return false;
+              if (params.containerWidth != null && preset.width > params.containerWidth) return false;
               if (slotRecord?.width != null && preset.width > slotRecord.width) return false;
               if (slotRecord?.height != null && preset.height > slotRecord.height) return false;
               if (slotRecord?.allowedPresetIds == null) return true;
@@ -1165,8 +1378,11 @@ export class DeliveryService {
       city?: string;
       device?: string;
     },
-    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean; consentState?: 'granted' | 'denied' | 'unknown'; transportRequestId?: string; privacyControl?: boolean; continuityProof?: string },
+    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean; consentState?: 'granted' | 'denied' | 'unknown'; transportRequestId?: string; privacyControl?: boolean; continuityProof?: string; containerWidth?: number },
   ) {
+    const hintedWidth = requestHeaders?.containerWidth;
+    const containerWidth = typeof hintedWidth === 'number' && Number.isSafeInteger(hintedWidth)
+      && hintedWidth > 0 && hintedWidth <= 3840 ? hintedWidth : undefined;
     this.tokenService.assertConfigured();
     const requestId = crypto.randomUUID();
     const serverDeadline=Date.now()+DELIVERY_RUNTIME.serverMs;
@@ -1313,7 +1529,7 @@ export class DeliveryService {
 
       if (earlyFallbackReason) {
         const isShadowRisk = restricted || riskAssessment.trafficRiskStatus !== 'normal';
-        return this.serveHouseOrShadowAd({
+        return this.serveHouseOrShadowAd({containerWidth,
           consentState: requestHeaders?.consentState,
           serveBefore: serverDeadline,
           requestId,
@@ -1615,7 +1831,9 @@ export class DeliveryService {
       if (requestedLayout !== 'general' && candidate.format !== requestedLayout && (canonicalSlot || candidate.adType !== 'video'))
         return reject('CREATIVE_FORMAT_MISMATCH');
       if (candidate.adType === 'image') {
-        const sizingSlot=intersectCreativeSlotSizes(canonicalSlot??{allowedPresetIds:JSON.stringify(APPROVED_IMAGE_AD_PRESETS.filter(preset=>requestedLayout==='banner'?preset.ratioDecimal>=3:preset.ratioDecimal<3).map(preset=>preset.id))},candidate.sizePolicy,candidate.creativePresetIds);
+        const measuredSlot = canonicalSlot?.format === 'general' && containerWidth !== undefined
+          ? { ...canonicalSlot, width: Math.min(canonicalSlot.width ?? containerWidth, containerWidth) } : canonicalSlot;
+        const sizingSlot=intersectCreativeSlotSizes(measuredSlot??{allowedPresetIds:JSON.stringify(APPROVED_IMAGE_AD_PRESETS.filter(preset=>requestedLayout==='banner'?preset.ratioDecimal>=3:preset.ratioDecimal<3).map(preset=>preset.id))},candidate.sizePolicy,candidate.creativePresetIds);
         if(!sizingSlot)return reject('CREATIVE_SIZE_POLICY_MISMATCH');
         const general = requestedLayout === 'general' && canonicalSlot
           ? selectGeneralSlotImage(candidate.preparation?.renditions ?? [{
@@ -1692,7 +1910,7 @@ export class DeliveryService {
         terminationStage = 'creative_compatibility';
       }
 
-      return this.serveHouseOrShadowAd({
+      return this.serveHouseOrShadowAd({containerWidth,
         consentState: requestHeaders?.consentState,
         serveBefore: serverDeadline,
         requestId,
@@ -1829,7 +2047,7 @@ export class DeliveryService {
         (error instanceof OpportunityConflictError ? error.reasonCode : undefined) ?? rejection ?? 'BILLING_OUTCOME_UNCONFIRMED';
       const capacityDetails = error instanceof OpportunityConflictError ? error.capacityDetails : undefined;
       const attemptOutcome = rejection ? 'rejected' : 'unconfirmed';
-      return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
+      return this.serveHouseOrShadowAd({containerWidth,consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
         promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',
         candidateCount: auctionResult.decisionSnapshot.candidateCount,
         excludedCandidates: [{ reasonCode, stage: billingStage, campaignId: finalCampaignId, creativeId: finalCreativeId,
@@ -1929,7 +2147,7 @@ export class DeliveryService {
     } catch(error) {
       if(this.evidence)await this.evidence.append(requestId,{version:1,stage:'no_fill',reasonCode:'REQUEST_NOT_SERVED',errorCategory:error instanceof Error?error.name:'UNKNOWN',runtimeVersion:DELIVERY_RUNTIME.version,elapsedMs:DELIVERY_RUNTIME.serverMs-(serverDeadline-Date.now()),slotHandleHash:adDigest(token),consentState:requestHeaders?.consentState??'unknown',serverReceivedAt:new Date()});
       if(error instanceof DeliveryDeadlineError&&['candidate_fetch','candidate_targeting','auction'].includes(error.stage)&&canonicalSlot&&Date.now()<serverDeadline){
-        return this.serveHouseOrShadowAd({consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
+        return this.serveHouseOrShadowAd({containerWidth,consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
           promoterId:canonicalPromoter.id,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',fallbackReasonCode:'DELIVERY_DEADLINE_EXCEEDED',terminationStage:error.stage,candidateEvaluationStatus:'failed',clientIp,userAgent,referrerDomain,clientGeo});
       }
       throw error;
@@ -2183,6 +2401,94 @@ export class DeliveryService {
       recordingReason: event ? null : 'EVENT_NOT_RECORDED',
     }).where(eq(schema.adsClicks.id, attemptId));
     return Boolean(event);
+  }
+
+  async recordAdvertRating(params: {
+    impToken: string;
+    rating: 'love' | 'like' | 'dislike';
+    eventId?: string;
+    occurredAt?: string;
+    clientIp?: string;
+    claims?: {
+      pageViewId?: string;
+      slotInstanceId?: string;
+      opportunityId?: string;
+      sdkInitId?: string;
+      instanceIndex?: number;
+      instancesDetected?: number;
+    };
+    userAgent?: string;
+    referrer?: string;
+  }) {
+    if (!['love', 'like', 'dislike'].includes(params.rating)) {
+      throw new BadRequestException('Unsupported advert rating');
+    }
+    if (!params.impToken || typeof params.impToken !== 'string') {
+      return null;
+    }
+    const payload =
+      this.tokenService.verifyToken(params.impToken, params.clientIp) ||
+      this.tokenService.verifyToken(params.impToken, params.clientIp, { allowIpMismatch: true });
+    if (!payload) {
+      return null;
+    }
+    const isHouseOrShadowServe = payload.campaignId === HOUSE_CAMPAIGN_UUID;
+    if (!(await this.boundServe(payload, isHouseOrShadowServe))) {
+      return null;
+    }
+
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`set local lock_timeout='5s'`);
+      await tx.execute(sql`set local statement_timeout='8s'`);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-rating:${payload.servedId}`}, 0))`);
+
+      const [serveRecord] = await tx
+        .select({
+          id: adsServes.id,
+          contentSnapshot: adsServes.contentSnapshot,
+        })
+        .from(adsServes)
+        .where(eq(adsServes.id, payload.servedId))
+        .limit(1);
+      if (!serveRecord) {
+        return null;
+      }
+
+      const observations = await tx
+        .select({
+          pageViewId: sql<string>`max(${adsInteractions.pageViewId}::text)`,
+          slotInstanceId: sql<string>`max(${adsInteractions.slotInstanceId}::text)`,
+          opportunityId: sql<string>`max(${adsInteractions.opportunityId}::text)`,
+          sdkInitId: sql<string>`max(${adsInteractions.sdkInitId}::text)`,
+        })
+        .from(adsInteractions)
+        .where(eq(adsInteractions.serveId, payload.servedId));
+      for (const prior of observations) {
+        assertInstanceBinding(prior, params.claims ?? {});
+      }
+
+      const existingSnapshot =
+        serveRecord.contentSnapshot && typeof serveRecord.contentSnapshot === 'object'
+          ? (serveRecord.contentSnapshot as Record<string, unknown>)
+          : {};
+      const nextRating = {
+        rating: params.rating,
+        eventId: params.eventId ?? crypto.randomUUID(),
+        occurredAt: params.occurredAt ?? null,
+        updatedAt: new Date().toISOString(),
+      };
+      await tx
+        .update(adsServes)
+        .set({
+          contentSnapshot: {
+            ...existingSnapshot,
+            visitorRating: nextRating,
+          },
+        })
+        .where(eq(adsServes.id, payload.servedId));
+
+      return nextRating;
+    });
   }
 
   async logInteraction(params: {

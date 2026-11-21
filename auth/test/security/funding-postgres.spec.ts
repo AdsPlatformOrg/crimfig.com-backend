@@ -437,6 +437,10 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
         isVerified: true, status: 'verified',
         website: { verificationMethod: 'html_file_and_meta_tag', policyStatus: 'approved' },
       });
+      const views=await new PromotersService(db).getWebsites(promoter.id);
+      const view=views.find(item=>item.id===site.id)!;
+      expect(view.ownershipChecks.html_meta.status).toBe('verified');
+      expect(view.ownershipChecks.dns_txt.status).toBe('not_verified');
     } finally {
       fetchProof.mockRestore();
     }
@@ -464,7 +468,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       });
       await expect(service.retestWebsite(site.id, 'html_meta', owner)).rejects.toThrow('attempted recently');
       expect(fetchProof).toHaveBeenCalledTimes(1);
-      expect((await pool.query('select to_state, actor_id, reason from ads_supply_state_history where entity_id=$1', [site.id])).rows)
+      expect((await pool.query("select to_state, actor_id, reason from ads_supply_state_history where entity_id=$1 and dimension='ownership_status'", [site.id])).rows)
         .toEqual([{ to_state: 'verified', actor_id: owner, reason: 'OWNERSHIP_RETEST_CONFIRMED_HTML_META' }]);
     } finally {
       fetchProof.mockRestore();

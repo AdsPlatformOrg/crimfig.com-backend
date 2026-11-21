@@ -7,6 +7,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import * as dns from 'dns/promises';
 import { deadline, fetchWebsiteProof, hasVerificationMeta, websiteTarget } from './website-proof';
 import { resolveTxtDnsProof } from './dns-proof-resolver';
+import {proofTokenHash} from './ownership-method-status';
 
 @Injectable()
 export class VerificationService {
@@ -118,6 +119,7 @@ export class VerificationService {
         verificationFailures:isVerified?0:(current.verificationFailures||0)+1,updatedAt:now,
       }).where(eq(adsPromoterWebsites.id,websiteId)).returning();
       await tx.insert(adsSupplyStateHistory).values({entityType:'website',entityId:websiteId,dimension:'ownership_status',fromState:current.verificationStatus,toState:saved.verificationStatus,actorRole:staff?'ads_staff':'owner',actorId:staff?.actorId,reason:staff ? (isVerified ? 'OWNERSHIP_RETEST_CONFIRMED_' : 'OWNERSHIP_RETEST_FAILED_') + staff.method.toUpperCase() : isVerified?'OWNERSHIP_PROOF_CONFIRMED':'OWNERSHIP_PROOF_FAILED'});
+      await tx.insert(adsSupplyStateHistory).values({entityType:'website',entityId:websiteId,dimension:`ownership_check_${method==='dns_txt'?'dns_txt':'html_meta'}`,toState:isVerified?'verified':'not_verified',actorRole:staff?'ads_staff':'owner',actorId:staff?.actorId,reason:proofTokenHash(token)});
       return saved;
     });
 

@@ -17,7 +17,8 @@ import {
   adsInteractions,
   adsSupplyStateHistory,
 } from '@crimfig/database/schema';
-import { and, eq, desc, sql } from 'drizzle-orm';
+import { and, eq, desc, sql, inArray } from 'drizzle-orm';
+import {ownershipMethodStatuses} from '../verification/ownership-method-status';
 import * as crypto from 'crypto';
 import { websiteTarget } from '../verification/website-proof';
 
@@ -313,11 +314,14 @@ export class PromotersService {
    * List websites for promoter
    */
   async getWebsites(promoterId: string) {
-    return this.db
+    const websites=await this.db
       .select()
       .from(adsPromoterWebsites)
       .where(eq(adsPromoterWebsites.promoterId, promoterId))
       .orderBy(desc(adsPromoterWebsites.createdAt));
+    if(!websites.length)return [];
+    const checks=await this.db.select().from(adsSupplyStateHistory).where(and(eq(adsSupplyStateHistory.entityType,'website'),inArray(adsSupplyStateHistory.entityId,websites.map(site=>site.id)),inArray(adsSupplyStateHistory.dimension,['ownership_check_html_meta','ownership_check_dns_txt']))).orderBy(desc(adsSupplyStateHistory.createdAt)).limit(5000);
+    return websites.map(website=>({...website,ownershipChecks:ownershipMethodStatuses(website,checks)}));
   }
 
   /**

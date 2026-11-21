@@ -451,7 +451,7 @@ export class PublisherSlotsService {
       `<!-- If you have a visitor consent choice, supply it before loading the SDK. The default is unknown. -->`,
       `<ins class="crimfig-pub-slot"`,
       `     style="display:block;min-height:0;"`,
-      `     data-cf-height="${slot.height || 90}"`,
+      `     data-cf-height="${slot.height ?? (slot.format === 'general' ? 0 : 90)}"`,
       `     data-cf-consent="unknown"`,
       `     data-cf-api-base="${adsPublicUrl}"`,
       `     data-ad-slot="${slot.slotTagId}"`,
@@ -470,6 +470,7 @@ export class PublisherSlotsService {
       `  publisherKey="${website?.id || slot.websiteId}"`,
       `  apiBaseUrl="${adsPublicUrl}"`,
       `  measurementConsent="unknown"`,
+      ...(slot.format === 'general' ? ['  responsiveSizing'] : []),
       `/>`,
     ].join('\n');
 

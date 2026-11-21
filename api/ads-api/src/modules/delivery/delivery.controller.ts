@@ -86,6 +86,21 @@ export class ViewabilityTelemetryDto {
   @IsOptional() @IsInt() @Min(0) @Max(1000) instanceIndex?: number;
   @IsOptional() @IsInt() @Min(0) @Max(1000) instancesDetected?: number;}
 
+export class RateAdvertDto {
+  @IsOptional() @IsUUID() eventId?: string;
+  @IsOptional() @IsISO8601() occurredAt?: string;
+  @IsString() @MaxLength(2048)
+  impToken: string;
+  @IsIn(['love', 'like', 'dislike'])
+  rating: 'love' | 'like' | 'dislike';
+  @IsOptional() @IsUUID() pageViewId?: string;
+  @IsOptional() @IsUUID() slotInstanceId?: string;
+  @IsOptional() @IsUUID() opportunityId?: string;
+  @IsOptional() @IsUUID() sdkInitializationId?: string;
+  @IsOptional() @IsInt() @Min(0) @Max(1000) instanceIndex?: number;
+  @IsOptional() @IsInt() @Min(0) @Max(1000) instancesDetected?: number;
+}
+
 @ApiTags('Ad Delivery & Embed')
 @Controller('delivery')
 export class DeliveryController {
@@ -178,6 +193,27 @@ export class DeliveryController {
   }
 
   @Public()
+  @Post('rating')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Record non-billable visitor sentiment rating (love, like, dislike) for a served advert' })
+  async rateAdvert(@Body() dto: RateAdvertDto, @Req() req: Request) {
+    const clientIp = extractClientIp(req);
+    const userAgent = req.headers['user-agent'];
+    const referrer = req.headers['referer'];
+
+    await this.deliveryService.recordAdvertRating({
+      impToken: dto.impToken,
+      rating: dto.rating,
+      eventId: dto.eventId,
+      occurredAt: dto.occurredAt,
+      clientIp,
+      claims: pickClaims(dto),
+      userAgent,
+      referrer,
+    });
+  }
+
+  @Public()
   @Get('ad/:placementToken')
   @Header('Cache-Control', 'private, no-store')
   @ApiOperation({ summary: 'Fetch ad creative for placement and log impression' })
@@ -188,6 +224,7 @@ export class DeliveryController {
     @Query('fill') fill?: string,
     @Query('consent') consent?:string,
     @Req() req?: Request,
+    @Query('containerWidth') containerWidth?: string,
   ) {
     const clientIp = req ? extractClientIp(req) : undefined;
     const userAgent = req?.headers['user-agent'];
@@ -202,6 +239,7 @@ export class DeliveryController {
       req ? trustedClientGeo(req) : undefined,
       req
         ? {
+            containerWidth: typeof containerWidth === 'string' && /^[1-9][0-9]{0,3}$/.test(containerWidth) ? Number(containerWidth) : undefined,
             measurementConsent: consent === 'granted',
             privacyControl: req.headers['sec-gpc'] === '1',
             continuityProof: typeof req.headers['x-cf-cpc-consent'] === 'string' ? req.headers['x-cf-cpc-consent'] : undefined,
