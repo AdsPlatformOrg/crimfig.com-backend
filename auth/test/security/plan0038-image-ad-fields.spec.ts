@@ -10,6 +10,7 @@ const ASSET = {
   cdnUrl: '/api/v1/uploads/media/asset-1.webp',
   thumbnailUrl: null,
   bytes: 1000,
+  width:300,height:250,
   sha256: 'a'.repeat(64),
 };
 

@@ -9,6 +9,7 @@ describe('AdStation Security & Zero Commission Invariants (PLAN-0018)', () => {
     savedRows = [];
     const queryChain: any = {
       from: jest.fn(() => queryChain),
+      for:jest.fn(()=>queryChain),
       where: jest.fn(() => queryChain),
       orderBy: jest.fn(() => queryChain),
       limit: jest.fn((n?: number) => Promise.resolve(savedRows.slice(0, n || 1))),
@@ -37,6 +38,7 @@ describe('AdStation Security & Zero Commission Invariants (PLAN-0018)', () => {
     };
 
     adstationService = new AdstationService(mockDb);
+    mockDb.execute=jest.fn(async()=>({rows:[]}));mockDb.transaction=jest.fn(async(work:any)=>work(mockDb));
   });
 
   test('Direct deal CANNOT be assigned to a Consideration Slot', async () => {

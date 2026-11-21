@@ -37,6 +37,6 @@ describe('PLAN-0051 delivered byte and campaign attachment boundaries — failur
     const asset={id:'asset',bytes,cdnUrl:'/image.webp',mimeType:'image/webp',preparation:{layout:'card'},width:600,height:600};
     const q:any={from:()=>q,where:()=>q,limit:async()=>[asset]};
     const db:any={select:()=>q};const service=new CampaignsService(db,{} as any,{} as any);
-    await expect((service as any).validateCreative(db,'owner',{adType:'image',mediaAssetId:'asset',destinationUrl:'https://example.com',adFormat:'card'})).resolves.toMatchObject({mediaAssetId:'asset',imageUrl:'/image.webp'});
+    await expect((service as any).validateCreative(db,'owner',{adType:'image',mediaAssetId:'asset',destinationUrl:'https://example.com',adFormat:'card',sizePolicy:'legacy'})).resolves.toMatchObject({mediaAssetId:'asset',imageUrl:'/image.webp'});
   });
 });

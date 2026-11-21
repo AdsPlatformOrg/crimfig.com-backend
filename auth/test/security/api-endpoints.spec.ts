@@ -15,6 +15,7 @@ describe('Comprehensive API Endpoint Unit Tests (PLAN-0027)', () => {
       savedRows = [];
       const queryChain: any = {
         from: jest.fn(() => queryChain),
+        for:jest.fn(()=>queryChain),
         where: jest.fn(() => queryChain),
         innerJoin: jest.fn(() => queryChain),
         leftJoin: jest.fn(() => queryChain),
@@ -48,6 +49,7 @@ describe('Comprehensive API Endpoint Unit Tests (PLAN-0027)', () => {
       analyticsService = new AnalyticsService(mockDb);
       promotersService = new PromotersService(mockDb);
       adstationService = new AdstationService(mockDb);
+      mockDb.execute=jest.fn(async()=>({rows:[]}));mockDb.transaction=jest.fn(async(work:any)=>work(mockDb));
     });
 
     it('GET /api/v1/analytics/dashboard/summary - returns valid non-null summary metrics without NaN', async () => {
