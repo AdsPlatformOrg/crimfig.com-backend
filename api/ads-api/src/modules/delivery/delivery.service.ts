@@ -638,14 +638,17 @@ export class DeliveryService {
     function attachRatingOverlay(hostCard, servedAd, rateBase) {
       if (!hostCard || !servedAd || !servedAd.impToken) return;
       function makeIcon(pathD, color) {
-        var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        var createSvg = typeof document.createElementNS === 'function'
+          ? function(tag) { return document.createElementNS('http://www.w3.org/2000/svg', tag); }
+          : function(tag) { return document.createElement(tag); };
+        var svg = createSvg('svg');
         svg.setAttribute('viewBox', '0 0 24 24');
         svg.setAttribute('width', '13');
         svg.setAttribute('height', '13');
         svg.setAttribute('aria-hidden', 'true');
         svg.setAttribute('data-cf-icon-color', color);
         svg.style.cssText = 'display:inline-block;flex-shrink:0;';
-        var p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        var p = createSvg('path');
         p.setAttribute('d', pathD);
         p.setAttribute('fill', color);
         svg.appendChild(p);
