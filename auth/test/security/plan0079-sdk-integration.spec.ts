@@ -81,7 +81,7 @@ test('PLAN0134 negative & positive: DeliveryService.recordAdvertRating enforces 
   const priorObservations = [
     { pageViewId: '00000000-0000-4000-8000-000000000011', slotInstanceId: '00000000-0000-4000-8000-000000000022', opportunityId: '00000000-0000-4000-8000-000000000033', sdkInitId: '00000000-0000-4000-8000-000000000044' },
   ];
-  let serveFound = true;
+  const serveFound = true;
   const tx = {
     execute: jest.fn(async () => ({})),
     select: jest.fn((projection?: any) => ({
