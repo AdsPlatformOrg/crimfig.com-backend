@@ -81,3 +81,12 @@ PLAN-0118: Ads and Billing HTTP access regression suites passed 37/37 in 9.523s 
 2026-11-20 | PLAN-0123 | IN_PROGRESS | Live-safe Campaign/Stack/Creative edits and selective creative review isolation verified via `tsc --noEmit` (`ads-api`, `auth` -> 0 errors), backend Jest (`plan0123-workflow.spec.ts` within 5-suite / 50-test pass), and isolated PostgreSQL 17 (`--plan0123` `plan0077-integration.spec.ts` 7/7 passed in 26.705s; `--plan0123-billing` `funding-postgres.spec.ts` 1 passed / 94 skipped in 599ms). Staging/browser checks pending.
 2026-11-20 | PLAN-0124 | IN_PROGRESS | Fixed `ImpressionTokenService.secretKey` to use a dynamic getter reading `process.env.ADS_IMPRESSION_SIGNING_KEY` for runtime key rotation; verified `house-click-policy.ts`, `delivery.service.ts`, and `AdminHouseAdsController` via `tsc --noEmit` (`ads-api`, `auth` -> 0 errors), Jest (`plan0124-house-click.spec.ts` within 5-suite / 50-test pass), and isolated PostgreSQL 17 (`--plan0124` `funding-postgres.spec.ts` 1 passed / 94 skipped in 578ms). Staging redirect check pending.
 2026-11-20 | PLAN-0110 | IN_PROGRESS | Phase 1 Auth locale preference validation & persistence verified via `tsc -p backend/auth/tsconfig.json --noEmit` (0 errors), Jest (`plan0110-locale.spec.ts` within 5-suite / 50-test pass), and isolated PostgreSQL 17 (`--plan0110` `funding-postgres.spec.ts` 1 passed / 94 skipped in 466ms). Phases 2-5 consumer/layout integration pending.
+
+---
+### [ACT-20261121-002] 2026-11-21 08:15 UTC — PLAN-0126 HTML Meta Verification Lookup Fix
+- **Plan Reference:** PLAN-0126
+- **Files Modified:**
+  - `api/ads-api/src/modules/verification/website-proof.ts`
+  - `auth/test/security/website-proof.spec.ts`
+- **Summary:** Fixed `fetchWebsiteProof()` custom `lookup` callback to return `[{ address, family: 4 }]` when Node's `net.Socket.connect` passes `{ all: true }`, resolving `TypeError [ERR_INVALID_IP_ADDRESS]: Invalid IP address: undefined` on `Check HTML meta` (`stemfillltd.com`).
+- **Verification:** `pnpm --filter @crimfig/ads-api lint`, `pnpm --filter @crimfig/ads-api build`, `jest test/security/website-proof.spec.ts --runInBand` (42/42 passed), and live `fetchWebsiteProof` + `hasVerificationMeta` check against `https://stemfillltd.com/` (`matched: true`).

@@ -73,7 +73,17 @@ export async function fetchWebsiteProof(url: URL): Promise<string> {
     const request = https.request(url, {
       method: 'GET', agent: false,
       // Preserve URL hostname/SNI/certificate validation while preventing a second DNS lookup.
-      lookup: (_hostname, _options, callback) => callback(null, address, 4),
+      lookup: (_hostname, options, callback) => {
+        const cb = typeof options === 'function' ? options : callback;
+        const all = typeof options === 'object' && options !== null && 'all' in options && Boolean((options as { all?: boolean }).all);
+        if (all) {
+          (cb as (err: NodeJS.ErrnoException | null, addresses: Array<{ address: string; family: number }>) => void)(null, [
+            { address, family: 4 },
+          ]);
+        } else {
+          (cb as (err: NodeJS.ErrnoException | null, address: string, family: number) => void)(null, address, 4);
+        }
+      },
       headers: { 'User-Agent': 'Crimfig-Verification-Bot/1.0', Accept: 'text/html', 'Accept-Encoding': 'identity' },
     }, response => {
       const fail = (message: string) => { response.destroy(); request.destroy(new Error(message)); };

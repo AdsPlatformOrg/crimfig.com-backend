@@ -54,6 +54,8 @@ test('pins lookup while retaining HTTPS hostname and disables shared agent', asy
   await expect(fetchWebsiteProof(target)).resolves.toBe('<html>ok</html>');
   const callback = jest.fn(); setup.options().lookup('example.com', {}, callback);
   expect(callback).toHaveBeenCalledWith(null, '93.184.216.34', 4);
+  const allCallback = jest.fn(); setup.options().lookup('example.com', { all: true }, allCallback);
+  expect(allCallback).toHaveBeenCalledWith(null, [{ address: '93.184.216.34', family: 4 }]);
   expect(requestMock.mock.calls[0][0].hostname).toBe('example.com');
   expect(setup.options().agent).toBe(false);
 });
