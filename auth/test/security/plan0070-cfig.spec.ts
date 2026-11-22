@@ -55,11 +55,15 @@ describe("PLAN-0070 safeguards and canonical policy", () => {
       ).toThrow();
     expect(() => transition("invalidate", 0n, 0n, at, at, true)).toThrow();
   });
-  it("disabled earning and conversion never write reward or funded assets", async () => {
+  it("admin-disabled earning and locked conversion never write reward or funded assets", async () => {
     const queries: string[] = [];
     const tx = {
       execute: jest.fn(async (q: any) => {
-        queries.push(new PgDialect().sqlToQuery(q).sql);
+        const sqlText = new PgDialect().sqlToQuery(q).sql;
+        queries.push(sqlText);
+        if (sqlText.includes("program_feature_switches")) {
+          return { rows: [{ enabled: false }] };
+        }
         return { rows: [] };
       }),
     };
@@ -193,13 +197,18 @@ describe("PLAN-0070 safeguards and canonical policy", () => {
   });
   it("preserves zero virtual balances and never claims backing", async () => {
     const s = new CfigService({
-      execute: async () => ({
-        rows: [{ pending: "0", available: "0", invalid: "0", converted: "0" }],
-      }),
+      execute: async (q: any) => {
+        const sqlText = new PgDialect().sqlToQuery(q).sql;
+        if (sqlText.includes("program_feature_switches")) return { rows: [{ enabled: true }] };
+        return {
+          rows: [{ pending: "0", available: "0", invalid: "0", converted: "0" }],
+        };
+      },
     });
     expect(await s.balances(id)).toMatchObject({
       balances: { pending: "0", available: "0", invalid: "0", converted: "0" },
-      earningEnabled: false,
+      earningEnabled: true,
+      conversionEnabled: false,
       backedValue: null,
     });
   });

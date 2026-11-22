@@ -158,8 +158,10 @@ export const adsCampaigns = pgTable(
     // Whether new promoters can apply to run this campaign
     acceptingPromoters: boolean("accepting_promoters").notNull().default(true),
 
-    // Non-cash promotional bonus delivery flag (PLAN-0017 / PLAN-0018)
+    // Non-cash promotional bonus delivery flag (PLAN-0017 / PLAN-0018 / PLAN-0154)
     isBonusDelivery: boolean("is_bonus_delivery").notNull().default(false),
+    bonusReservedCents: integer("bonus_reserved_cents").notNull().default(0),
+    bonusSpentCents: integer("bonus_spent_cents").notNull().default(0),
 
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()

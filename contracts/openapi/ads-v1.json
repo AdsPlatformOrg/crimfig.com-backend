@@ -10026,6 +10026,10 @@
             "maxLength": 255,
             "minLength": 1,
             "type": "string"
+          },
+          "useBonusCredit": {
+            "nullable": true,
+            "type": "boolean"
           }
         },
         "required": [
@@ -21075,6 +21079,10 @@
             "maxLength": 255,
             "nullable": true,
             "type": "string"
+          },
+          "useBonusCredit": {
+            "nullable": true,
+            "type": "boolean"
           }
         },
         "required": [

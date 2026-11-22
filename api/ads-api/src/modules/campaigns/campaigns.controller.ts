@@ -17,6 +17,7 @@ import { documentAdsController } from '../../contracts/ads-contract';
 import {
   ArrayMaxSize,
   IsArray,
+  IsBoolean,
   IsObject,
   IsIn,
   IsInt,
@@ -61,6 +62,7 @@ export class SaveCampaignDto extends MutationDto {
   @IsOptional() @IsArray() @IsString({each:true}) locations?:string[];
   @IsOptional() @IsArray() @ArrayMaxSize(30) stacks?:object[];
   @IsOptional() @IsISO8601() endsAt?: string;
+  @IsOptional() @IsBoolean() useBonusCredit?: boolean;
 }
 
 export class CreateCampaignDto {
@@ -156,6 +158,10 @@ export class CreateCampaignDto {
   @ArrayMaxSize(50)
   @IsString({ each: true })
   locations?: string[];
+
+  @IsOptional()
+  @IsBoolean()
+  useBonusCredit?: boolean;
 }
 
 export class AddCreativeDto extends MutationDto {

@@ -17,7 +17,7 @@ import { DATABASE_TOKEN } from '../database/database.module';
 import { Inject } from '@nestjs/common';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, sql } from 'drizzle-orm';
 
 @Controller('rewards')
 export class RewardsController {
@@ -54,8 +54,18 @@ export class RewardsController {
       .from(schema.deferredRewardEntitlements)
       .where(eq(schema.deferredRewardEntitlements.userId, userId));
 
+    let paidSwitchOn = true;
+    try {
+      const sw: any = await this.db.execute(
+        sql`SELECT enabled FROM program_feature_switches WHERE key='redeemable_points' LIMIT 1`,
+      );
+      const row = sw?.rows?.[0] ?? sw?.[0];
+      if (row?.enabled !== undefined) paidSwitchOn = Boolean(row.enabled);
+    } catch {
+      // Fallback when switch table is absent in lightweight unit fixtures
+    }
     return {
-      paidEarningEnabled: gate('paid'),
+      paidEarningEnabled: gate('paid', process.env, paidSwitchOn),
       availablePoints: balance.availablePoints,
       pendingPoints: balance.pendingPoints,
       reservedPoints: balance.reservedPoints,

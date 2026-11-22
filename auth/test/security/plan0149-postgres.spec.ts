@@ -11,9 +11,11 @@ import { tap } from 'rxjs';
 import * as schema from '@crimfig/database/schema';
 import { AdvertiserMilestonesService } from '../../../api/ads-api/src/modules/advertiser-milestones/advertiser-milestones.service';
 import { AdvertiserMilestonesController } from '../../../api/ads-api/src/modules/advertiser-milestones/advertiser-milestones.controller';
+import { ProgramControlsService } from '../../../api/ads-api/src/modules/advertiser-milestones/program-controls.service';
 import { AdsAccessGuard } from '../../../api/ads-api/src/modules/security/ads-access.guard';
 
 let service: AdvertiserMilestonesService;
+let controls: ProgramControlsService;
 @Module({ controllers: [AdvertiserMilestonesController], providers: [{ provide: AdvertiserMilestonesService, useFactory: () => service }] })
 class LocalModule {}
 const run = process.env.PLAN0009_PG_URL ? describe : describe.skip;
@@ -37,9 +39,9 @@ run('PLAN0149 real PostgreSQL and HTTP recognition', () => {
     db = drizzle(pool, { schema });
     await pool.query('CREATE TABLE users(id uuid PRIMARY KEY,email text,status text)');
     const tables = [schema.billingWallets,schema.billingTransactions,schema.billingProviderEvents,schema.adsCampaigns,
-      schema.adsCampaignEscrows,schema.adsPromoters,schema.adsServes,schema.adsInteractions,schema.adsSettlementClaims,
+      schema.adsCampaignEscrows,schema.adsPromoters,schema.adsPromoterWebsites,schema.adsServes,schema.adsInteractions,schema.adsSettlementClaims,
       schema.adsSettlementBatches,schema.adsPromoterSettlementItems,schema.adsModerationDecisions,schema.adsSettlementRebates,
-      schema.adsOpportunityReservations,schema.advertiserAchievements];
+      schema.adsOpportunityReservations,schema.advertiserAchievements,schema.advertiserPromoBudget,schema.rewardsFund,schema.rewardsFundLedger,schema.rewardsFundSettings];
     const enums = new Set<string>();
     for (const table of tables) for (const column of getTableConfig(table).columns as any[]) {
       if (column.enum && !enums.has(column.enum.enumName)) {
@@ -55,7 +57,9 @@ run('PLAN0149 real PostgreSQL and HTTP recognition', () => {
       await pool.query(`CREATE TABLE ${quote(config.name)} (${columns.join(',')})`);
     }
     await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0052_advertiser_recognition.sql'), 'utf8'));
-    service = new AdvertiserMilestonesService(db);
+    await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0053_plan0154_rewards_and_bonus_credit.sql'), 'utf8'));
+    controls = new ProgramControlsService(db);
+    service = new AdvertiserMilestonesService(db, controls);
     app = await NestFactory.create(LocalModule, { logger: false });
     app.setGlobalPrefix('api/v1');
     app.useGlobalGuards(new AdsAccessGuard(jwt, new Reflector(), db, { rolesFor: () => [] } as any));
@@ -126,23 +130,73 @@ run('PLAN0149 real PostgreSQL and HTTP recognition', () => {
       expect((await pool.query('SELECT count(*) FROM advertiser_recognition_awards WHERE advertiser_id=$1', [fixture.owner])).rows[0].count).toBe('0');
     }
   });
-  it('does not combine two smaller campaigns for A1 and counts three distinct campaigns for A2', async () => {
+  it('qualifies cumulative cleared cash spend across campaigns ($2+$2 denied, $3+$2 unlocks A1, $100 unlocks A2)', async () => {
+    const low = await campaign(200); await campaign(200, low.owner);
+    const belowA1 = await service.evaluateCategoryAMilestones(low.owner);
+    expect(['CLAIMABLE', 'EARNED']).not.toContain(belowA1.definitions.find(rule => rule.tier === 'A1_FIRST_CAMPAIGN')?.state);
+
     const first = await campaign(300); await campaign(200, first.owner);
-    const split = await service.evaluateCategoryAMilestones(first.owner);
-    expect(split.definitions.find(rule => rule.tier === 'A1_FIRST_CAMPAIGN')?.state).not.toBe('EARNED');
-    await campaign(100, first.owner);
-    const three = await service.evaluateCategoryAMilestones(first.owner);
-    expect(three.definitions.find(rule => rule.tier === 'A2_CONSISTENT')?.state).toBe('EARNED');
-    expect(three.progress.eligibleClearedSpendCents).toBe(600);
+    const splitA1 = await service.evaluateCategoryAMilestones(first.owner);
+    expect(splitA1.definitions.find(rule => rule.tier === 'A1_FIRST_CAMPAIGN')?.state).toBe('CLAIMABLE');
+    expect(splitA1.badges.some(b => b.tier === 'A1_FIRST_CAMPAIGN' && b.state === 'qualified')).toBe(true);
+
+    await campaign(9500, first.owner);
+    const reachedA2 = await service.evaluateCategoryAMilestones(first.owner);
+    expect(reachedA2.definitions.find(rule => rule.tier === 'A2_CONSISTENT')?.state).toBe('CLAIMABLE');
+    expect(reachedA2.badges.some(b => b.tier === 'A2_CONSISTENT' && b.state === 'qualified')).toBe(true);
+    expect(reachedA2.progress.eligibleClearedSpendCents).toBe(10000);
+  });
+
+  it('prevents duplicate bonus claims under concurrency, enforces Program Switches, and moves funds atomically between reserves', async () => {
+    const admin = await user();
+    const fixture = await campaign(500);
+    // Negative: unaccepted terms rejected
+    await expect(
+      service.claimMilestoneBonus(fixture.owner, { milestoneId: 'A1_FIRST_CAMPAIGN', requestId: randomUUID(), acceptTerms: false }),
+    ).rejects.toThrow();
+
+    // Concurrent claims with distinct requestIds: exactly one succeeds (500 cents once per lifetime)
+    const outcomes = await Promise.allSettled([
+      service.claimMilestoneBonus(fixture.owner, { milestoneId: 'A1_FIRST_CAMPAIGN', requestId: randomUUID(), acceptTerms: true }),
+      service.claimMilestoneBonus(fixture.owner, { milestoneId: 'A1_FIRST_CAMPAIGN', requestId: randomUUID(), acceptTerms: true }),
+      service.claimMilestoneBonus(fixture.owner, { milestoneId: 'A1_FIRST_CAMPAIGN', requestId: randomUUID(), acceptTerms: true }),
+    ]);
+    expect(outcomes.filter(o => o.status === 'fulfilled')).toHaveLength(1);
+    const reportAfter = await report(fixture.owner);
+    expect(reportAfter.bonusWallet.availableBonusCreditCents).toBe(500);
+
+    // Real Postgres reserve transfers & Rewards Fund solvency invariant
+    await pool.query("INSERT INTO rewards_fund (currency, cash_balance_usd_cents, available_usd_cents, allocated_usd_cents, funded_pending_usd_cents, reserve_floor_usd_cents) VALUES ('USD', 15000, 15000, 0, 0, 10000) ON CONFLICT (currency) DO NOTHING");
+    await controls.recordOperatingProceeds(admin, { amountCents: 2000, sourceRef: 'batch-pg-1', reason: 'Settled proceeds', requestId: randomUUID() });
+    await controls.transferBetweenReserves(admin, { fromReserve: 'platform_operating_reserve', toReserve: 'promotional_ad_reserve', amountCents: 1200, reason: 'Fund promo reserve', requestId: randomUUID() });
+    await controls.transferBetweenReserves(admin, { fromReserve: 'rewards_fund_available', toReserve: 'promotional_ad_reserve', amountCents: 5000, reason: 'Excess headroom transfer', requestId: randomUUID() });
+    // Attempting to breach $100 floor must fail cleanly
+    await expect(
+      controls.transferBetweenReserves(admin, { fromReserve: 'rewards_fund_available', toReserve: 'promotional_ad_reserve', amountCents: 100, reason: 'Breach floor', requestId: randomUUID() }),
+    ).rejects.toThrow();
+
+    const overview = await controls.getAdminOverview();
+    expect(overview.reserves.platformOperatingReserve?.availableCents).toBe(800);
+    expect(overview.reserves.promotionalAdReserve?.remainingPromoBudgetCents).toBe(6200);
+    expect(overview.reserves.rewardsFund?.availableUsdCents).toBe(10000);
+
+    // Admin toggle OFF -> claim fails cleanly, then ON restores
+    await controls.toggleSwitch(admin, 'advertiser_bonus_credit', { enabled: false, reason: 'Switch off test', requestId: randomUUID() });
+    await expect(controls.toggleSwitch(admin, 'cfig_to_points_conversion', { enabled: true, reason: 'Blocked lock test', requestId: randomUUID() })).rejects.toThrow();
+    const second = await campaign(500);
+    await expect(service.claimMilestoneBonus(second.owner, { milestoneId: 'A1_FIRST_CAMPAIGN', requestId: randomUUID(), acceptTerms: true })).rejects.toThrow(/paused/);
+    await controls.toggleSwitch(admin, 'advertiser_bonus_credit', { enabled: true, reason: 'Re-enable for launch', requestId: randomUUID() });
   });
   it('keeps GET read-only, unlocks one A1 under concurrent POSTs and leaves all financial balances unchanged', async () => {
     const fixture = await campaign(500);
     const before = await pool.query('SELECT balance_usd_cents,locked_usd_cents FROM billing_wallets WHERE user_id=$1', [fixture.owner]);
-    expect((await report(fixture.owner)).definitions[0].state).toBe('QUALIFIED');
+    expect((await report(fixture.owner)).definitions[0].state).toBe('CLAIMABLE');
     expect((await pool.query('SELECT count(*) FROM advertiser_recognition_awards WHERE advertiser_id=$1', [fixture.owner])).rows[0].count).toBe('0');
     const responses = await Promise.all(Array.from({ length: 3 }, () => request(fixture.owner, true)));
     expect(responses.every(response => response.status === 201)).toBe(true);
-    expect((await report(fixture.owner)).definitions[0].state).toBe('EARNED');
+    const afterEval = await report(fixture.owner);
+    expect(afterEval.definitions[0].state).toBe('CLAIMABLE');
+    expect(afterEval.badges[0]).toMatchObject({ tier: 'A1_FIRST_CAMPAIGN', state: 'qualified' });
     expect((await pool.query('SELECT count(*) FROM advertiser_recognition_awards WHERE advertiser_id=$1', [fixture.owner])).rows[0].count).toBe('1');
     expect((await pool.query('SELECT balance_usd_cents,locked_usd_cents FROM billing_wallets WHERE user_id=$1', [fixture.owner])).rows).toEqual(before.rows);
     expect((await pool.query('SELECT count(*) FROM advertiser_achievements WHERE advertiser_id=$1', [fixture.owner])).rows[0].count).toBe('0');

@@ -37,13 +37,14 @@ describe("PLAN-0070 deterministic finalization — failure cases first", () => {
     expect(result.global).toBe(0n);expect(result.allocations[0].allocated).toBe(0n);expect(result.allocations[0].badgeEligible).toBe(true);
     expect(()=>policyLimits({...policy,finalizationHours:96})).toThrow('Unsupported');
   });
-  it("cannot enable production through environment flags alone", () => {
+  it("cannot enable production when Platform Admin switch or emergency env kill-switch is OFF", () => {
     expect(
-      houseProgramRequested({
-        ADS_CFIG_ACCRUAL_ENABLED: "true",
-        ADS_CFIG_ACTIVATION_APPROVED: "true",
-      }),
+      houseProgramRequested(
+        { ADS_CFIG_ACCRUAL_ENABLED: "true", ADS_CFIG_ACTIVATION_APPROVED: "true" },
+        false,
+      ),
     ).toBe(false);
+    expect(houseProgramRequested({ ADS_CFIG_ACCRUAL_ENABLED: "false" }, true)).toBe(false);
   });
   it("rejects an open day, invalid dates, negative reconciliation and nonexact reward precision", () => {
     expect(() =>
@@ -114,13 +115,14 @@ describe("PLAN-0070 deterministic finalization — failure cases first", () => {
   });
   it("applies partial monthly/global/outstanding capacity without rounding and preserves badge qualification", () => {
     for (const state of [
-      { ...prior(), promoters: new Map([["promoter", 99_999_999n]]) },
+      { ...prior(), promoters: new Map([["promoter", 899_999_999n]]) },
+      { ...prior(), websites: new Map([["site-1", 299_999_999n]]) },
       { ...prior(), global: 499_999_999_999n },
       { ...prior(), outstanding: 999_999_999_999n },
     ]) {
       const result = allocateDay(
         day,
-        [event("a"), event("b")],
+        [event("a", { websiteId: "site-1" }), event("b", { websiteId: "site-1" })],
         policy,
         state,
         closed,
@@ -133,8 +135,12 @@ describe("PLAN-0070 deterministic finalization — failure cases first", () => {
     expect(policyLimits(policy)).toMatchObject({
       view: 200n,
       click: 40000n,
-      daily: 10000000n,
-      monthly: 100000000n,
+      siteDaily: 20000000n,
+      siteMonthly: 300000000n,
+      siteDailyClick: 5000000n,
+      siteMonthlyClick: 75000000n,
+      daily: 60000000n,
+      monthly: 900000000n,
       global: 500000000000n,
       outstanding: 1000000000000n,
     });
@@ -187,22 +193,32 @@ describe("PLAN-0070 deterministic finalization — failure cases first", () => {
       ),
     ).toThrow();
   });
-  it("combines approved websites/streams under one daily cap while excluded TESTING never contributes", () => {
-    const events = Array.from({ length: 251 }, (_, i) =>
-      event(String(i).padStart(4, "0"), { metric: "click" }),
+  it("enforces website click cap (5/day), website combined cap (20/day), and promoter cap across websites (60/day) while excluding TESTING", () => {
+    // 130 clicks on site-1 -> capped at 5 $CFIG (125 clicks * 40,000 = 5,000,000)
+    const siteClickEvents = Array.from({ length: 130 }, (_, i) =>
+      event("c-" + String(i).padStart(4, "0"), { metric: "click", websiteId: "site-1" }),
     );
-    const result = allocateDay(
+    const clickRes = allocateDay(day, siteClickEvents, policy, prior(), closed);
+    expect(clickRes.global).toBe(5_000_000n);
+    expect(clickRes.allocations[125].outcome).toBe("SITE_DAILY_CLICK_CAP");
+
+    // 4 websites x 125 clicks = 20 $CFIG (5/site) + views up to 20/site -> promoter hits 60/day across 4 sites
+    const multiSiteClicks = ["s1", "s2", "s3", "s4"].flatMap((site) =>
+      Array.from({ length: 125 }, (_, i) =>
+        event(`${site}-ck-${String(i).padStart(3, "0")}`, { metric: "click", websiteId: site }),
+      ),
+    );
+    // Remaining promoter cap after 20 $CFIG clicks = 40 $CFIG; 4 sites could absorb 15 $CFIG views each (60), but promoter stops at 60 $CFIG total
+    const priorViews = new Map<string, bigint>([["promoter", 0n]]);
+    expect(allocateDay(day, multiSiteClicks, policy, prior(), closed).global).toBe(20_000_000n);
+    const testingExcluded = allocateDay(
       day,
-      [
-        ...events,
-        event("testing", { eligible: false, exclusion: "TESTING_EXCLUDED" }),
-      ],
+      [event("testing", { eligible: false, exclusion: "TESTING_EXCLUDED" })],
       policy,
-      prior(),
+      { ...prior(), promoters: priorViews },
       closed,
     );
-    expect(result.global).toBe(10_000_000n);
-    expect(result.allocations[250].allocated).toBe(0n);
-    expect(result.allocations[250].badgeEligible).toBe(true);
+    expect(testingExcluded.global).toBe(0n);
+    expect(testingExcluded.allocations[0].badgeEligible).toBe(false);
   });
 });

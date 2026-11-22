@@ -1,5 +1,6 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { AdvertiserMilestonesService } from '../../advertiser-milestones/advertiser-milestones.service';
+import { ProgramControlsService } from '../../advertiser-milestones/program-controls.service';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@crimfig/database/schema';
 import { DATABASE_TOKEN } from '../../database/database.module';
@@ -25,6 +26,7 @@ export class RewardsReconciliationJob implements CronJobHandler {
     @Inject(DATABASE_TOKEN)
     private readonly db: NodePgDatabase<typeof schema>,
     @Optional() private readonly milestones?: AdvertiserMilestonesService,
+    @Optional() private readonly controls?: ProgramControlsService,
   ) {}
 
   async execute(
@@ -77,6 +79,9 @@ export class RewardsReconciliationJob implements CronJobHandler {
 
     const milestoneCursor = typeof context.lastCheckpoint?.milestoneCursor === 'string' ? context.lastCheckpoint.milestoneCursor : null;
     const milestones = this.milestones ? await this.milestones.reconcile(milestoneCursor, context.mode === 'ACTIVE', () => context.assertLeaseOwnership()) : null;
+    const bonusPromoClearance = this.controls && context.mode === 'ACTIVE'
+      ? await this.controls.clearMaturedBonusPromoEarnings(() => context.assertLeaseOwnership())
+      : { skippedReportOnly: true };
     const checkpoint = {
       lastReconciledFrom: lower,
       lastReconciledUntil: upper,
@@ -102,6 +107,7 @@ export class RewardsReconciliationJob implements CronJobHandler {
         pointsReconciliation,
         houseReconciliation,
         advertiserRecognition: milestones,
+        bonusPromoClearance,
       },
     };
   }

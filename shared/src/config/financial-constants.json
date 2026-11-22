@@ -465,14 +465,18 @@
     ]
   },
   "houseRewards": {
-    "enabled": false,
+    "enabled": true,
     "conversionEnabled": false,
-    "policyVersion": "CFIG-HOUSE-REWARDS-v1.0.0",
+    "policyVersion": "CFIG-HOUSE-REWARDS-v1.1.0",
     "impressionsPerCfig": 5000,
     "clicksPerCfig": 25,
-    "dailyCapApprovedCfig": 10,
+    "dailyCapPerWebsiteCfig": 20,
+    "monthlyCapPerWebsiteCfig": 300,
+    "dailyClickCapPerWebsiteCfig": 5,
+    "monthlyClickCapPerWebsiteCfig": 75,
+    "dailyCapApprovedCfig": 60,
     "dailyCapTestingCfig": 0,
-    "monthlyCapPerPromoterCfig": 100,
+    "monthlyCapPerPromoterCfig": 900,
     "monthlyBudgetUsdCents": 5000,
     "maxOutstandingUsdCents": 10000,
     "proposedCfigPerFundedPoint": 100,
@@ -514,7 +518,7 @@
     "maxCandidatesPerDay": 200000
   },
   "fundedRewards": {
-    "enabled": false,
+    "enabled": true,
     "fundingEnabled": false,
     "conversionEnabled": false,
     "policyVersion": "FUNDED-REWARDS-v1.0.0",

@@ -167,6 +167,18 @@ const responses: Record<string, Record<string, Schema>> = {
     reviewCampaign: reviewResult, emergencyOverride: reviewResult,
     suspendPromoter: object({ id: str(), isSuspended: bool() }),
   },
+  AdvertiserMilestonesController: {
+    getAchievements: json(),
+    evaluateAchievements: json(),
+    claimBonusCredit: json(),
+  },
+  AdminRewardsControlsController: {
+    overview: json(),
+    toggleSwitch: json(),
+    transferReserves: json(),
+    recordOperatingProceeds: json(),
+    acknowledgeAlert: json(),
+  },
 };
 
 /** Derive documentation from actual class-validator fields (including inline controller DTOs). */

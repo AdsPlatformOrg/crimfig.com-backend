@@ -80,11 +80,27 @@ export class CfigService {
         "A reason of 3 to 500 characters is required",
       );
   }
-  status() {
+  private async houseSwitchEnabled(conn: any = this.db): Promise<boolean> {
+    try {
+      const res = rows(
+        await conn.execute(
+          sql`SELECT enabled FROM program_feature_switches WHERE key='house_cfig_earning' LIMIT 1`,
+        ),
+      );
+      if (res.length > 0 && res[0].enabled !== undefined) {
+        return Boolean(res[0].enabled);
+      }
+    } catch {
+      // Unmigrated or lightweight unit mock falls back to canonical policy flag.
+    }
+    return true;
+  }
+  async status() {
+    const dbSwitch = await this.houseSwitchEnabled();
     return {
       currency: "CFIG",
       scale: CFIG_SCALE.toString(),
-      earningEnabled: houseProgramRequested(),
+      earningEnabled: houseProgramRequested(process.env, dbSwitch),
       housePolicy: canonicalHousePolicy(),
       finalizationHours: 72,
       conversionEnabled: false,
@@ -109,7 +125,7 @@ export class CfigService {
       ),
     );
     return {
-      ...this.status(),
+      ...(await this.status()),
       balances: { ...balance },
       units: "micro-cfig",
       backedValue: null,
@@ -474,7 +490,13 @@ export class CfigService {
     });
     return this.locked("global-allocation", async (tx) => {
       if (input.action === "accrue" || input.action === "reject") {
-        if (input.action === "accrue" && !houseProgramRequested())
+        if (
+          input.action === "accrue" &&
+          !houseProgramRequested(
+            process.env,
+            await this.houseSwitchEnabled(tx),
+          )
+        )
           throw new ServiceUnavailableException(
             "Virtual earning disabled pending separate activation approval",
           );
@@ -683,7 +705,12 @@ export class CfigService {
         throw new ConflictException(
           "UTC day already finalized; it cannot be reopened",
         );
-      if (!houseProgramRequested())
+      if (
+        !houseProgramRequested(
+          process.env,
+          await this.houseSwitchEnabled(tx),
+        )
+      )
         throw new ServiceUnavailableException(
           "Finalization disabled pending explicit activation",
         );
@@ -741,9 +768,26 @@ export class CfigService {
           sql`SELECT promoter_id,sum(allocated)::text AS used FROM cfig_allocations WHERE day>=${month + "-01"}::date AND day<${day}::date GROUP BY promoter_id`,
         ),
       );
+      const priorWebsiteRows = rows(
+        await tx.execute(
+          sql`SELECT s.website_id,a.metric,sum(a.allocated)::text AS used FROM cfig_allocations a JOIN ads_serves s ON s.id=a.serve_id WHERE a.day>=${month + "-01"}::date AND a.day<${day}::date AND s.website_id IS NOT NULL GROUP BY s.website_id,a.metric`,
+        ),
+      );
       const priorPromoters = new Map<string, bigint>(
         priorRows.map((r) => [r.promoter_id, BigInt(r.used)]),
       );
+      const priorWebsites = new Map<string, bigint>();
+      const priorWebsiteClicks = new Map<string, bigint>();
+      for (const r of priorWebsiteRows) {
+        const used = BigInt(r.used);
+        priorWebsites.set(r.website_id, (priorWebsites.get(r.website_id) ?? 0n) + used);
+        if (r.metric === "click") {
+          priorWebsiteClicks.set(
+            r.website_id,
+            (priorWebsiteClicks.get(r.website_id) ?? 0n) + used,
+          );
+        }
+      }
       const [outstanding] = rows(
         await tx.execute(
           sql`SELECT (coalesce((SELECT sum(allocated) FROM cfig_allocations WHERE day<${day}::date),0)+coalesce((SELECT sum(l.pending_delta+l.available_delta) FROM cfig_ledger l WHERE l.kind IN ('invalidate','convert') AND (l.created_at AT TIME ZONE 'UTC')::date<=${day}::date AND EXISTS(SELECT 1 FROM cfig_allocations a WHERE a.event_id=l.event_id)),0)+coalesce((SELECT sum(l.pending_delta+l.available_delta) FROM cfig_ledger l WHERE NOT EXISTS(SELECT 1 FROM cfig_allocations a WHERE a.event_id=l.event_id)),0))::text AS units`,
@@ -847,6 +891,7 @@ export class CfigService {
           eventId: row.id,
           serveId: row.serve_id,
           promoterId: row.promoter_id,
+          websiteId: row.website_id ?? row.serve_record?.website_id ?? undefined,
           servedAt: row.ordered_serve_time,
           receivedAt: new Date(row.created_at),
           validatedAt: row.validated_at ? new Date(row.validated_at) : null,
@@ -862,6 +907,8 @@ export class CfigService {
         policy,
         {
           promoters: priorPromoters,
+          websites: priorWebsites,
+          websiteClicks: priorWebsiteClicks,
           global: priorRows.reduce((a, r) => a + BigInt(r.used), 0n),
           outstanding: BigInt(outstanding.units),
         },

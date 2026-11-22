@@ -1,10 +1,14 @@
 import financial from "../../../../../shared/src/config/financial-constants.json";
 export const SCALE = 1_000_000n;
-export function houseProgramRequested(env = process.env) {
+export function houseProgramRequested(
+  env = process.env,
+  dbSwitchEnabled = true,
+) {
   return (
     financial.houseRewards.enabled === true &&
-    env.ADS_CFIG_ACCRUAL_ENABLED === "true" &&
-    env.ADS_CFIG_ACTIVATION_APPROVED === "true"
+    dbSwitchEnabled === true &&
+    env.ADS_CFIG_ACCRUAL_ENABLED !== "false" &&
+    env.ADS_CFIG_ACTIVATION_APPROVED !== "false"
   );
 }
 export function canonicalHousePolicy() {
@@ -24,9 +28,28 @@ export function policyLimits(p: HousePolicy) {
     "pendingHoldHours",
     "maxCandidatesPerDay",
   ] as const)
-    if (!Number.isSafeInteger(p[key]) || p[key] < 0 ||
-      (p[key] === 0 && !['dailyCapApprovedCfig','monthlyCapPerPromoterCfig','monthlyBudgetUsdCents','maxOutstandingUsdCents'].includes(key)))
+    if (
+      !Number.isSafeInteger(p[key]) ||
+      p[key] < 0 ||
+      (p[key] === 0 &&
+        ![
+          "dailyCapApprovedCfig",
+          "monthlyCapPerPromoterCfig",
+          "monthlyBudgetUsdCents",
+          "maxOutstandingUsdCents",
+        ].includes(key))
+    )
       throw new Error("Invalid House policy limits");
+  for (const key of [
+    "dailyCapPerWebsiteCfig",
+    "monthlyCapPerWebsiteCfig",
+    "dailyClickCapPerWebsiteCfig",
+    "monthlyClickCapPerWebsiteCfig",
+  ] as const) {
+    const val = (p as any)[key];
+    if (val !== undefined && (!Number.isSafeInteger(val) || val < 0))
+      throw new Error("Invalid House website policy limits");
+  }
   if (
     p.qualifyingSupply !== "approved_only" ||
     p.dailyCapTestingCfig !== 0 ||
@@ -41,9 +64,15 @@ export function policyLimits(p: HousePolicy) {
     throw new Error("Invalid funded points valuation");
   if (SCALE % BigInt(p.impressionsPerCfig) || SCALE % BigInt(p.clicksPerCfig))
     throw new Error("Reward precision is not exact");
+  const optional = (v: unknown) =>
+    typeof v === "number" ? BigInt(v) * SCALE : null;
   return {
     view: SCALE / BigInt(p.impressionsPerCfig),
     click: SCALE / BigInt(p.clicksPerCfig),
+    siteDaily: optional((p as any).dailyCapPerWebsiteCfig),
+    siteMonthly: optional((p as any).monthlyCapPerWebsiteCfig),
+    siteDailyClick: optional((p as any).dailyClickCapPerWebsiteCfig),
+    siteMonthlyClick: optional((p as any).monthlyClickCapPerWebsiteCfig),
     daily: BigInt(p.dailyCapApprovedCfig) * SCALE,
     monthly: BigInt(p.monthlyCapPerPromoterCfig) * SCALE,
     global:
@@ -73,6 +102,7 @@ export interface RewardCandidate {
   eventId: string;
   serveId: string;
   promoterId: string;
+  websiteId?: string;
   servedAt: string;
   receivedAt: Date;
   validatedAt: Date | null;
@@ -96,6 +126,8 @@ export function allocateDay(
     promoters: Map<string, bigint>;
     global: bigint;
     outstanding: bigint;
+    websites?: Map<string, bigint>;
+    websiteClicks?: Map<string, bigint>;
   },
   now: Date,
 ) {
@@ -107,6 +139,8 @@ export function allocateDay(
     prior.global,
     prior.outstanding,
     ...prior.promoters.values(),
+    ...(prior.websites?.values() ?? []),
+    ...(prior.websiteClicks?.values() ?? []),
   ])
     if (amount < 0n) throw new Error("Invalid cap reconciliation");
   const sorted = [...events].sort((a, b) => {
@@ -122,6 +156,10 @@ export function allocateDay(
   });
   const daily = new Map<string, bigint>(),
     monthly = new Map(prior.promoters),
+    siteDaily = new Map<string, bigint>(),
+    siteMonthly = new Map(prior.websites ?? []),
+    siteDailyClick = new Map<string, bigint>(),
+    siteMonthlyClick = new Map(prior.websiteClicks ?? []),
     seen = new Set<string>();
   let global = prior.global,
     outstanding = prior.outstanding;
@@ -166,33 +204,67 @@ export function allocateDay(
     const entitled = c.metric === "click" ? limits.click : limits.view;
     const d = daily.get(c.promoterId) || 0n,
       m = monthly.get(c.promoterId) || 0n;
-    const remaining = [
-      limits.daily - d,
-      limits.monthly - m,
-      limits.global - global,
-      limits.outstanding - outstanding,
-    ];
-    const allocated = remaining.reduce((a, b) => (b < a ? b : a), entitled);
+    const siteKey = c.websiteId || "promoter:" + c.promoterId;
+    const sd = siteDaily.get(siteKey) || 0n,
+      sm = siteMonthly.get(siteKey) || 0n,
+      sdc = siteDailyClick.get(siteKey) || 0n,
+      smc = siteMonthlyClick.get(siteKey) || 0n;
+    const checks: { reason: string; left: bigint }[] = [];
+    if (c.metric === "click") {
+      if (limits.siteDailyClick !== null)
+        checks.push({
+          reason: "SITE_DAILY_CLICK_CAP",
+          left: limits.siteDailyClick - sdc,
+        });
+      if (limits.siteMonthlyClick !== null)
+        checks.push({
+          reason: "SITE_MONTHLY_CLICK_CAP",
+          left: limits.siteMonthlyClick - smc,
+        });
+    }
+    if (limits.siteDaily !== null)
+      checks.push({ reason: "SITE_DAILY_CAP", left: limits.siteDaily - sd });
+    if (limits.siteMonthly !== null)
+      checks.push({
+        reason: "SITE_MONTHLY_CAP",
+        left: limits.siteMonthly - sm,
+      });
+    checks.push(
+      { reason: "DAILY_CAP", left: limits.daily - d },
+      { reason: "MONTHLY_PROMOTER_CAP", left: limits.monthly - m },
+      { reason: "MONTHLY_GLOBAL_CAP", left: limits.global - global },
+      { reason: "OUTSTANDING_CAP", left: limits.outstanding - outstanding },
+    );
+    const allocated = checks.reduce(
+      (a, entry) => (entry.left < a ? entry.left : a),
+      entitled,
+    );
     const value = allocated > 0n ? allocated : 0n;
     daily.set(c.promoterId, d + value);
     monthly.set(c.promoterId, m + value);
+    siteDaily.set(siteKey, sd + value);
+    siteMonthly.set(siteKey, sm + value);
+    if (c.metric === "click") {
+      siteDailyClick.set(siteKey, sdc + value);
+      siteMonthlyClick.set(siteKey, smc + value);
+    }
     global += value;
     outstanding += value;
-    const reasons = [
-      "DAILY_CAP",
-      "MONTHLY_PROMOTER_CAP",
-      "MONTHLY_GLOBAL_CAP",
-      "OUTSTANDING_CAP",
-    ];
-    const reason = remaining.findIndex((v) => v <= value && value < entitled);
+    const hit = checks.find((entry) => entry.left <= value && value < entitled);
     return {
       candidate: c,
       entitled,
       allocated: value,
-      outcome:
-        value === entitled ? "ALLOCATED" : reasons[reason] || "PARTIAL_CAP",
+      outcome: value === entitled ? "ALLOCATED" : hit?.reason || "PARTIAL_CAP",
       badgeEligible: true,
     };
   });
-  return { allocations, global, outstanding, monthly };
+  return {
+    allocations,
+    global,
+    outstanding,
+    monthly,
+    siteMonthly,
+    siteMonthlyClick,
+  };
 }

@@ -42,7 +42,11 @@ export class RewardProgramWorker implements OnModuleInit, OnModuleDestroy {
   }
   async reconcile() {
     const actor = process.env.BILLING_REWARDS_WORKER_OPERATOR_ID;
-    if (this.running || !gate("paid") || !actor) return;
+    const paidDbOn = await this.db
+      .execute(sql`SELECT enabled FROM program_feature_switches WHERE key='redeemable_points' LIMIT 1`)
+      .then((r: any) => ((r.rows ?? r)[0]?.enabled !== undefined ? Boolean((r.rows ?? r)[0].enabled) : true))
+      .catch(() => true);
+    if (this.running || !gate("paid", process.env, paidDbOn) || !actor) return;
     this.running = true;
     try {
       const result = await this.db.execute(

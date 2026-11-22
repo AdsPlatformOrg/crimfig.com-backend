@@ -22,6 +22,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  Optional,
   ServiceUnavailableException,
 } from "@nestjs/common";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
@@ -40,6 +41,7 @@ import {
 import { and, asc, desc, eq, inArray, sql, or } from "drizzle-orm";
 import { DATABASE_TOKEN } from "../database/database.module";
 import { AdsEscrowService } from "../billing/ads-escrow.service";
+import { AdvertiserMilestonesService } from "../advertiser-milestones/advertiser-milestones.service";
 import {
   LocationsService,
   ResolvedTarget,
@@ -190,6 +192,7 @@ export class CampaignsService {
     private readonly db: NodePgDatabase<typeof schema>,
     private readonly escrowService: AdsEscrowService,
     private readonly locations: LocationsService,
+    @Optional() private readonly milestones?: AdvertiserMilestonesService,
   ) {}
 
   creationCapabilities() {
@@ -291,6 +294,7 @@ export class CampaignsService {
     locations?: string[];
     startsAt?: Date;
     endsAt?: Date;
+    useBonusCredit?: boolean;
   }) {
     const title = cleanString(params.title, "Campaign title", 255, true);
     if (params.budgetUsd < 5)
@@ -298,7 +302,8 @@ export class CampaignsService {
     if (!Number.isFinite(params.budgetUsd) || params.budgetUsd > 100_000_000) {
       throw new BadRequestException("Campaign budget is out of range.");
     }
-    const cpmBid = params.costPerImpressionCents ?? 50;
+    const isBonusDelivery = params.useBonusCredit === true;
+    const cpmBid = isBonusDelivery ? 50 : (params.costPerImpressionCents ?? 50);
     const cpcBid = params.costPerClickCents ?? 10;
     if (!Number.isSafeInteger(cpmBid) || cpmBid < 50 || cpmBid > 2147483647) {
       throw new BadRequestException(
@@ -411,7 +416,8 @@ export class CampaignsService {
           hourlyPacingUsdCents: hourlyPacingCents,
           remainingBudgetUsdCents: budgetCents,
           pricingVersion: 2,
-          pricingModel: params.pricingModel || "cpm",
+          pricingModel: isBonusDelivery ? "cpm" : (params.pricingModel || "cpm"),
+          isBonusDelivery,
           costPerImpressionUsdCents: cpmBid,
           costPerClickUsdCents: cpcBid,
           format: params.format || "card",
@@ -1028,8 +1034,15 @@ export class CampaignsService {
           patch.endsAt = date;
         }
       }
-      const allowed = ['expectedRevision','expectedUpdatedAt','endsAt','requestId','title','description','category','channels','budgetUsd','dailyBudgetUsd','costPerImpressionCents','costPerClickCents','pricingModel','format','targetDevices','schedule','frequencyCapPerDay','geoMode','locations','stacks'];
+      const allowed = ['expectedRevision','expectedUpdatedAt','endsAt','requestId','title','description','category','channels','budgetUsd','dailyBudgetUsd','costPerImpressionCents','costPerClickCents','pricingModel','format','targetDevices','schedule','frequencyCapPerDay','geoMode','locations','stacks','useBonusCredit'];
       if (Object.keys(input).some(k => !allowed.includes(k))) throw new BadRequestException('Unsupported campaign field.');
+      if (input.useBonusCredit !== undefined && typeof input.useBonusCredit === 'boolean') {
+        patch.isBonusDelivery = input.useBonusCredit;
+        if (input.useBonusCredit) {
+          patch.pricingModel = 'cpm';
+          patch.costPerImpressionUsdCents = 50;
+        }
+      }
       for (const [field,max] of [['title',255],['description',5000],['category',80]] as const) if (input[field] !== undefined) patch[field] = cleanString(input[field],field,max,field==='title') || null;
       if (input.channels !== undefined) {
         if (!Array.isArray(input.channels) || input.channels.length>3 || input.channels.some((v: any)=>!['websites','individuals','mobile_apps'].includes(v))) throw new BadRequestException('Unsupported channel.');
@@ -1242,10 +1255,28 @@ export class CampaignsService {
       const [c]=await this.db.select().from(adsCampaigns).where(and(eq(adsCampaigns.id,campaignId),eq(adsCampaigns.advertiserId,advertiserId))).limit(1);
       if(c.currentSubmissionId!==intent.id) throw new ConflictException('This review was superseded.');return c;
     }
+    const snapshot=intent.snapshot as any;
+    const isBonusCampaign = Boolean(snapshot?.campaign?.isBonusDelivery);
     let receipt:any;
+    if (isBonusCampaign) {
+      if (!this.milestones) throw new ServiceUnavailableException('Bonus credit service unavailable.');
+      return this.db.transaction(async(tx)=>{
+        const c=await this.workflow.lock(tx,campaignId,advertiserId);
+        const [submission]=await tx.select().from(adsCampaignSubmissions).where(eq(adsCampaignSubmissions.id,intent.id)).limit(1);
+        if(submission.state==='submitted' && c.currentSubmissionId===intent.id) return c;
+        if(c.contentRevision!==intent.contentRevision || c.submissionIntentId!==intent.id || ['suspended','trash','completed','cancelled'].includes(c.status)) throw new ConflictException('This revision cannot enter review.');
+        await this.milestones!.reserveBonusForCampaignTx(tx, advertiserId, campaignId, snapshot.campaign.budgetUsdCents, control.requestId);
+        const before=await this.workflow.snapshot(tx,c), now=new Date();
+        const [updated]=await tx.update(adsCampaigns).set({bonusReservedCents:snapshot.campaign.budgetUsdCents,isBonusDelivery:true,status:'paused',moderationStatus:'pending_primary_review',currentSubmissionId:intent.id,submissionIntentId:null,submittedAt:now,approvedSubmissionId:null,approvedRevision:null,primaryReviewerId:null,managerReviewerId:null,primaryReviewedAt:null,managerReviewedAt:null,updatedAt:now}).where(eq(adsCampaigns.id,campaignId)).returning();
+        await tx.update(adsCreatives).set({reviewStatus:'pending',rejectionReason:null,reviewedAt:null,primaryReviewerId:null,managerReviewerId:null,primaryReviewedAt:null,managerReviewedAt:null}).where(and(eq(adsCreatives.campaignId,campaignId),sql`${adsCreatives.status} <> 'archived'`));
+        await tx.update(adsCreativeStacks).set({reviewStatus:'pending',rejectionReason:null,primaryReviewerId:null,managerReviewerId:null,primaryReviewedAt:null,managerReviewedAt:null,updatedAt:new Date()}).where(eq(adsCreativeStacks.campaignId,campaignId));
+        await tx.update(adsCampaignSubmissions).set({state:'submitted',submittedAt:now,updatedAt:now,fundingReference:{kind:'bonus_credit',amountCents:snapshot.campaign.budgetUsdCents}}).where(eq(adsCampaignSubmissions.id,intent.id));
+        await this.workflow.audit(tx,before,await this.workflow.snapshot(tx,updated),advertiserId,'submit_review',control.requestId,['currentSubmissionId','moderationStatus','bonusReservedCents']);
+        return updated;
+      });
+    }
     try {
       // Billing validates its durable receipt even when the same campaign was funded before.
-      const snapshot=intent.snapshot as any;
       receipt=await this.escrowService.lockCampaignBudget({campaignId,userId:advertiserId,amountUsdCents:snapshot.campaign.budgetUsdCents,campaignTitle:snapshot.campaign.title});
       if(!receipt?.transactionId || !receipt?.operationId || receipt?.escrow?.status!=='active') throw new ServiceUnavailableException('Funding needs reconciliation.');
     } catch(error) {
@@ -1822,6 +1853,59 @@ export class CampaignsService {
       throw new BadRequestException(
         "Campaign must have completed moderation before activation.",
       );
+    }
+    if (campaign.isBonusDelivery) {
+      return this.db.transaction(async (tx) => {
+        const locked = await this.campaignForUpdate(tx, campaignId, advertiserId);
+        const unspent = Math.max(0, Number(locked.bonusReservedCents ?? 0) - Number(locked.bonusSpentCents ?? 0));
+        if (['paused', 'trash', 'draft'].includes(status) && unspent > 0 && this.milestones) {
+          await this.milestones.releaseUnusedBonusForCampaignTx(
+            tx,
+            advertiserId,
+            campaignId,
+            unspent,
+            `Campaign status changed to ${status}`,
+          );
+          await tx
+            .update(adsCampaigns)
+            .set({
+              bonusReservedCents: Number(locked.bonusSpentCents ?? 0),
+              status: status as any,
+              updatedAt: new Date(),
+            })
+            .where(eq(adsCampaigns.id, campaignId));
+        } else if (status === 'active') {
+          const needed = Math.max(0, Number(locked.remainingBudgetUsdCents ?? 0) - Math.max(0, Number(locked.bonusReservedCents ?? 0) - Number(locked.bonusSpentCents ?? 0)));
+          if (needed > 0 && this.milestones) {
+            await this.milestones.reserveBonusForCampaignTx(
+              tx,
+              advertiserId,
+              campaignId,
+              needed,
+              crypto.randomUUID(),
+            );
+          }
+          await tx
+            .update(adsCampaigns)
+            .set({
+              bonusReservedCents: Number(locked.bonusReservedCents ?? 0) + needed,
+              status: 'active',
+              updatedAt: new Date(),
+            })
+            .where(eq(adsCampaigns.id, campaignId));
+        } else {
+          await tx
+            .update(adsCampaigns)
+            .set({ status: status as any, updatedAt: new Date() })
+            .where(eq(adsCampaigns.id, campaignId));
+        }
+        const [updated] = await tx
+          .select()
+          .from(adsCampaigns)
+          .where(eq(adsCampaigns.id, campaignId))
+          .limit(1);
+        return updated;
+      });
     }
     return this.escrowService.changeCampaignStatus(
       campaignId,

@@ -38,17 +38,21 @@ describe("PLAN-0070 funded program safeguards", () => {
     "rejects malformed integer units %s",
     (v) => expect(() => positive(v)).toThrow(),
   );
-  it.each(["funding", "paid", "conversion"] as const)(
+  it.each(["funding", "conversion"] as const)(
     "cannot enable %s using environment alone",
     (kind) =>
       expect(
         gate(kind, {
           BILLING_REWARDS_FUNDING_ENABLED: "true",
-          BILLING_REWARDS_PAID_ENABLED: "true",
           BILLING_REWARDS_CONVERSION_ENABLED: "true",
         }),
       ).toBe(false),
   );
+  it("paid points follow Platform Admin switch and can be turned off", () => {
+    expect(gate("paid", {}, true)).toBe(true);
+    expect(gate("paid", {}, false)).toBe(false);
+    expect(gate("paid", { BILLING_REWARDS_PAID_ENABLED: "false" }, true)).toBe(false);
+  });
   it("rejects below minimum, insufficient balance, monthly cap and invalid valuation", () => {
     expect(() => conversionQuote("99999999", 100, 100000000n, 0n)).toThrow();
     expect(() => conversionQuote("100000000", 100, 99999999n, 0n)).toThrow();
@@ -96,7 +100,9 @@ describe("PLAN-0070 funded program safeguards", () => {
   it.each(["convert", "processPaid", "clearLegacy"] as const)(
     "disabled %s makes no writes",
     async (name) => {
-      const f = fixture();
+      const f = fixture((q) =>
+        q.includes("program_feature_switches") ? [{ enabled: false }] : [],
+      );
       const input = {
         requestId: id,
         allocationId: id,

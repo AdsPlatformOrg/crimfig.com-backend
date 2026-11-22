@@ -1053,6 +1053,219 @@ export class DeliveryService {
     });
   }
 
+  private async tryServeBonusPromoOnUnsoldSlot(params: {
+    requestId: string;
+    slot: any;
+    website: any;
+    promoter: any;
+    allowedTypes: Set<'text' | 'image' | 'video'>;
+    resolvedDevice?: 'desktop' | 'android' | 'ios' | 'mobile' | 'tablet';
+    clientGeo?: { country?: string; region?: string };
+    clientIp: string;
+    userAgent?: string;
+  }) {
+    if (!params.slot || !params.website || !params.promoter) return null;
+    if (params.website.policyStatus !== 'approved') return null;
+
+    try {
+      const sw = await this.db.execute(
+        sql`SELECT enabled FROM program_feature_switches WHERE key = 'bonus_ad_delivery' LIMIT 1`,
+      );
+      const swRow = (sw.rows ?? sw)[0];
+      if (swRow && swRow.enabled === false) return null;
+
+      const budgetRes = await this.db.execute(
+        sql`SELECT remaining_promo_budget_cents, reserved_liability_cents, is_issuance_halted
+            FROM advertiser_promo_budget ORDER BY updated_at DESC LIMIT 1`,
+      );
+      const budget = (budgetRes.rows ?? budgetRes)[0];
+      if (
+        !budget ||
+        budget.is_issuance_halted ||
+        Number(budget.remaining_promo_budget_cents ?? 0) - Number(budget.reserved_liability_cents ?? 0) <= 0
+      ) {
+        return null;
+      }
+
+      const rawCandidates = await this.db
+        .select({
+          campaignId: adsCampaigns.id,
+          advertiserId: adsCampaigns.advertiserId,
+          creativeId: adsCreatives.id,
+          adType: adsCreatives.adType,
+          adFormat: adsCreatives.adFormat,
+          headline: adsCreatives.headline,
+          bodyText: adsCreatives.bodyText,
+          ctaText: adsCreatives.ctaText,
+          imageUrl: adsCreatives.imageUrl,
+          videoUrl: adsCreatives.videoUrl,
+          posterUrl: adsCreatives.posterUrl,
+          width: adsCreatives.width,
+          height: adsCreatives.height,
+          destinationUrl: adsCreatives.destinationUrl,
+          targetDevices: adsCampaigns.targetDevices,
+          campaignSchedule: adsCampaigns.schedule,
+          stackSchedule: adsCreativeStacks.schedule,
+          stackDevices: adsCreativeStacks.targetDevices,
+          startsAt: adsCampaigns.startsAt,
+          endsAt: adsCampaigns.endsAt,
+        })
+        .from(adsCampaigns)
+        .innerJoin(adsCreatives, eq(adsCampaigns.id, adsCreatives.campaignId))
+        .innerJoin(adsCreativeStacks, eq(adsCreatives.adStackId, adsCreativeStacks.id))
+        .where(
+          and(
+            eq(adsCampaigns.status, 'active'),
+            eq(adsCampaigns.isBonusDelivery, true),
+            eq(adsCampaigns.moderationStatus, 'approved'),
+            sql`${adsCampaigns.currentSubmissionId} = ${adsCampaigns.approvedSubmissionId}`,
+            sql`${adsCampaigns.contentRevision} = ${adsCampaigns.approvedRevision}`,
+            sql`${adsCampaigns.submissionIntentId} IS NULL`,
+            sql`${adsCampaigns.remainingBudgetUsdCents} > 0`,
+            sql`${adsCampaigns.bonusReservedCents} > ${adsCampaigns.bonusSpentCents}`,
+            eq(adsCreatives.status, 'active'),
+            eq(adsCreatives.reviewStatus, 'approved'),
+          ),
+        )
+        .limit(50);
+
+      if (!rawCandidates.length) return null;
+
+      const now = new Date();
+      const parseArr = (raw: string | null | undefined): string[] | null => {
+        if (!raw) return null;
+        try {
+          const parsed = JSON.parse(raw);
+          return Array.isArray(parsed) ? parsed : null;
+        } catch {
+          return null;
+        }
+      };
+      let blockedSelfDealing = false;
+      const eligible = rawCandidates.filter(c => {
+        if (c.advertiserId === params.promoter.userId) {
+          blockedSelfDealing = true;
+          return false;
+        }
+        if (c.startsAt && c.startsAt > now) return false;
+        if (c.endsAt && c.endsAt <= now) return false;
+        if (!params.allowedTypes.has(c.adType as 'text' | 'image' | 'video')) return false;
+        const cDev = parseArr(c.targetDevices);
+        if (cDev && params.resolvedDevice && !matchesDeviceTarget(cDev, params.resolvedDevice)) return false;
+        const sDev = parseArr(c.stackDevices);
+        if (sDev && params.resolvedDevice && !matchesDeviceTarget(sDev, params.resolvedDevice)) return false;
+        return scheduleMatches(resolvedSchedule(c.campaignSchedule, c.stackSchedule, null, null), now);
+      });
+
+      if (!eligible.length) {
+        if (blockedSelfDealing) {
+          await this.db.execute(
+            sql`INSERT INTO platform_admin_silent_alerts (category, severity, advertiser_id, summary, details)
+                VALUES ('self_dealing_risk', 'warning', ${params.promoter.userId}::uuid,
+                        'Self-dealing blocked on bonus-credit delivery: advertiser bonus campaign skipped on own website.',
+                        ${JSON.stringify({ websiteId: params.website.id, slotId: params.slot.id })}::jsonb)`,
+          ).catch(() => {});
+        }
+        return null;
+      }
+
+      const winner = eligible[0];
+      const ipHash = this.tokenService.hashIp(params.clientIp);
+      const placementTokenId = HOUSE_PLACEMENT_UUID;
+      const [decision] = await this.db.insert(adsAuctionDecisions).values({
+        requestId: params.requestId,
+        promoterId: params.promoter.id,
+        websiteId: params.website.id,
+        slotId: params.slot.id,
+        slotTagId: params.slot.slotTagId,
+        inventoryClass: 'bonus_promo',
+        deliveryMode: 'normal',
+        trafficRiskStatus: 'normal',
+        financialEligibility: 'pending',
+        policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
+        bidderGroupingMode: 'advertiser',
+        tieSeed: crypto.randomUUID(),
+        candidateCount: eligible.length,
+        eligibleGroupCount: 1,
+        evaluatedCandidates: [{ campaignId: winner.campaignId, creativeId: winner.creativeId, isBonusDelivery: true }],
+        excludedCandidates: [],
+        winnerCampaignId: winner.campaignId,
+        winnerCreativeId: winner.creativeId,
+        pricingModel: 'cpm',
+        clearingPriceMicros: 500_000,
+        billingPriceNanos: 500_000_000n,
+        recordHash: adDigest({ requestId: params.requestId, campaignId: winner.campaignId, creativeId: winner.creativeId, kind: 'bonus_promo' }),
+      }).returning({ id: adsAuctionDecisions.id });
+
+      const [serve] = await this.db.insert(adsServes).values({
+        placementId: null,
+        campaignId: winner.campaignId,
+        creativeId: winner.creativeId,
+        promoterId: params.promoter.id,
+        slotHandle: params.slot.slotTagId,
+        requestId: params.requestId,
+        websiteId: params.website.id,
+        slotId: params.slot.id,
+        inventoryClass: 'bonus_promo',
+        deliveryMode: 'normal',
+        trafficRiskStatus: 'normal',
+        financialEligibility: 'pending',
+        auctionDecisionId: decision.id,
+        policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
+        clearingPriceMicros: 500_000,
+        pricingVersion: 2,
+        billingPriceNanos: 500_000_000n,
+        pricingModel: 'cpm',
+        ipHash,
+        userAgentHash: params.userAgent ? this.tokenService.hashIp(params.userAgent) : null,
+        geoCountry: params.clientGeo?.country || null,
+        geoRegion: params.clientGeo?.region || null,
+        deviceType: params.resolvedDevice,
+        contentSnapshot: {
+          isBonusDelivery: true,
+          destinationUrl: winner.destinationUrl,
+          adType: winner.adType,
+          adFormat: winner.adFormat,
+          headline: winner.headline,
+          imageUrl: winner.imageUrl,
+          campaignId: winner.campaignId,
+          creativeId: winner.creativeId,
+        },
+      }).returning({ id: adsServes.id });
+
+      await this.db.update(adsAuctionDecisions).set({ serveId: serve.id }).where(eq(adsAuctionDecisions.id, decision.id));
+
+      const impToken = this.tokenService.generateToken({
+        servedId: serve.id,
+        placementId: placementTokenId,
+        campaignId: winner.campaignId,
+        creativeId: winner.creativeId,
+        promoterId: params.promoter.id,
+        ipHash,
+      });
+
+      return {
+        adType: winner.adType,
+        format: params.slot.format === 'general' ? winner.adFormat : params.slot.format || winner.adFormat,
+        headline: winner.headline,
+        bodyText: winner.bodyText,
+        ctaText: winner.ctaText,
+        imageUrl: winner.imageUrl,
+        videoUrl: winner.videoUrl,
+        posterUrl: winner.posterUrl,
+        width: winner.width,
+        height: winner.height,
+        durationSeconds: null,
+        isHouseAd: false,
+        isBonusPromoAd: true,
+        impToken,
+        clickUrl: `${this.publicBaseUrl()}/api/v1/delivery/go/${impToken}?pid=${params.promoter.id}`,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   /**
    * Builds and persists a zero-charge CrimFig House Ad or Shadow Ad response (`PLAN-0047`).
    * Invariant: billingPriceNanos = 0n, clearingPriceMicros = 0, financialEligibility = 'invalid'.
@@ -1226,7 +1439,12 @@ export class DeliveryService {
         const controls=await tx.execute(sql`SELECT 1 FROM ads_traffic_controls WHERE is_active AND (expires_at IS NULL OR expires_at>now()) AND ((target_scope='slot' AND target_id=${params.slotId}) OR(target_scope='website' AND target_id=${params.websiteId}) OR(target_scope='promoter' AND target_id=${params.promoterId})) LIMIT 1`);
         if(controls.rows.length){params.inventoryClass='shadow';params.deliveryMode='shadow';params.trafficRiskStatus='suspicious';}
         let rewardPolicy:any=null;
-        if(houseProgramRequested()){
+        let houseSwitchEnabled=true;
+        try{
+          const sw=await tx.execute(sql`SELECT enabled FROM program_feature_switches WHERE key='house_cfig_earning' LIMIT 1`);
+          if((sw.rows??sw)[0]?.enabled!==undefined) houseSwitchEnabled=Boolean((sw.rows??sw)[0].enabled);
+        }catch{}
+        if(houseProgramRequested(process.env, houseSwitchEnabled)){
           const result=await tx.execute(sql`SELECT id,terms FROM cfig_policies WHERE approved_at IS NOT NULL AND (terms->>'effectiveFrom')::timestamptz<=clock_timestamp() ORDER BY (terms->>'effectiveFrom')::timestamptz DESC,id DESC LIMIT 1`);
           rewardPolicy=result.rows[0]??null;
         }
@@ -1767,6 +1985,7 @@ export class DeliveryService {
       .where(
         and(
           eq(adsCampaigns.status, 'active'),
+          eq(adsCampaigns.isBonusDelivery, false),
           eq(adsCampaigns.pricingVersion, 2),
           eq(adsCampaigns.moderationStatus, 'approved'),
           sql`${adsCampaigns.currentSubmissionId} = ${adsCampaigns.approvedSubmissionId}`,
@@ -1918,6 +2137,22 @@ export class DeliveryService {
         fallbackReasonCode = 'CREATIVE_RENDITION_INCOMPATIBLE';
         terminationStage = 'creative_compatibility';
       }
+
+      // PLAN-0154 Option B: Fill eligible unsold inventory with approved bonus-credit campaigns
+      // ONLY when bonus_ad_delivery switch is ON, Promotional Ad Reserve has cash backing,
+      // and promoter/website owner is NOT the campaign advertiser (anti-self-dealing).
+      const bonusServed = await this.tryServeBonusPromoOnUnsoldSlot({
+        requestId,
+        slot: canonicalSlot,
+        website: canonicalWebsite,
+        promoter: canonicalPromoter,
+        allowedTypes,
+        resolvedDevice,
+        clientGeo,
+        clientIp: clientIp ?? '0.0.0.0',
+        userAgent,
+      });
+      if (bonusServed) return bonusServed;
 
       return this.serveHouseOrShadowAd({containerWidth,
         consentState: requestHeaders?.consentState,
@@ -2531,6 +2766,8 @@ export class DeliveryService {
     let websiteId: string | null = null;
     let slotId: string | null = null;
     let isHouseOrShadowServe = false;
+    let isBonusPromoServe = false;
+    let bonusServeRecord: any = null;
     let signedPayload: ImpressionTokenPayload | undefined;
 
     // 1. If signed impToken is provided, decode cryptographic payload
@@ -2559,9 +2796,12 @@ export class DeliveryService {
         .limit(1);
 
       if (serveRecord) {
+        bonusServeRecord = serveRecord;
         websiteId = serveRecord.websiteId || null;
         slotId = serveRecord.slotId || null;
-        if (
+        if (serveRecord.inventoryClass === 'bonus_promo') {
+          isBonusPromoServe = true;
+        } else if (
           serveRecord.inventoryClass === 'house' ||
           serveRecord.inventoryClass === 'shadow' ||
           serveRecord.deliveryMode === 'shadow'
@@ -2766,9 +3006,48 @@ export class DeliveryService {
         measurable:event.measurable,verificationVersion:event.verificationVersion,assessmentStatus:event.assessmentStatus,financialEligibility:event.financialEligibility,
         keyedIpHash:event.keyedIpHash,keyId:event.keyId,websiteId,slotId,referrer:safeReferrer,
         instanceClaims:{pageViewId:event.pageViewId,slotInstanceId:event.slotInstanceId,opportunityId:event.opportunityId,sdkInitId:event.sdkInitId,instanceIndex:event.instanceIndex,instancesDetected:event.instancesDetected}},tx);
+
+      // PLAN-0154: Record 55% promotional reserve earnings ($0.50 base CPM viewable impression) with 72h hold.
+      if (isBonusPromoServe && params.type === 'viewable_impression' && isValid && bonusServeRecord?.campaignId && bonusServeRecord?.websiteId) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('bonus-promo-reserve', 0))`);
+        const [camp] = await tx.select({ advertiserId: adsCampaigns.advertiserId }).from(adsCampaigns).where(eq(adsCampaigns.id, bonusServeRecord.campaignId)).for('update').limit(1);
+        const [promoOwner] = await tx.select({ userId: adsPromoters.userId }).from(adsPromoters).where(eq(adsPromoters.id, bonusServeRecord.promoterId)).limit(1);
+        if (camp && promoOwner && camp.advertiserId !== promoOwner.userId) {
+          const inserted = await tx.execute(
+            sql`INSERT INTO bonus_promo_impressions (serve_id, interaction_id, campaign_id, advertiser_id, promoter_id, website_id, face_value_microusd, promoter_earnings_microusd, clearance_status, hold_expires_at)
+                VALUES (${bonusServeRecord.id}::uuid, ${event.id}::uuid, ${bonusServeRecord.campaignId}::uuid, ${camp.advertiserId}::uuid, ${bonusServeRecord.promoterId}::uuid, ${bonusServeRecord.websiteId}::uuid, 500, 275, 'pending', now() + interval '72 hours')
+                ON CONFLICT (serve_id) DO NOTHING RETURNING id`,
+          );
+          if ((inserted.rows ?? inserted).length > 0) {
+            const totalsRes = await tx.execute(
+              sql`SELECT floor(coalesce(sum(face_value_microusd), 0) / 10000)::int AS consumed_cents
+                  FROM bonus_promo_impressions WHERE campaign_id = ${bonusServeRecord.campaignId}::uuid AND clearance_status <> 'invalidated'`,
+            );
+            const consumedCents = Number((totalsRes.rows ?? totalsRes)[0]?.consumed_cents ?? 0);
+            await tx.execute(
+              sql`UPDATE ads_campaigns
+                  SET bonus_spent_cents = ${consumedCents},
+                      remaining_budget_usd_cents = GREATEST(0, budget_usd_cents - ${consumedCents}),
+                      updated_at = now()
+                  WHERE id = ${bonusServeRecord.campaignId}::uuid`,
+            );
+            const liabilityRes = await tx.execute(
+              sql`SELECT ceil(coalesce(sum(promoter_earnings_microusd), 0)::numeric / 10000)::bigint AS reserved_cents
+                  FROM bonus_promo_impressions WHERE clearance_status = 'pending'`,
+            );
+            const reservedCents = Number((liabilityRes.rows ?? liabilityRes)[0]?.reserved_cents ?? 0);
+            await tx.execute(
+              sql`UPDATE advertiser_promo_budget
+                  SET reserved_liability_cents = ${reservedCents},
+                      updated_at = now()
+                  WHERE id = (SELECT id FROM advertiser_promo_budget ORDER BY updated_at DESC LIMIT 1)`,
+            );
+          }
+        }
+      }
       return event;
     });
-    if(recorded.serveId&&recorded.verificationVersion===2&&recorded.financialEligibility==='pending'&&['click','viewable_impression'].includes(recorded.type)){
+    if(recorded.serveId&&recorded.verificationVersion===2&&recorded.financialEligibility==='pending'&&!isBonusPromoServe&&['click','viewable_impression'].includes(recorded.type)){
       const [serve]=await this.db.select().from(adsServes).where(eq(adsServes.id,recorded.serveId)).limit(1);
       if(serve?.opportunityReservationId&&this.opportunities){try{await this.opportunities.claim(serve.opportunityReservationId,recorded.id);}catch{/* Durable event remains available to the reconciler; no payment is inferred. */}}
     }

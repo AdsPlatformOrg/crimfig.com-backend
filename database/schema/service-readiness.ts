@@ -14,6 +14,9 @@ const tableNames: Record<ReleaseService, string[]> = {
     'billing_wallets', 'billing_transactions', 'billing_provider_events', 'ads_campaign_escrows',
     'ads_settlement_claims', 'ads_settlement_batches', 'ads_promoter_settlement_items',
     'ads_moderation_decisions', 'ads_settlement_rebates',
+    'program_feature_switches', 'program_feature_switch_audit', 'platform_operating_reserve',
+    'platform_reserve_transfers', 'advertiser_bonus_credits', 'advertiser_bonus_ledger',
+    'platform_admin_silent_alerts', 'bonus_promo_impressions',
   ],
   billing: [
     'users', 'billing_wallets', 'billing_transactions', 'billing_exchange_rates',

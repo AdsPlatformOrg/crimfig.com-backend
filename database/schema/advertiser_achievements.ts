@@ -28,6 +28,8 @@ export const advertiserPromoBudget = pgTable(
     issuedBonusCreditsCents: bigint('issued_bonus_credits_cents', { mode: 'number' }).notNull().default(0),
     consumedBonusCreditsCents: bigint('consumed_bonus_credits_cents', { mode: 'number' }).notNull().default(0),
     remainingPromoBudgetCents: bigint('remaining_promo_budget_cents', { mode: 'number' }).notNull().default(0),
+    reservedLiabilityCents: bigint('reserved_liability_cents', { mode: 'number' }).notNull().default(0),
+    paidPromoterEarningsCents: bigint('paid_promoter_earnings_cents', { mode: 'number' }).notNull().default(0),
 
     isIssuanceHalted: boolean('is_issuance_halted').notNull().default(false),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

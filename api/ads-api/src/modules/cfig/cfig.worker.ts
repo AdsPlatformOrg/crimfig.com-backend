@@ -41,6 +41,17 @@ export class CfigWorker implements OnModuleInit, OnModuleDestroy {
       process.env.ADS_CFIG_FINALIZER_ENABLED !== "true"
     )
       return;
+    let houseSwitchOn = true;
+    try {
+      const sw = await this.db.execute(
+        sql`SELECT enabled FROM program_feature_switches WHERE key='house_cfig_earning' LIMIT 1`,
+      );
+      const row = (sw.rows ?? sw)[0];
+      if (row?.enabled !== undefined) houseSwitchOn = Boolean(row.enabled);
+    } catch {
+      // Lightweight test mock fallback
+    }
+    if (!houseProgramRequested(process.env, houseSwitchOn)) return;
     this.busy = true;
     try {
       const actor = process.env.ADS_CFIG_FINALIZER_ACTOR_ID ?? "";

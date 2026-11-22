@@ -84,3 +84,5 @@ export * from './moderation_claims';
 export * from './ads_cron_scheduler';
 
 export * from './service-readiness';
+
+export * from './program_controls';

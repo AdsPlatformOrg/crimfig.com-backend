@@ -365,6 +365,13 @@
       "when": 1795305600001,
       "tag": "0052_advertiser_recognition",
       "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "7",
+      "when": 1795392000000,
+      "tag": "0053_plan0154_rewards_and_bonus_credit",
+      "breakpoints": true
     }
   ]
 }

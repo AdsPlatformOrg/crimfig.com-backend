@@ -61,17 +61,18 @@ export function reserveFloor(fund: any, settings: any) {
 export function gate(
   kind: "funding" | "paid" | "conversion",
   env = process.env,
+  dbSwitchEnabled = true,
 ) {
   const p = constants.fundedRewards;
+  if (!p.enabled || !dbSwitchEnabled) return false;
+  if (kind === "funding")
+    return p.fundingEnabled && env.BILLING_REWARDS_FUNDING_ENABLED !== "false";
+  if (kind === "paid")
+    return env.BILLING_REWARDS_PAID_ENABLED !== "false";
   return (
-    p.enabled &&
-    (kind === "funding"
-      ? p.fundingEnabled && env.BILLING_REWARDS_FUNDING_ENABLED === "true"
-      : kind === "paid"
-        ? env.BILLING_REWARDS_PAID_ENABLED === "true"
-        : p.conversionEnabled &&
-          constants.houseRewards.conversionEnabled &&
-          env.BILLING_REWARDS_CONVERSION_ENABLED === "true")
+    p.conversionEnabled &&
+    constants.houseRewards.conversionEnabled &&
+    env.BILLING_REWARDS_CONVERSION_ENABLED === "true"
   );
 }
 export const fundedPolicy = () => {

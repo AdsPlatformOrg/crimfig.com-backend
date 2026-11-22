@@ -47,6 +47,26 @@ export class RewardProgramService {
   private id(v: string) {
     if (!uuid.test(v ?? "")) throw new BadRequestException("UUID required");
   }
+  private async switchEnabled(key: string, conn: any = this.db): Promise<boolean> {
+    try {
+      const r = rows(
+        await conn.execute(
+          sql`SELECT enabled FROM program_feature_switches WHERE key=${key} LIMIT 1`,
+        ),
+      );
+      if (r.length > 0 && r[0].enabled !== undefined) return Boolean(r[0].enabled);
+    } catch {
+      // Lightweight test mock or pre-migration fallback
+    }
+    return true;
+  }
+  private async ensureEnabled(kind: "funding" | "paid" | "conversion", conn: any = this.db) {
+    const dbOn = kind === "paid" ? await this.switchEnabled("redeemable_points", conn) : true;
+    if (!gate(kind, process.env, dbOn))
+      throw new ConflictException(
+        "Funded rewards operation disabled pending separate policy, funding and activation approval",
+      );
+  }
   private enabled(kind: "funding" | "paid" | "conversion") {
     if (!gate(kind))
       throw new ConflictException(
@@ -575,7 +595,7 @@ export class RewardProgramService {
           throw new ConflictException("Performance receipt identity changed");
         return prior.payload;
       }
-      this.enabled("paid");
+      await this.ensureEnabled("paid", tx);
       const [a] = rows(
         await tx.execute(
           sql`SELECT * FROM reward_program_allocations WHERE id=${input.allocationId} AND program='paid_performance' AND approved_at IS NOT NULL FOR SHARE`,

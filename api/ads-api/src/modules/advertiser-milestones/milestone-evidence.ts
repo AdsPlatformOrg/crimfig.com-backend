@@ -9,6 +9,8 @@ export interface CampaignEvidence {
 export interface MilestoneEvidence {
   totalCampaigns: number;
   fundingVerified: boolean;
+  tenureMonths?: number;
+  complianceClean?: boolean;
   campaigns: CampaignEvidence[];
 }
 
@@ -128,12 +130,19 @@ export async function readMilestoneEvidence(db: any, advertiserId: string): Prom
       FROM campaigns c
     )
     SELECT (SELECT count(*)::text FROM campaigns) AS total,coalesce((SELECT verified FROM cash_wallet),false) AS funding_verified,
+      coalesce((SELECT FLOOR(EXTRACT(EPOCH FROM (now() - coalesce((to_jsonb(u)->>'created_at')::timestamptz, now()))) / (30.4375 * 86400))::int FROM users u WHERE u.id=${advertiserId}::uuid LIMIT 1), 0) AS tenure_months,
+      coalesce((SELECT u.status = 'ACTIVE' FROM users u WHERE u.id=${advertiserId}::uuid LIMIT 1), false)
+        AND NOT EXISTS (SELECT 1 FROM campaigns c JOIN ads_settlement_rebates rb ON rb.campaign_id=c.id WHERE rb.status IN ('completed','pending_admin_signoff'))
+        AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.status='suspended')
+        AS compliance_clean,
       coalesce(jsonb_agg(jsonb_build_object('id',id,'completed',completed,'eligible',eligible,'clearedSpend',cleared_spend)),'[]'::jsonb) AS campaigns
     FROM campaign_evidence
   `);
   const row = result.rows[0];
   return {
     totalCampaigns: Number(row.total), fundingVerified: row.funding_verified === true,
+    tenureMonths: Number(row.tenure_months ?? 0),
+    complianceClean: row.compliance_clean === true,
     campaigns: row.campaigns.map((campaign: any) => {
       const cents = Number(campaign.clearedSpend);
       const safe = Number.isSafeInteger(cents) && cents >= 0;
