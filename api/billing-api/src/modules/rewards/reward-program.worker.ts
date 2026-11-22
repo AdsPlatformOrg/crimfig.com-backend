@@ -42,15 +42,11 @@ export class RewardProgramWorker implements OnModuleInit, OnModuleDestroy {
   }
   async reconcile() {
     const actor = process.env.BILLING_REWARDS_WORKER_OPERATOR_ID;
-    const paidDbOn = await this.db
-      .execute(sql`SELECT enabled FROM program_feature_switches WHERE key='redeemable_points' LIMIT 1`)
-      .then((r: any) => ((r.rows ?? r)[0]?.enabled !== undefined ? Boolean((r.rows ?? r)[0].enabled) : true))
-      .catch(() => true);
-    if (this.running || !gate("paid", process.env, paidDbOn) || !actor) return;
+    if (this.running || !gate("paid") || !actor) return;
     this.running = true;
     try {
       const result = await this.db.execute(
-        sql`SELECT e.id,a.id AS allocation_id FROM ads_interactions e JOIN ads_serves s ON s.id=e.serve_id JOIN ads_opportunity_reservations r ON r.id=s.opportunity_reservation_id JOIN reward_program_allocations a ON a.program='paid_performance' AND a.approved_at IS NOT NULL AND (a.policy_snapshot->>'effectiveFrom')::timestamptz<=e.created_at WHERE s.inventory_class='paid' AND s.delivery_mode<>'shadow' AND NOT r.is_simulated AND r.state='CLAIMED' AND r.settled_at IS NOT NULL AND r.claim_event_id=e.id AND e.created_at<=clock_timestamp()-interval '72 hours' AND NOT EXISTS(SELECT 1 FROM reward_performance_receipts p WHERE p.event_id=e.id) AND EXISTS(SELECT 1 FROM ads_settlement_claims c JOIN ads_promoter_settlement_items i ON i.batch_id=c.batch_id AND i.promoter_id=c.promoter_id AND i.campaign_id=s.campaign_id WHERE c.interaction_id=e.id AND i.clearance_status='cleared' AND i.status='credited' AND i.hold_expires_at<=clock_timestamp()) ORDER BY e.created_at,e.id,a.created_at,a.id LIMIT 20`,
+        sql`SELECT e.id,a.id AS allocation_id FROM ads_interactions e JOIN ads_serves s ON s.id=e.serve_id JOIN ads_opportunity_reservations r ON r.id=s.opportunity_reservation_id JOIN reward_program_allocations a ON a.program='paid_performance' AND a.approved_at IS NOT NULL AND (a.policy_snapshot->>'effectiveFrom')::timestamptz<=e.created_at WHERE NOT EXISTS (SELECT 1 FROM program_feature_switches sw WHERE sw.key='redeemable_points' AND sw.enabled=false) AND s.inventory_class='paid' AND s.delivery_mode<>'shadow' AND NOT r.is_simulated AND r.state='CLAIMED' AND r.settled_at IS NOT NULL AND r.claim_event_id=e.id AND e.created_at<=clock_timestamp()-interval '72 hours' AND NOT EXISTS(SELECT 1 FROM reward_performance_receipts p WHERE p.event_id=e.id) AND EXISTS(SELECT 1 FROM ads_settlement_claims c JOIN ads_promoter_settlement_items i ON i.batch_id=c.batch_id AND i.promoter_id=c.promoter_id AND i.campaign_id=s.campaign_id WHERE c.interaction_id=e.id AND i.clearance_status='cleared' AND i.status='credited' AND i.hold_expires_at<=clock_timestamp()) ORDER BY e.created_at,e.id,a.created_at,a.id LIMIT 20`,
       );
       for (const row of result.rows ?? result)
         try {
