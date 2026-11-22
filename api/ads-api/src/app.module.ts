@@ -2,7 +2,6 @@ import { AdsOperationsModule } from './modules/ads-operations/ads-operations.mod
 import { APP_GUARD, APP_INTERCEPTOR, Reflector } from '@nestjs/core';
 import { DashboardAuthModule, ErrorMonitorCaptureInterceptor, DurableErrorMonitorSink, ErrorMonitorMetadataGuard } from '@crimfig/shared';
 import { AdsAccessGuard } from './modules/security/ads-access.guard';
-import { AdsStaffGrants } from './modules/security/ads-staff-grants';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -24,6 +23,8 @@ import { EcosystemModule } from './modules/ecosystem/ecosystem.module';
 import { AdstationModule } from './modules/adstation/adstation.module';
 import { AdvertiserMilestonesModule } from './modules/advertiser-milestones/advertiser-milestones.module';
 import { SchedulingModule } from './modules/scheduling/scheduling.module';
+import { ReportAccessModule } from './modules/report-access/report-access.module';
+import { ReportAuditInterceptor } from './modules/report-access/report-audit.interceptor';
 
 @Module({
   imports: [
@@ -49,12 +50,13 @@ import { SchedulingModule } from './modules/scheduling/scheduling.module';
     AdsOperationsModule,
     AdvertiserMilestonesModule,
     SchedulingModule,
+    ReportAccessModule,
   ],
   providers: [
     {provide:DurableErrorMonitorSink,useFactory:(db:any)=>new DurableErrorMonitorSink(db,'ads-api'),inject:['DATABASE_CONNECTION']},
     {provide:APP_GUARD,useClass:ErrorMonitorMetadataGuard},
-    AdsStaffGrants,
     { provide: APP_GUARD, useClass: AdsAccessGuard },
+    { provide: APP_INTERCEPTOR, useClass: ReportAuditInterceptor },
     {
       provide: APP_INTERCEPTOR,
       useFactory: (reflector: Reflector, sink:DurableErrorMonitorSink) => new ErrorMonitorCaptureInterceptor('ads-api', reflector, sink),

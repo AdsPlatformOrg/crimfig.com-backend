@@ -17,6 +17,7 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { configureAdsApi } from './contracts/api-configuration';
+import { reportAction } from './modules/report-access/report-audit.service';
 
 const logger = new Logger('Bootstrap');
 
@@ -30,7 +31,11 @@ async function bootstrap() {
 
   app.enableShutdownHooks([ShutdownSignal.SIGINT, ShutdownSignal.SIGTERM]);
   app.use(helmet());
-  app.use(errorMonitorBoundary('ads-api',app.get(DurableErrorMonitorSink)));
+  const monitor = errorMonitorBoundary('ads-api', app.get(DurableErrorMonitorSink));
+  app.use((req: import('express').Request & { __skipErrorMonitorCapture?: boolean }, res: import('express').Response, next: import('express').NextFunction) => {
+    if (reportAction(req.path)) req.__skipErrorMonitorCapture = true;
+    monitor(req, res, next);
+  });
 
   app.enableCors(adsCorsOptions(process.env.NODE_ENV === 'production'));
 

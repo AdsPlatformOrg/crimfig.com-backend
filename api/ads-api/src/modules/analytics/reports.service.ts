@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { billedClick, observedClickRows } from './observed-clicks';
 import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
@@ -7,6 +8,11 @@ import { DATABASE_TOKEN } from '../database/database.module';
 import { addReportMetrics, emptyReportMetrics, REPORT_ZONE, reportMetrics, reportRange, type ReportMetrics } from './report-range';
 
 type ReportRow = { day: string; campaignId: string | null; creativeId: string | null; campaign: string | null; creative: string | null } & ReportMetrics;
+
+function reportReference(owner: string, dimension: 'campaign' | 'ad', id: string | null) {
+  if (id === null) return null;
+  return createHash('sha256').update(JSON.stringify([owner, dimension, id])).digest('hex');
+}
 
 @Injectable()
 export class ReportsService {
@@ -89,8 +95,10 @@ export class ReportsService {
           AND t.created_at >= ${start} AND t.created_at < ${end}
       )
       SELECT to_char(entries.at AT TIME ZONE ${REPORT_ZONE}, 'YYYY-MM-DD') AS day,
-        entries.campaign_id AS "campaignId", entries.creative_id AS "creativeId", campaign.title AS campaign,
-        creative.headline AS creative, ${sql.join(projections, sql`, `)}
+        entries.campaign_id AS "campaignId", entries.creative_id AS "creativeId",
+        ${advertiser ? sql`campaign.title` : sql`null::text`} AS campaign,
+        ${advertiser ? sql`creative.headline` : sql`null::text`} AS creative,
+        ${sql.join(projections, sql`, `)}
       FROM entries
       LEFT JOIN ads_campaigns campaign ON campaign.id = entries.campaign_id
       LEFT JOIN ads_creatives creative ON creative.id = entries.creative_id AND creative.campaign_id = entries.campaign_id
@@ -118,7 +126,14 @@ export class ReportsService {
     }
     return {
       role, timezone: REPORT_ZONE, updatedAt: now.toISOString(), from: range.from, to: range.to,
-      daily: [...days.values()], totals, breakdown: [...breakdown.values()],
+      daily: [...days.values()],
+      totals,
+      breakdown: [...breakdown.values()].map(({ campaignId, creativeId, campaign, creative, ...values }) => ({
+        ...(advertiser
+          ? { campaignId, creativeId, campaign, creative }
+          : { campaignId: reportReference(owner, 'campaign', campaignId), creativeId: reportReference(owner, 'ad', creativeId), campaign: null, creative: null }),
+        ...values,
+      })),
       comparison: previous && { from: range.previousFrom, to: range.previousTo, totals: previous },
     };
   }

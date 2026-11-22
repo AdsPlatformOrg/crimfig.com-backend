@@ -1,4 +1,5 @@
-import { Inject, Injectable, UnauthorizedException, ForbiddenException, ExecutionContext } from '@nestjs/common';
+import { Inject, Injectable, UnauthorizedException, ForbiddenException, ExecutionContext, Optional } from '@nestjs/common';
+import { ReportAuditService } from '../report-access/report-audit.service';
 import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { AccessTokenGuard } from '@crimfig/shared';
@@ -12,12 +13,16 @@ import { ADS_ROLES_KEY, AdsStaffGrants, AdsStaffRole } from './ads-staff-grants'
 export class AdsAccessGuard extends AccessTokenGuard {
   constructor(jwt: JwtService, reflector: Reflector,
     @Inject(DATABASE_TOKEN) private readonly db: NodePgDatabase<typeof schema>,
-    private readonly staff: AdsStaffGrants) { super(jwt, reflector); }
+    private readonly staff: AdsStaffGrants,
+    @Optional() private readonly reportAudit?: ReportAuditService) { super(jwt, reflector); }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     if (this.isPublic(context)) { delete request.user; return true; }
+    let actor: string | undefined;
+    try {
     await super.canActivate(context);
+    actor = request.user.sub;
     const user = await this.db.query.users.findFirst({
       where: eq(schema.users.id, request.user.sub), columns: { id: true, email: true, status: true },
     });
@@ -29,6 +34,10 @@ export class AdsAccessGuard extends AccessTokenGuard {
     const required = this.reflector.getAllAndOverride<AdsStaffRole[]>(ADS_ROLES_KEY, [context.getHandler(), context.getClass()]);
     if (required?.length && !required.some(role => this.staff.rolesFor(user.id).includes(role))) {
       throw new ForbiddenException('This action requires an assigned Ads staff role');
+    }
+    } catch (error) {
+      await this.reportAudit?.record({ ...request, path: request.path, user: actor ? { sub: actor } : undefined }, 'denied', 'ACCESS_DENIED');
+      throw error;
     }
     return true;
   }

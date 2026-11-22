@@ -2,7 +2,7 @@ import { Injectable, SetMetadata } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 export const ADS_ROLES_KEY = 'ads:roles';
-export const ADS_STAFF_ROLES = ['super_admin', 'ads_admin', 'ads_reviewer', 'ads_manager', 'ads_finance', 'ads_support'] as const;
+export const ADS_STAFF_ROLES = ['super_admin', 'ads_admin', 'ads_reviewer', 'ads_manager', 'ads_finance', 'ads_support', 'report_auditor', 'report_contact_reveal'] as const;
 export type AdsStaffRole = typeof ADS_STAFF_ROLES[number];
 /** An empty method list overrides a staff-only class for owner-scoped routes. */
 export const AdsRoles = (...roles: AdsStaffRole[]) => SetMetadata(ADS_ROLES_KEY, roles);
@@ -24,4 +24,7 @@ export class AdsStaffGrants {
   }
 
   rolesFor(id: string): readonly AdsStaffRole[] { return this.grants.get(id.toLowerCase()) || []; }
+  accountsWithRole(role: AdsStaffRole): string[] {
+    return [...this.grants].filter(([, roles]) => roles.includes(role)).map(([id]) => id);
+  }
 }
