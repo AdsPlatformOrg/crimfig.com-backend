@@ -21,11 +21,16 @@ describe('AdStation Security & Zero Commission Invariants (PLAN-0018)', () => {
       select: jest.fn(() => queryChain),
       insert: jest.fn(() => ({
         values: jest.fn((vals) => {
+          const exists = vals?.idempotencyKey && savedRows.some((r) => r.idempotencyKey === vals.idempotencyKey);
           const row = { id: 'evt-uuid-1234', ...vals };
-          savedRows.push(row);
-          return {
-            returning: jest.fn(() => Promise.resolve([row])),
+          if (!exists) savedRows.push(row);
+          const chain = {
+            onConflictDoNothing: jest.fn(() => ({
+              returning: jest.fn(() => Promise.resolve(exists ? [] : [row])),
+            })),
+            returning: jest.fn(() => Promise.resolve(exists ? [] : [row])),
           };
+          return chain;
         }),
       })),
       update: jest.fn(() => ({
@@ -73,7 +78,7 @@ describe('AdStation Security & Zero Commission Invariants (PLAN-0018)', () => {
     expect(res1.eventId).toBeDefined();
 
     // Replay with identical idempotencyKey
-    savedRows = [{ id: res1.eventId, idempotencyKey: 'idem-key-1000' }];
+    savedRows = [{ id: res1.eventId, idempotencyKey: 'idem-key-1000', directCampaignId: 'dc-1', websiteId: 'web-1', slotId: null, eventType: 'impression', isViewable: false, viewDurationMs: 0 }];
     const res2 = await adstationService.recordDirectEvent({
       directCampaignId: 'dc-1',
       websiteId: 'web-1',
