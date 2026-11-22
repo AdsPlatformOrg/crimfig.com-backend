@@ -12,6 +12,7 @@ import {
   Headers,
   HttpCode,
   UseGuards,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Response } from 'express';
@@ -67,64 +68,37 @@ export class ConversionsController {
    */
   @Public()
   @Get('px.js')
-  @ApiOperation({ summary: 'Serve lightweight browser conversion tracking pixel' })
+  @ApiOperation({ summary: 'Serve lightweight browser conversion tracking pixel (paused)' })
   getPixelScript(@Res() res: Response) {
-    const script = this.conversionsService.getPixelScript();
     res.setHeader('Content-Type', 'application/javascript');
-    res.setHeader('Cache-Control', 'public, max-age=3600');
-    return res.send(script);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    return res.send('/* CrimFig conversion tracking is coming soon and currently paused. */\n');
   }
 
   /**
-   * Beacon collector endpoint called by px.js
+   * Beacon collector endpoint called by px.js (paused under PLAN-0152)
    * POST /api/v1/px/collect
    */
   @Public()
   @Post('px/collect')
   @HttpCode(204)
-  @ApiOperation({ summary: 'Browser pixel beacon collection' })
-  async collectPixel(@Body() body: any) {
-    if (!body || !body.advertiserId || !body.event) {
-      return;
-    }
-
-    await this.conversionsService.ingestConversion({
-      advertiserId: body.advertiserId,
-      clickId: body.clickId,
-      event: body.event,
-      orderId: body.orderId,
-      value: body.value ? Number(body.value) : undefined,
-      currency: body.currency,
-      metadata: body.metadata,
-      source: 'pixel',
-    });
+  @ApiOperation({ summary: 'Browser pixel beacon collection (paused)' })
+  async collectPixel(@Body() _body: any) {
+    return;
   }
 
   /**
-   * Server-to-server (S2S) postback conversion ingestion
+   * Server-to-server (S2S) postback conversion ingestion (paused under PLAN-0152)
    * POST /api/v1/conversions
    */
   @Public()
   @Post('conversions')
-  @ApiOperation({ summary: 'Record S2S conversion postback' })
+  @ApiOperation({ summary: 'Record S2S conversion postback (paused)' })
   async reportS2SConversion(
-    @Headers('authorization') authHeader: string,
-    @Body() dto: IngestConversionDto,
+    @Headers('authorization') _authHeader: string,
+    @Body() _dto: IngestConversionDto,
   ) {
-    const rawKey = authHeader?.replace(/^Bearer\s+/i, '');
-
-    const result = await this.conversionsService.ingestConversion({
-      apiKey: rawKey,
-      clickId: dto.clickId,
-      event: dto.event,
-      orderId: dto.orderId,
-      value: dto.value,
-      currency: dto.currency,
-      metadata: dto.metadata,
-      source: 's2s',
-    });
-
-    return { status: 'success', data: result };
+    throw new ServiceUnavailableException('Conversion tracking is coming soon and intake is currently paused.');
   }
 
   /**
@@ -179,15 +153,9 @@ export class ConversionsController {
    * POST /api/v1/advertisers/api-keys
    */
   @Post('advertisers/api-keys')
-  @ApiOperation({ summary: 'Create new advertiser API key' })
-  async createApiKey(@Req() req: any, @Body() dto: CreateApiKeyDto) {
-    const advertiserId = req.user.sub;
-    const key = await this.conversionsService.createApiKey({
-      advertiserId,
-      name: dto.name,
-      scopes: dto.scopes,
-    });
-    return { status: 'success', data: key };
+  @ApiOperation({ summary: 'Create new advertiser API key (paused)' })
+  async createApiKey(@Req() _req: any, @Body() _dto: CreateApiKeyDto) {
+    throw new ServiceUnavailableException('Conversion API key issuance is coming soon and currently paused.');
   }
 
   /**
