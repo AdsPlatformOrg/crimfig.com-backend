@@ -414,7 +414,9 @@ export class DeliveryService {
     }
     state.timer=setTimeout(function(){state.closed=true;state.controller.abort();collapseSlot();},15000);
     var headers={Accept:'application/json'};
-    if(consent!=='denied'&&typeof window.crimfigCpcConsent==='function'&&typeof navigator==='object'&&navigator.globalPrivacyControl!==true){
+    // A native CMP needs verified vendor and purpose rules before it can enable optional continuity.
+    var hasNativeCmp=typeof window.__tcfapi==='function'||typeof window.__gpp==='function';
+    if(!hasNativeCmp&&consent!=='denied'&&typeof window.crimfigCpcConsent==='function'&&typeof navigator==='object'&&navigator.globalPrivacyControl!==true){
       try{
         var permission=window.crimfigCpcConsent();
         if(permission&&permission.state==='granted'&&typeof permission.proof==='string'&&permission.proof.length===111
@@ -1488,6 +1490,10 @@ export class DeliveryService {
           `Domain mismatch: slot "${canonicalSlot.slotTagId}" is bound exclusively to https://${canonicalWebsite.domain}.`,
         );
       }
+
+      // The Network auction cannot fill AdStation Direct inventory. Until assigned
+      // deal serving is available on this endpoint, return an empty slot.
+      if (canonicalSlot.slotType === 'direct') return null;
 
       // Update website heartbeat timestamp
       await this.db

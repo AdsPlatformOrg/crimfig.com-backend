@@ -1,5 +1,12 @@
 import { resolveClientIp, resolveClaimedIp } from '../../../api/ads-api/src/modules/delivery/client-ip';
 
+test('malformed forwarding entries cannot shift the configured hop or establish an address', () => {
+  const request = { headers: { 'x-forwarded-for': '198.51.100.7, , 10.0.0.2', 'cf-connecting-ip': '999.999.999.999' },
+    socket: { remoteAddress: '10.0.0.9' } };
+  expect(resolveClientIp(request, { TRUST_CF_CONNECTING_IP: 'true', TRUSTED_PROXY_HOPS: '2' })).toBe('10.0.0.9');
+  expect(resolveClaimedIp({ headers: { 'x-forwarded-for': ':::1' } })).toBeNull();
+});
+
 const req = (headers: Record<string, string>, remote = '10.0.0.9') =>
   ({ headers, socket: { remoteAddress: remote } }) as any;
 

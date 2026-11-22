@@ -13,9 +13,11 @@ export class ErrorMonitorMetadataGuard implements CanActivate {
 /** Finish listener also observes guard failures, explicit error responses and upstream proxy status. */
 export function errorMonitorBoundary(service:string,sink:ErrorMonitorSink){
   return (req:any,res:any,next:()=>void)=>{
-    req.__monitorBoundary=true;observeDiagnosticResponse(req,res);
+    req.__monitorBoundary=true;
     req.requestId=ensureRequestId(req.headers?.['x-request-id']);req.correlationId=ensureRequestId(req.headers?.['x-correlation-id']??req.requestId);
     res.setHeader('X-Request-Id',req.requestId);res.setHeader('X-Correlation-Id',req.correlationId);
+    if (req.__skipErrorMonitorCapture) return next();
+    observeDiagnosticResponse(req,res);
     const finalize=(aborted=false)=>{
       const statusCode=aborted?499:res.statusCode;
       if(req.__crimfigErrorCaptured||statusCode<400||statusCode>599)return;

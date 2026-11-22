@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -325,69 +325,49 @@ export class AdstationService extends PublisherSlotsService {
       }
     }
 
-    const existing = await this.db
-      .select({ id: schema.adstationAdEvents.id })
-      .from(schema.adstationAdEvents)
-      .where(eq(schema.adstationAdEvents.idempotencyKey, dto.idempotencyKey))
-      .limit(1);
+    const input = {
+      directCampaignId: dto.directCampaignId,
+      websiteId: dto.websiteId,
+      slotId: dto.slotId || null,
+      eventType: dto.eventType,
+      idempotencyKey: dto.idempotencyKey,
+      isViewable: dto.isViewable ?? false,
+      viewDurationMs: dto.viewDurationMs ?? 0,
+      ipHash: dto.ipHash || null,
+      userAgent: dto.userAgent || null,
+    };
 
-    if (existing.length > 0) {
-      return { status: 'duplicate_ignored', eventId: existing[0].id };
-    }
+    return this.db.transaction(async tx => {
+      await tx.execute(sql`set local lock_timeout = '5s'`);
+      await tx.execute(sql`set local statement_timeout = '8s'`);
+      const [event] = await tx.insert(schema.adstationAdEvents).values(input)
+        .onConflictDoNothing({ target: schema.adstationAdEvents.idempotencyKey })
+        .returning();
 
-    const [event] = await this.db
-      .insert(schema.adstationAdEvents)
-      .values({
-        directCampaignId: dto.directCampaignId,
-        websiteId: dto.websiteId,
-        slotId: dto.slotId || null,
-        eventType: dto.eventType,
-        idempotencyKey: dto.idempotencyKey,
-        isViewable: dto.isViewable ?? false,
-        viewDurationMs: dto.viewDurationMs ?? 0,
-        ipHash: dto.ipHash || null,
-        userAgent: dto.userAgent || null,
-      })
-      .returning();
-
-    if (
-      dto.eventType === 'impression' ||
-      dto.eventType === 'viewable_impression'
-    ) {
-      const [camp] = await this.db
-        .select({ delivered: adstationDirectCampaigns.deliveredImpressions })
-        .from(adstationDirectCampaigns)
-        .where(eq(adstationDirectCampaigns.id, dto.directCampaignId))
-        .limit(1);
-
-      if (camp) {
-        await this.db
-          .update(adstationDirectCampaigns)
-          .set({
-            deliveredImpressions: (camp.delivered || 0) + 1,
-            updatedAt: new Date(),
-          })
-          .where(eq(adstationDirectCampaigns.id, dto.directCampaignId));
+      if (!event) {
+        const [prior] = await tx.select().from(schema.adstationAdEvents)
+          .where(eq(schema.adstationAdEvents.idempotencyKey, input.idempotencyKey));
+        if (!prior || prior.directCampaignId !== input.directCampaignId.toLowerCase() ||
+            prior.websiteId !== input.websiteId.toLowerCase() || prior.slotId !== (input.slotId?.toLowerCase() ?? null) ||
+            prior.eventType !== input.eventType || prior.isViewable !== input.isViewable ||
+            prior.viewDurationMs !== input.viewDurationMs) {
+          throw new ConflictException('Direct event identity changed');
+        }
+        return { status: 'duplicate_ignored', eventId: prior.id };
       }
-    } else if (dto.eventType === 'click') {
-      const [camp] = await this.db
-        .select({ clicks: adstationDirectCampaigns.deliveredClicks })
-        .from(adstationDirectCampaigns)
-        .where(eq(adstationDirectCampaigns.id, dto.directCampaignId))
-        .limit(1);
 
-      if (camp) {
-        await this.db
-          .update(adstationDirectCampaigns)
-          .set({
-            deliveredClicks: (camp.clicks || 0) + 1,
-            updatedAt: new Date(),
-          })
-          .where(eq(adstationDirectCampaigns.id, dto.directCampaignId));
+      const impression = event.eventType === 'impression' || event.eventType === 'viewable_impression';
+      if (impression || event.eventType === 'click') {
+        await tx.update(adstationDirectCampaigns).set({
+          ...(impression
+            ? { deliveredImpressions: sql`${adstationDirectCampaigns.deliveredImpressions} + 1` }
+            : { deliveredClicks: sql`${adstationDirectCampaigns.deliveredClicks} + 1` }),
+          updatedAt: new Date(),
+        }).where(eq(adstationDirectCampaigns.id, event.directCampaignId));
       }
-    }
 
-    return { status: 'recorded', eventId: event.id };
+      return { status: 'recorded', eventId: event.id };
+    }, { isolationLevel: 'read committed' });
   }
 
   /**

@@ -31,6 +31,8 @@ export const supportTickets = pgTable(
   'support_tickets',
   {
     id: uuid('id').primaryKey().defaultRandom(),
+    requestId: uuid('request_id'),
+    requestHash: text('request_hash'),
     ticketNumber: varchar('ticket_number', { length: 32 }).notNull().unique(), // e.g. 'TCK-202610-001'
     userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     app: varchar('app', { length: 32 }).notNull().default('ads'), // 'ads' | 'billing' | 'auth'
@@ -73,6 +75,8 @@ export const supportMessages = pgTable(
     isStaffReply: boolean('is_staff_reply').notNull().default(false),
     isInternalNote: boolean('is_internal_note').notNull().default(false), // True = internal staff note, never shown to user
 
+    requestId: uuid('request_id'),
+    requestHash: text('request_hash'),
     body: text('body').notNull(),
     attachments: jsonb('attachments').default([]), // Array of { name, url, mimeType, sizeBytes }
 

@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { adsCampaigns, adsCreatives, adsInteractions, adsPlacements, adsServes } from '@crimfig/database/schema';
 import { sql } from 'drizzle-orm';
+import { billedClick, observedClickRows } from '../analytics/observed-clicks';
 import { eventCampaignId } from '../analytics/event-attribution';
 
 export const CAMPAIGN_LIST_SORTS = [
@@ -21,6 +22,10 @@ export function campaignListOrder(sort: string) {
     where ${eventCampaignId} = ${adsCampaigns.id}
       and ${adsInteractions.isValid} = true and ${adsInteractions.type} = ${type}
   )`;
+  const billed = sql`(
+    select count(distinct event_id) from (${observedClickRows({ campaign: sql`select ${adsCampaigns.id}` })}) click
+    where click.valid is true and ${billedClick}
+  )`;
   const key = sort.replace(/_desc$/, '');
   const expression = (() => {
     switch (key) {
@@ -30,8 +35,8 @@ export function campaignListOrder(sort: string) {
       case 'spend': return sql`${adsCampaigns.budgetUsdCents} - ${adsCampaigns.remainingBudgetUsdCents}`;
       case 'creatives': return sql`(select count(*) from ${adsCreatives} where ${adsCreatives.campaignId} = ${adsCampaigns.id} and ${adsCreatives.status} = 'active' and ${adsCreatives.reviewStatus} = 'approved')`;
       case 'views': return interactions('impression');
-      case 'clicks': return interactions('click');
-      case 'ctr': return sql`coalesce(100.0 * ${interactions('click')} / nullif(${interactions('impression')}, 0), 0)`;
+      case 'clicks': return billed;
+      case 'ctr': return sql`coalesce(100.0 * ${billed} / nullif(${interactions('impression')}, 0), 0)`;
       default: return sql`${adsCampaigns.createdAt}`;
     }
   })();

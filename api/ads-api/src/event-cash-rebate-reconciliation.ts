@@ -48,6 +48,7 @@ export interface EventCashRestoreSummary {
   promoterCreditedUsdCents: number;
   deferredInsufficientBalance: number;
   skippedNotRejectedOrAlreadyRestored: number;
+  skippedFullChainRejected: number;
 }
 
 const MAX_PG_INT = 2147483647;
@@ -199,6 +200,22 @@ async function lockTransactionTimeouts(tx: any) {
   await tx.execute(sql`set local statement_timeout = '8s'`);
 }
 
+async function hasFullChainRejection(
+  tx: Parameters<Parameters<NodePgDatabase<typeof s>['transaction']>[0]>[0],
+  escrowId: string,
+  promoterId: string,
+) {
+  const events = s.billingProviderEvents;
+  const [rejection] = await tx.select({ id: events.id }).from(events).where(and(
+    eq(events.provider, 'paystack'),
+    eq(events.eventType, 'internal.ad.rejection'),
+    eq(events.processed, true),
+    sql`${events.errorMessage} IS DISTINCT FROM 'review_dismissed'`,
+    sql`${events.reference} LIKE ${`internal.ad.rejection:${escrowId}:${promoterId}:%`}`,
+  )).limit(1);
+  return Boolean(rejection);
+}
+
 async function findEventSettlementItem(tx: any, campaignId: string, promoterId: string, eventId: string) {
   const rows = await tx
     .select({
@@ -314,21 +331,7 @@ export async function applyEventCashRebates(
           throw new Error(`Settlement escrow ownership mismatch for event ${eventId}`);
         }
 
-        // Do not double-rebate if the entire (escrowId, promoterId) chain was already rejected.
-        const [fullChainRejected] = await tx
-          .select({ id: s.billingProviderEvents.id })
-          .from(s.billingProviderEvents)
-          .where(
-            and(
-              eq(s.billingProviderEvents.provider, 'paystack'),
-              eq(s.billingProviderEvents.eventType, 'internal.ad.rejection'),
-              eq(s.billingProviderEvents.processed, true),
-              sql`${s.billingProviderEvents.errorMessage} IS DISTINCT FROM 'review_dismissed'`,
-              sql`${s.billingProviderEvents.reference} LIKE ${`internal.ad.rejection:${claim.escrowId}:${claim.promoterId}:%`}`,
-            ),
-          )
-          .limit(1);
-        if (fullChainRejected) {
+        if (await hasFullChainRejection(tx, claim.escrowId, claim.promoterId)) {
           summary.skippedFullChainRejected += 1;
           continue;
         }
@@ -601,6 +604,7 @@ export async function restoreOverturnedEventCash(
       promoterCreditedUsdCents: 0,
       deferredInsufficientBalance: 0,
       skippedNotRejectedOrAlreadyRestored: 0,
+      skippedFullChainRejected: 0,
     };
 
     const byCampaign = new Map<string, string[]>();
@@ -642,6 +646,12 @@ export async function restoreOverturnedEventCash(
           .where(eq(s.adsSettlementClaims.interactionId, eventId))
           .for('update');
         if (!claim) continue;
+
+        // An event-level appeal cannot overturn an approved full-chain rejection.
+        if (await hasFullChainRejection(tx, claim.escrowId, claim.promoterId)) {
+          summary.skippedFullChainRejected += 1;
+          continue;
+        }
 
         const [promoter] = await tx
           .select()

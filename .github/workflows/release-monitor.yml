@@ -17,7 +17,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - run: node scripts/release-delivery-smoke.cjs --monitor | tee runtime-smoke.json
+      - run: |
+          set -o pipefail
+          node scripts/release-delivery-smoke.cjs --monitor | tee runtime-smoke.json
         env:
           RELEASE_ADS_BASE_URL: ${{ vars.RELEASE_ADS_BASE_URL }}
           RELEASE_PUBLISHER_ORIGIN: ${{ vars.RELEASE_PUBLISHER_ORIGIN }}

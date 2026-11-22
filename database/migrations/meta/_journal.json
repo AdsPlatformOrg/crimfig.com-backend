@@ -337,6 +337,34 @@
       "when": 1794956400002,
       "tag": "0048_slot_retirement",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "7",
+      "when": 1794956400003,
+      "tag": "0049_campaign_report_pseudonyms",
+      "breakpoints": true
+    },
+    {
+      "idx": 49,
+      "version": "7",
+      "when": 1795219200000,
+      "tag": "0050_support_center",
+      "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "7",
+      "when": 1795305600000,
+      "tag": "0051_report_access_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1795305600001,
+      "tag": "0052_advertiser_recognition",
+      "breakpoints": true
     }
   ]
 }

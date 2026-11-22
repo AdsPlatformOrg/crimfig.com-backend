@@ -2,7 +2,7 @@ import {
   Injectable, ConflictException, UnauthorizedException, BadRequestException, Inject,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
@@ -17,7 +17,7 @@ import { IsString, IsNotEmpty } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import {
   AVATAR_ATTRIBUTION,
-  AVATAR_PRESETS,
+  SELECTABLE_AVATAR_PRESETS,
   DEFAULT_AVATAR_PRESET_ID,
   getAvatarPreset,
 } from './avatar-presets';
@@ -159,12 +159,16 @@ export class AuthService {
     if (!user) throw new BadRequestException('Invalid token');
     if (user.isEmailVerified) return { message: 'Email already verified' };
 
-    await this.db
+    const [verified] = await this.db
       .update(schema.users)
       .set({ isEmailVerified: true, status: 'ACTIVE' })
-      .where(eq(schema.users.id, payload.sub));
+      .where(and(eq(schema.users.id, user.id), eq(schema.users.isEmailVerified, false)))
+      .returning({ email: schema.users.email });
 
-    this.logger.audit('AUTH_EMAIL_VERIFIED', { userId: payload.sub });
+    if (!verified) return { message: 'Email already verified' };
+
+    this.logger.audit('AUTH_EMAIL_VERIFIED', { userId: user.id });
+    await this.emailService.sendWelcomeEmail({ email: verified.email });
     return { message: 'Email verified successfully. Your account is now active.' };
   }
 
@@ -231,7 +235,7 @@ export class AuthService {
   avatarCatalog() {
     return {
       defaultId: DEFAULT_AVATAR_PRESET_ID,
-      presets: AVATAR_PRESETS,
+      presets: SELECTABLE_AVATAR_PRESETS,
       attribution: AVATAR_ATTRIBUTION,
     };
   }
@@ -277,7 +281,7 @@ export class AuthService {
   }
 
   async updateAvatarPreset(userId: string, presetId: string | null) {
-    const preset = presetId === null ? undefined : getAvatarPreset(presetId);
+    const preset = presetId === null ? undefined : SELECTABLE_AVATAR_PRESETS.find(candidate => candidate.id === presetId);
     if (presetId !== null && !preset) throw new BadRequestException('Choose a valid avatar preset.');
     const [updated] = await this.db
       .update(schema.users)

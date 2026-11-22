@@ -8,6 +8,30 @@ describe('PLAN0080 actual SDK DOM with synthetic House provider',()=>{
  test.each([undefined,'denied','granted'])('consent %s is truthful across repeated slots and duplicate loader',async consent=>{process.env.ADS_PUBLIC_URL='https://ads.example.test';const tag='<ins class="crimfig-pub-slot" data-ad-slot="cf-slot-fixture"'+(consent?' data-cf-consent="'+consent+'"':'')+'></ins>';const dom=new JSDOM(tag+tag,{url:'https://publisher.example.test',runScripts:'outside-only'});const w=dom.window,calls:any[]=[];w.fetch=async(url:string,init:any={})=>{calls.push({url,body:init.body?JSON.parse(init.body):null});return{ok:true,json:async()=>({data:{adType:'image',imageUrl:'https://ads.example.test/api/v1/uploads/media/fixture',impToken:'synthetic-'+calls.length,width:728,height:90,isHouseAd:true}})};};w.navigator.sendBeacon=()=>false;try{const code=new DeliveryService({}as any,{}as any,{}as any,{}as any).getEmbedScript();w.eval(code);w.eval(code);w.document.dispatchEvent(new w.Event('DOMContentLoaded'));await tick();for(const img of w.document.querySelectorAll('img'))img.dispatchEvent(new w.Event('load'));await tick();const requests=calls.filter(c=>c.url.includes('/delivery/ad/'));expect(requests).toHaveLength(2);expect(requests.every(c=>new URL(c.url).searchParams.get('consent')===(consent??'unknown'))).toBe(true);const renders=calls.filter(c=>c.body?.type==='render');expect(renders).toHaveLength(2);expect(new Set(renders.map(c=>c.body.slotInstanceId)).size).toBe(2);expect(new Set(renders.map(c=>c.body.pageViewId)).size).toBe(1);for(const slot of w.document.querySelectorAll('ins'))slot.setAttribute('data-cf-consent','granted');w.cfPubQ.push({});await tick();expect(calls.filter(c=>c.url.includes('/delivery/ad/'))).toHaveLength(2);}finally{w.close();}});
 });
 describe('PLAN0080 real local HTTP consent parsing (delivery provider mocked)',()=>{
+  test('PLAN0104 positive GPC and missing consent suppress optional proof at the HTTP boundary', async () => {
+    const handler = jest.fn(async (..._args: any[]) => ({ isHouseAd: true }));
+    @Module({ controllers: [DeliveryController], providers: [{ provide: DeliveryService, useValue: { getAdForPlacement: handler } }] })
+    class PrivacyFixture {}
+    const app = await NestFactory.create(PrivacyFixture, { logger: false });
+    await app.listen(0, '127.0.0.1');
+    try {
+      const base = (await app.getUrl()) + '/delivery/ad/cf-slot-fixture?consent=';
+      for (const input of [
+        { consent: 'granted', gpc: '0, 1', blocked: true, proof: undefined },
+        { consent: 'unknown', gpc: '0', blocked: false, proof: undefined },
+        { consent: 'granted', gpc: '0', blocked: false, proof: 'fixture-proof' },
+      ]) {
+        const response = await fetch(base + input.consent, {
+          headers: { 'sec-gpc': input.gpc, 'x-cf-cpc-consent': 'fixture-proof' },
+          signal: AbortSignal.timeout(5000),
+        });
+        expect(response.status).toBe(200);
+        expect(handler.mock.calls.at(-1)?.[7]).toMatchObject({
+          privacyControl: input.blocked, continuityProof: input.proof,
+        });
+      }
+    } finally { await app.close(); }
+  }, 30000);
   test('only exact granted reaches the service as true, preserving all other inputs',async()=>{const seen:any[]=[];const service={getAdForPlacement:async(...args:any[])=>{seen.push(args);return {isHouseAd:true};}};
   @Module({controllers:[DeliveryController],providers:[{provide:DeliveryService,useValue:service}]})class LocalModule{}
   const app=await NestFactory.create(LocalModule,{logger:false});await app.listen(0,'127.0.0.1');try{for(const consent of ['', 'unknown','denied','true','GRANTED','granted']){const r=await fetch((await app.getUrl())+'/delivery/ad/cf-slot-fixture?domain=publisher.example.test'+(consent?'&consent='+consent:''),{signal:AbortSignal.timeout(5000)});expect(r.status).toBe(200);expect(seen.at(-1)[7].measurementConsent).toBe(consent==='granted');expect(seen.at(-1)[7].consentState).toBe(consent==='granted'||consent==='denied'?consent:'unknown');expect(seen.at(-1)[3]).toBe('publisher.example.test');}}finally{await app.close();}},30000);

@@ -10,6 +10,7 @@ import {
   timestamp,
   pgEnum,
   index,
+  uniqueIndex,
   integer,
 } from "drizzle-orm/pg-core";
 import { users } from "./users";
@@ -72,6 +73,7 @@ export const adsCampaigns = pgTable(
     submissionIntentId: uuid('submission_intent_id'),
     submittedAt: timestamp('submitted_at', { withTimezone: true }),
     title: varchar("title", { length: 255 }).notNull(),
+    reportPseudonym: varchar("report_pseudonym", { length: 40 }),
     description: text("description"),
 
     // Total budget allocated for this campaign (USD cents)
@@ -169,6 +171,7 @@ export const adsCampaigns = pgTable(
   (t) => [
     index("ads_campaigns_advertiser_id_idx").on(t.advertiserId),
     index("ads_campaigns_status_idx").on(t.status),
+    uniqueIndex("ads_campaigns_report_pseudonym_uq").on(t.reportPseudonym),
   ],
 );
 

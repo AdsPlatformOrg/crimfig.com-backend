@@ -1,3 +1,4 @@
+import { DeliveryService } from '../../../api/ads-api/src/modules/delivery/delivery.service';
 import { BadRequestException, ForbiddenException, Get } from '@nestjs/common';
 import {
   evaluateDirectSlotReadiness,
@@ -299,3 +300,27 @@ describe('PLAN-0115: AdStation Direct Ad Slot Mandatory Dual LIVE Gating', () =>
   });
 });
 
+
+test('PLAN0136 a Live Direct slot cannot fall into the Network auction or House fallback', async () => {
+  const slot = makeDirectSlot({
+    lifecycleStatus: 'active', manualReviewStatus: 'approved', approvedRevision: 1,
+  });
+  const website = makeWebsite({ domain: 'publisher.example.test' });
+  const rows = [{ slot, website, promoter: { isActive: true, isSuspended: false } }];
+  const db = {
+    select: jest.fn()
+      .mockReturnValueOnce({ from: () => ({ innerJoin: () => ({ innerJoin: () => ({
+        where: () => ({ limit: async () => rows }),
+      }) }) }) })
+      .mockReturnValueOnce({ from: () => ({ where: async () => [makeNetworkSlot()] }) }),
+    update: jest.fn(),
+    transaction: jest.fn(),
+  };
+  const auction = { runAuction: jest.fn() };
+  const delivery = new DeliveryService(db as any, { assertConfigured: jest.fn() } as any, auction as any, {} as any);
+  await expect(delivery.getAdForPlacement('cf-slot-direct-fixture', undefined, undefined, 'publisher.example.test'))
+    .resolves.toBeNull();
+  expect(auction.runAuction).not.toHaveBeenCalled();
+  expect(db.update).not.toHaveBeenCalled();
+  expect(db.transaction).not.toHaveBeenCalled();
+});

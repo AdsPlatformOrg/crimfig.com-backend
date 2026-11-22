@@ -67,6 +67,7 @@ export * from './notifications';
 // ─── AdStation & Advertiser Milestones (PLAN-0017 / PLAN-0018) ───────────────────
 export * from './adstation';
 export * from './advertiser_achievements';
+export * from './advertiser_recognition';
 
 export * from './ads_campaign_workflow';
 export * from './ads_supply_and_auction';

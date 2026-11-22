@@ -3,6 +3,7 @@ export interface AvatarPreset {
   label: string;
   file: string;
   alt: string;
+  collection?: 'portrait' | 'geometric';
 }
 
 export interface AvatarAttribution {
@@ -15,7 +16,7 @@ export interface AvatarAttribution {
   modifications: string;
 }
 
-/** Keep this list in sync with frontend/web/auth/src/lib/avatar-presets.ts and public/avatars/chibi/manifest.json. */
+/** Keep asset files in sync with the Auth app public avatar directory. */
 export const AVATAR_PRESETS: readonly AvatarPreset[] = [
   { id: 'chibi-indigo', label: 'Indigo', file: 'chibi-indigo.webp', alt: 'Chibi ninja avatar with an indigo hood and mask' },
   { id: 'chibi-crimson', label: 'Crimson', file: 'chibi-crimson.webp', alt: 'Chibi ninja avatar with a crimson hood and mask' },
@@ -29,7 +30,18 @@ export const AVATAR_PRESETS: readonly AvatarPreset[] = [
   { id: 'chibi-plum', label: 'Plum', file: 'chibi-plum.webp', alt: 'Chibi ninja avatar with a plum hood and mask' },
   { id: 'chibi-slate', label: 'Slate', file: 'chibi-slate.webp', alt: 'Chibi ninja avatar with a slate hood and mask' },
   { id: 'chibi-ember', label: 'Ember', file: 'chibi-ember.webp', alt: 'Chibi ninja avatar with an ember hood and mask' },
+  { id: 'portrait-1', label: 'Amara', file: 'portrait-1.webp', alt: 'Illustrated portrait', collection: 'portrait' },
+  { id: 'portrait-2', label: 'Tari', file: 'portrait-2.webp', alt: 'Illustrated portrait', collection: 'portrait' },
+  { id: 'portrait-3', label: 'Zuri', file: 'portrait-3.webp', alt: 'Illustrated portrait', collection: 'portrait' },
+  { id: 'portrait-4', label: 'Mika', file: 'portrait-4.webp', alt: 'Illustrated portrait', collection: 'portrait' },
+  { id: 'geo-1', label: 'Orbit', file: 'geo-1.webp', alt: 'Geometric character', collection: 'geometric' },
+  { id: 'geo-2', label: 'Tile', file: 'geo-2.webp', alt: 'Geometric character', collection: 'geometric' },
+  { id: 'geo-3', label: 'Prism', file: 'geo-3.webp', alt: 'Geometric character', collection: 'geometric' },
+  { id: 'geo-4', label: 'Halo', file: 'geo-4.webp', alt: 'Geometric character', collection: 'geometric' },
 ] as const;
+
+const AVAILABLE_NINJA_IDS = new Set(['chibi-indigo', 'chibi-crimson', 'chibi-jade', 'chibi-slate', 'chibi-amber']);
+export const SELECTABLE_AVATAR_PRESETS = AVATAR_PRESETS.filter(preset => preset.collection || AVAILABLE_NINJA_IDS.has(preset.id));
 
 export const DEFAULT_AVATAR_PRESET_ID = 'chibi-indigo';
 

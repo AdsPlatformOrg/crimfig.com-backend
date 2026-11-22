@@ -1,160 +1,120 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common';
+import { Injectable, Inject, UnauthorizedException } from '@nestjs/common';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
-import {
-  advertiserPromoBudget,
-  advertiserAchievements,
-  adsCampaigns,
-} from '@crimfig/database/schema';
-import { and, eq, desc, sql } from 'drizzle-orm';
-import financialConstants from '@crimfig/shared/src/config/financial-constants.json';
+import { desc, eq, sql } from 'drizzle-orm';
+import { readMilestoneEvidence } from './milestone-evidence';
+import { recognitionDecisions, recognitionPolicyVersion } from './milestone-policy';
 
 @Injectable()
 export class AdvertiserMilestonesService {
-  private readonly logger = new Logger(AdvertiserMilestonesService.name);
+  constructor(@Inject(DATABASE_TOKEN) private readonly db: NodePgDatabase<typeof schema>) {}
 
-  constructor(
-    @Inject(DATABASE_TOKEN)
-    private readonly db: NodePgDatabase<typeof schema>,
-  ) {}
-
-  /**
-   * Get or initialize advertiser promotional budget singleton
-   */
-  async getOrCreatePromoBudget() {
-    const [budget] = await this.db.select().from(advertiserPromoBudget).limit(1);
-    if (budget) return budget;
-
-    const [created] = await this.db
-      .insert(advertiserPromoBudget)
-      .values({
-        totalAllocatedCents: 1000000, // $10,000 USD default authorized promotional allocation
-        issuedBonusCreditsCents: 0,
-        consumedBonusCreditsCents: 0,
-        remainingPromoBudgetCents: 1000000,
-        isIssuanceHalted: false,
-      })
-      .returning();
-
-    return created;
+  private validateIdentity(advertiserId: string) {
+    if (typeof advertiserId !== 'string' || !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(advertiserId)) {
+      throw new UnauthorizedException('Authenticated advertiser required');
+    }
   }
 
-  /**
-   * List advertiser's achievements and bonus credits
-   */
   async getAdvertiserAchievements(advertiserId: string) {
-    const achievements = await this.db
-      .select()
-      .from(advertiserAchievements)
-      .where(eq(advertiserAchievements.advertiserId, advertiserId))
-      .orderBy(desc(advertiserAchievements.achievedAt));
-
-    const totalBonusCreditRemainingCents = achievements.reduce(
-      (sum, a) => sum + (a.isClawedBack ? 0 : a.bonusCreditRemainingCents),
-      0,
-    );
-
-    return {
-      achievements,
-      totalBonusCreditRemainingCents,
-      totalBonusCreditRemainingUsd: (totalBonusCreditRemainingCents / 100).toFixed(2),
-      definitions: financialConstants.advertiserAchievements,
-    };
+    this.validateIdentity(advertiserId);
+    return this.db.transaction(async tx => {
+      await tx.execute(sql`set local statement_timeout = '8s'`);
+      const evidence = await readMilestoneEvidence(tx, advertiserId);
+      const achievements = await tx.select({
+        id: schema.advertiserAchievements.id, tier: schema.advertiserAchievements.tier,
+        badgeTitle: schema.advertiserAchievements.badgeTitle,
+        bonusCreditCents: schema.advertiserAchievements.bonusCreditCents,
+        bonusCreditRemainingCents: schema.advertiserAchievements.bonusCreditRemainingCents,
+        creditExpiresAt: schema.advertiserAchievements.creditExpiresAt,
+        isClawedBack: schema.advertiserAchievements.isClawedBack, achievedAt: schema.advertiserAchievements.achievedAt,
+      }).from(schema.advertiserAchievements)
+        .where(eq(schema.advertiserAchievements.advertiserId, advertiserId))
+        .orderBy(desc(schema.advertiserAchievements.achievedAt));
+      const awards = await tx.execute<{ id: string; milestone_id: string; state: string; first_qualified_at: Date }>(sql`
+        SELECT id,milestone_id,state,first_qualified_at FROM advertiser_recognition_awards
+        WHERE advertiser_id=${advertiserId}::uuid AND qualifying_scope='lifetime' ORDER BY first_qualified_at,id`);
+      const decisions = recognitionDecisions(evidence);
+      const eligible = evidence.campaigns.filter(campaign => campaign.eligible);
+      const pending = evidence.campaigns.filter(campaign => campaign.completed && !campaign.eligible).length;
+      const spend = eligible.reduce((total, campaign) => total + campaign.clearedSpendCents!, 0);
+      return {
+        policyVersion: recognitionPolicyVersion, evaluatedAt: new Date().toISOString(),
+        monetaryProgram: { status: 'unavailable', reason: 'Bonus ad credit requires approved funding and claim terms.' },
+        progress: {
+          totalCampaigns: evidence.totalCampaigns, completedCampaignsAwaitingVerification: pending,
+          verifiedCompletedCampaigns: evidence.fundingVerified || !evidence.totalCampaigns ? eligible.length : null,
+          eligibleClearedSpendCents: (evidence.fundingVerified || !evidence.totalCampaigns) && Number.isSafeInteger(spend) ? spend : null,
+          evidenceStatus: !evidence.totalCampaigns ? 'no_activity' : !evidence.fundingVerified || pending ? 'pending_verification' : 'verified',
+          explanation: !evidence.totalCampaigns ? 'Complete an approved campaign to begin your milestone progress.'
+            : !evidence.fundingVerified ? 'Funding history needs verification before campaign spend can qualify.'
+            : pending ? 'Some completed campaigns are awaiting clearance or eligibility review.'
+            : 'Progress reflects verified cash funding, completed campaigns and cleared advertising activity.',
+        },
+        definitions: decisions.map(({ qualified, ...definition }) => ({
+          ...definition,
+          state: qualified ? awards.rows.some(award => award.milestone_id === definition.tier && award.state === 'qualified') ? 'EARNED' : 'QUALIFIED'
+            : !evidence.totalCampaigns ? 'LOCKED' : !evidence.fundingVerified || pending ? 'PENDING_CLEARANCE' : 'IN_PROGRESS',
+        })),
+        badges: awards.rows.map(award => ({
+          id: award.id, tier: award.milestone_id, achievedAt: award.first_qualified_at,
+          state: decisions.find(decision => decision.tier === award.milestone_id)?.qualified ? award.state
+            : !evidence.fundingVerified || pending ? 'under_review' : 'revoked',
+        })),
+        achievements: achievements.map(achievement => ({ ...achievement, status: 'RECONCILIATION_REQUIRED' })),
+        claimableRewards: [], totalBonusCreditRemainingCents: null, totalBonusCreditRemainingUsd: null,
+      };
+    }, { isolationLevel: 'repeatable read', accessMode: 'read only' });
   }
 
-  /**
-   * Evaluate and award Category A Milestones (A1 - A4)
-   * A1: First Campaign (min $5 spend, cleared) -> $5.00 bonus ad credit
-   * A2: Consistent Advertiser (>= 5 campaigns, 0 strikes) -> $15.00 bonus ad credit
-   * A3: Growth Advertiser (>= $500 spend, >= 10 campaigns) -> $50.00 bonus ad credit
-   * A4: Trusted Advertiser (>= $2,500 spend) -> $150.00 bonus ad credit
-   */
+  /** Recognition writes are separate from the historical bonus ledger and money. */
   async evaluateCategoryAMilestones(advertiserId: string) {
-    const budget = await this.getOrCreatePromoBudget();
-    if (budget.isIssuanceHalted) {
-      this.logger.warn(`Advertiser promotional budget issuance halted. Skipping evaluation.`);
-      return { status: 'budget_halted' };
-    }
-
-    // Get advertiser campaigns
-    const campaigns = await this.db
-      .select()
-      .from(adsCampaigns)
-      .where(eq(adsCampaigns.advertiserId, advertiserId));
-
-    const totalCampaigns = campaigns.length;
-    const totalSpendCents = campaigns.reduce((acc, c) => acc + Math.max(0, (c.budgetUsdCents || 0) - (c.remainingBudgetUsdCents || 0)), 0);
-
-    const existingAchievements = await this.db
-      .select()
-      .from(advertiserAchievements)
-      .where(eq(advertiserAchievements.advertiserId, advertiserId));
-
-    const existingTiers = new Set(existingAchievements.map((a) => a.tier));
-    const newlyAwarded: (typeof advertiserAchievements.$inferSelect)[] = [];
-
-    const awardTier = async (tier: any, title: string, icon: string, bonusCents: number, validityDays: number) => {
-      if (existingTiers.has(tier)) return;
-
-      if (budget.remainingPromoBudgetCents < bonusCents) {
-        this.logger.warn(`Insufficient remaining promotional budget to award tier ${tier}`);
-        return;
+    this.validateIdentity(advertiserId);
+    const newlyAwarded = await this.db.transaction(async tx => {
+      await tx.execute(sql`set local lock_timeout = '5s'`);
+      await tx.execute(sql`set local statement_timeout = '8s'`);
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${'advertiser-recognition:' + advertiserId},0))`);
+      const evidence = await readMilestoneEvidence(tx, advertiserId);
+      const decisions = recognitionDecisions(evidence);
+      const proof = JSON.stringify({ fundingVerified: evidence.fundingVerified,
+        campaigns: evidence.campaigns.filter(campaign => campaign.eligible).sort((left, right) => left.id.localeCompare(right.id)) });
+      const awarded: { id: string; tier: string }[] = [];
+      for (const decision of decisions) {
+        const prior = await tx.execute<{ id: string; state: string }>(sql`
+          SELECT id,state FROM advertiser_recognition_awards WHERE advertiser_id=${advertiserId}::uuid
+            AND milestone_id=${decision.tier} AND qualifying_scope='lifetime' FOR UPDATE`);
+        if (!prior.rows.length && !decision.qualified) continue;
+        const state = decision.qualified ? 'qualified' : !evidence.fundingVerified || evidence.campaigns.some(campaign => campaign.completed && !campaign.eligible)
+          ? 'under_review' : 'revoked';
+        if (!prior.rows.length) {
+          const created = await tx.execute<{ id: string }>(sql`INSERT INTO advertiser_recognition_awards(advertiser_id,milestone_id,qualifying_scope,policy_version,state,evidence)
+            VALUES (${advertiserId}::uuid,${decision.tier},'lifetime',${recognitionPolicyVersion},${state},${proof}::jsonb) RETURNING id`);
+          const id = created.rows[0].id;
+          await tx.execute(sql`INSERT INTO advertiser_recognition_evaluations(award_id,state,policy_version,evidence)
+            VALUES (${id}::uuid,${state},${recognitionPolicyVersion},${proof}::jsonb)`);
+          awarded.push({ id, tier: decision.tier });
+        } else {
+          await tx.execute(sql`WITH changed AS (
+            UPDATE advertiser_recognition_awards SET state=${state},policy_version=${recognitionPolicyVersion},evidence=${proof}::jsonb,evaluated_at=now()
+            WHERE id=${prior.rows[0].id}::uuid AND (state<>${state} OR evidence IS DISTINCT FROM ${proof}::jsonb OR policy_version<>${recognitionPolicyVersion}) RETURNING id
+          ) INSERT INTO advertiser_recognition_evaluations(award_id,previous_state,state,policy_version,evidence)
+            SELECT id,${prior.rows[0].state},${state},${recognitionPolicyVersion},${proof}::jsonb FROM changed`);
+        }
       }
+      return awarded;
+    });
+    return { status: 'evaluated', newlyAwarded, ...await this.getAdvertiserAchievements(advertiserId) };
+  }
 
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + validityDays);
-
-      const [achievement] = await this.db
-        .insert(advertiserAchievements)
-        .values({
-          advertiserId,
-          tier,
-          badgeTitle: title,
-          badgeIcon: icon,
-          bonusCreditCents: bonusCents,
-          bonusCreditRemainingCents: bonusCents,
-          creditExpiresAt: expiresAt,
-          qualifyingSpendCents: totalSpendCents,
-          qualifyingCampaignCount: totalCampaigns,
-        })
-        .returning();
-
-      // Deduct from promo budget atomically
-      await this.db
-        .update(advertiserPromoBudget)
-        .set({
-          issuedBonusCreditsCents: sql`${advertiserPromoBudget.issuedBonusCreditsCents} + ${bonusCents}`,
-          remainingPromoBudgetCents: sql`${advertiserPromoBudget.remainingPromoBudgetCents} - ${bonusCents}`,
-          updatedAt: new Date(),
-        })
-        .where(eq(advertiserPromoBudget.id, budget.id));
-
-      newlyAwarded.push(achievement);
-    };
-
-    // A1: First Campaign
-    if (totalCampaigns >= 1 && totalSpendCents >= 500) {
-      await awardTier('A1_FIRST_CAMPAIGN', 'First Campaign', '🛡️', 500, 90);
+  async reconcile(after: string | null, persist: boolean, assertLease: () => Promise<void>) {
+    const result = await this.db.execute<{ advertiser_id: string }>(sql`SELECT advertiser_id FROM (
+      SELECT advertiser_id FROM ads_campaigns UNION SELECT advertiser_id FROM advertiser_recognition_awards
+    ) owners WHERE ${after ? sql`advertiser_id>${after}::uuid` : sql`true`} ORDER BY advertiser_id LIMIT 100`);
+    for (const row of result.rows) {
+      await assertLease();
+      if (persist) await this.evaluateCategoryAMilestones(row.advertiser_id);
+      else await this.getAdvertiserAchievements(row.advertiser_id);
     }
-    // A2: Consistent
-    if (totalCampaigns >= 5) {
-      await awardTier('A2_CONSISTENT', 'Consistent Advertiser', '🥈', 1500, 180);
-    }
-    // A3: Growth
-    if (totalCampaigns >= 10 && totalSpendCents >= 50000) {
-      await awardTier('A3_GROWTH', 'Growth Advertiser', '💎', 5000, 365);
-    }
-    // A4: Trusted
-    if (totalSpendCents >= 250000) {
-      await awardTier('A4_TRUSTED', 'Trusted Advertiser', '👑', 15000, 365);
-    }
-
-    return {
-      status: 'evaluated',
-      newlyAwarded,
-      totalCampaigns,
-      totalSpendCents,
-    };
+    return { processed: result.rows.length, cursor: result.rows.length === 100 ? result.rows[result.rows.length - 1].advertiser_id : null };
   }
 }

@@ -28,6 +28,13 @@ function fixture() {
 }
 
 describe('release schema readiness', () => {
+  it('rejects an Ads release when the recognition migration is missing', async () => {
+    const f = fixture();
+    for (let index = f.columns.length - 1; index >= 0; index--) {
+      if (f.columns[index].table_name === 'advertiser_recognition_awards') f.columns.splice(index, 1);
+    }
+    await expect(requiredAdsSchema(f.db)).rejects.toThrow('Required service schema unavailable');
+  });
   it('rejects missing columns while process liveness stays available', async () => {
     const db = { execute: jest.fn().mockResolvedValue({ rows: [] }) };
     await expect(requiredAdsSchema(db)).rejects.toThrow('Required service schema unavailable');

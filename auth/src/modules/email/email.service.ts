@@ -52,6 +52,18 @@ export class EmailService {
 
   // ── Private helper ───────────────────────────────────────────────────────
 
+  async sendSupportEmail(params: {to: string; bcc?: string; subject: string; textContent: string}): Promise<ErrorAlertEmailDeliveryResult> {
+    if (!this.client) return {accepted:false,error:'BREVO_CLIENT_NOT_INITIALIZED'};
+    try {
+      await this.client.transactionalEmails.sendTransacEmail({
+        sender:{name:config.EMAIL.FROM_NAME,email:config.EMAIL.FROM},
+        to:[{email:params.to}], ...(params.bcc ? {bcc:[{email:params.bcc}]} : {}),
+        subject:params.subject, textContent:params.textContent,
+      });
+      return {accepted:true};
+    } catch { return {accepted:false,error:'SUPPORT_MAIL_FAILED'}; }
+  }
+
   private async send(params: {
     to: { email: string; name?: string };
     subject: string;
@@ -84,14 +96,17 @@ export class EmailService {
    * The token is a short-lived signed JWT (5-minute expiry).
    */
   async sendVerificationEmail(to: { email: string; name?: string }, token: string): Promise<void> {
-    const verifyUrl = `${config.APP.AUTH_WEB_URL}/verify-email?token=${token}`;
-    await this.send({
-      to,
+    await this.send({ to, ...this.buildVerificationEmail(to.name, token) });
+  }
+
+  private buildVerificationEmail(name: string | undefined, token: string) {
+    const verifyUrl = `${config.APP.AUTH_WEB_URL}/verify-email?token=${encodeURIComponent(token)}`;
+    return {
       subject: 'Verify your CrimFig email address',
       htmlContent: `
         <div style="font-family:'Poppins',Arial,sans-serif;max-width:560px;margin:0 auto;color:#171B2A;padding:24px;">
           <h2 style="color:#171B2A;font-weight:700;">Verify your email</h2>
-          <p>Hi${to.name ? ` ${to.name}` : ''},</p>
+          <p>Hi${name ? ` ${escapeHtml(name)}` : ''},</p>
           <p>Click the button below to verify your email address. This link expires in <strong>5 minutes</strong>.</p>
           <p style="margin:32px 0;">
             <a href="${verifyUrl}"
@@ -104,7 +119,7 @@ export class EmailService {
           <p style="color:#9CA3AF;font-size:12px;">If you did not create a CrimFig account, you can safely ignore this email.</p>
         </div>
       `,
-    });
+    };
   }
 
   /**
@@ -112,14 +127,17 @@ export class EmailService {
    * The token is a signed JWT (15-minute expiry).
    */
   async sendPasswordResetEmail(to: { email: string; name?: string }, token: string): Promise<void> {
-    const resetUrl = `${config.APP.AUTH_WEB_URL}/reset-password?token=${token}`;
-    await this.send({
-      to,
+    await this.send({ to, ...this.buildPasswordResetEmail(to.name, token) });
+  }
+
+  private buildPasswordResetEmail(name: string | undefined, token: string) {
+    const resetUrl = `${config.APP.AUTH_WEB_URL}/reset-password?token=${encodeURIComponent(token)}`;
+    return {
       subject: 'Reset your CrimFig password',
       htmlContent: `
         <div style="font-family:'Poppins',Arial,sans-serif;max-width:560px;margin:0 auto;color:#171B2A;padding:24px;">
           <h2 style="color:#171B2A;font-weight:700;">Reset your password</h2>
-          <p>Hi${to.name ? ` ${to.name}` : ''},</p>
+          <p>Hi${name ? ` ${escapeHtml(name)}` : ''},</p>
           <p>We received a request to reset the password for your CrimFig account. Click below — this link expires in <strong>15 minutes</strong>.</p>
           <p style="margin:32px 0;">
             <a href="${resetUrl}"
@@ -132,7 +150,7 @@ export class EmailService {
           <p style="color:#9CA3AF;font-size:12px;">If you did not request a password reset, your account is safe — no action is needed.</p>
         </div>
       `,
-    });
+    };
   }
 
   /**
@@ -146,15 +164,23 @@ export class EmailService {
     role: string;
     inviteToken: string;
   }): Promise<void> {
-    const acceptUrl = `${config.APP.AUTH_WEB_URL}/org/accept-invite?token=${params.inviteToken}`;
-    await this.send({
-      to: params.to,
+    await this.send({ to: params.to, ...this.buildOrgInviteEmail(params.to.name, params) });
+  }
+
+  private buildOrgInviteEmail(name: string | undefined, params: {
+    orgName: string;
+    inviterName: string;
+    role: string;
+    inviteToken: string;
+  }) {
+    const acceptUrl = `${config.APP.AUTH_WEB_URL}/org/accept-invite?token=${encodeURIComponent(params.inviteToken)}`;
+    return {
       subject: `You've been invited to join ${params.orgName} on CrimFig`,
       htmlContent: `
         <div style="font-family:'Poppins',Arial,sans-serif;max-width:560px;margin:0 auto;color:#171B2A;padding:24px;">
           <h2 style="color:#171B2A;font-weight:700;">Organisation Invitation</h2>
-          <p>Hi${params.to.name ? ` ${params.to.name}` : ''},</p>
-          <p><strong>${params.inviterName}</strong> has invited you to join <strong>${params.orgName}</strong> on CrimFig as a <strong>${params.role}</strong>.</p>
+          <p>Hi${name ? ` ${escapeHtml(name)}` : ''},</p>
+          <p><strong>${escapeHtml(params.inviterName)}</strong> has invited you to join <strong>${escapeHtml(params.orgName)}</strong> on CrimFig as a <strong>${escapeHtml(params.role)}</strong>.</p>
           <p style="margin:32px 0;">
             <a href="${acceptUrl}"
                style="background:#D4143A;color:#ffffff;padding:14px 28px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block;">
@@ -166,21 +192,24 @@ export class EmailService {
           <p style="color:#9CA3AF;font-size:12px;">If you did not expect this invitation, you can safely ignore this email.</p>
         </div>
       `,
-    });
+    };
   }
 
   /**
    * Send MFA backup codes to the user after TOTP enrollment.
    */
   async sendMfaBackupCodesEmail(to: { email: string; name?: string }, codes: string[]): Promise<void> {
-    const codeList = codes.map((c) => `<li style="font-family:monospace;font-size:15px;padding:4px 0;">${c}</li>`).join('');
-    await this.send({
-      to,
+    await this.send({ to, ...this.buildMfaBackupCodesEmail(to.name, codes) });
+  }
+
+  private buildMfaBackupCodesEmail(name: string | undefined, codes: string[]) {
+    const codeList = codes.map((c) => `<li style="font-family:monospace;font-size:15px;padding:4px 0;">${escapeHtml(c)}</li>`).join('');
+    return {
       subject: 'Your CrimFig MFA backup codes',
       htmlContent: `
         <div style="font-family:'Poppins',Arial,sans-serif;max-width:560px;margin:0 auto;color:#171B2A;padding:24px;">
           <h2 style="color:#171B2A;font-weight:700;">Your MFA Backup Codes</h2>
-          <p>Hi${to.name ? ` ${to.name}` : ''},</p>
+          <p>Hi${name ? ` ${escapeHtml(name)}` : ''},</p>
           <p>You have successfully enabled two-factor authentication. Store these backup codes in a safe place — each code can only be used <strong>once</strong> if you lose access to your authenticator app.</p>
           <ul style="background:#F5F6F8;padding:20px 32px;border-radius:8px;list-style-type:none;margin:16px 0;">${codeList}</ul>
           <p style="color:#DC2626;font-weight:600;">⚠ Keep these codes private. Anyone with these codes can access your account.</p>
@@ -188,7 +217,107 @@ export class EmailService {
           <p style="color:#9CA3AF;font-size:12px;">If you did not enable MFA on your account, contact support immediately.</p>
         </div>
       `,
-    });
+    };
+  }
+
+  async sendWelcomeEmail(to: { email: string }): Promise<void> {
+    await this.send({ to, ...this.buildWelcomeEmail() });
+  }
+
+  private buildWelcomeEmail() {
+    const campaignsUrl = new URL('/campaigns', config.APP.ADS_WEB_URL).href;
+    const promoterUrl = new URL('/promoter', config.APP.ADS_WEB_URL).href;
+    const supportUrl = new URL('/support', config.APP.AUTH_WEB_URL).href;
+    const intro = 'Your email is verified and you’re ready to get started. We’re glad you’re here!';
+    const sections = [
+      {
+        title: 'Advertisers',
+        description: 'Create ad campaigns, set your budget, and track how your ads perform.',
+        link: 'Go to Campaigns',
+        url: campaignsUrl,
+      },
+      {
+        title: 'Promoters',
+        description: 'Add your website, set up ad slots, and earn from eligible ad activity.',
+        link: 'Open Promoter Hub',
+        url: promoterUrl,
+      },
+      {
+        title: 'Help & Support',
+        description: 'Have a question or need a hand? Sign in to submit a support request or follow up on one.',
+        link: 'Open Help & Support',
+        url: supportUrl,
+      },
+    ];
+
+    return {
+      subject: 'Welcome to CrimFig!',
+      htmlContent: `
+        <div style="font-family:'Poppins',Arial,sans-serif;max-width:560px;margin:0 auto;color:#171B2A;padding:24px;line-height:1.6;">
+          <h2 style="margin-top:0;">Welcome to CrimFig!</h2>
+          <p>Hi there,</p>
+          <p>${intro}</p>
+          ${sections.map(({ title, description, link, url }) => `
+            <h3 style="margin:24px 0 4px;">${escapeHtml(title)}</h3>
+            <p style="margin:0 0 6px;">${description}</p>
+            <a style="color:#A80F32;font-weight:600;" href="${escapeHtml(url)}">${escapeHtml(link)}</a>
+          `).join('')}
+          <p style="margin-top:28px;">See you on CrimFig,<br>The CrimFig team</p>
+        </div>
+      `,
+      textContent: [
+        'Hi there,',
+        intro,
+        ...sections.map(({ title, description, link, url }) => `${title}\n${description}\n${link}: ${url}`),
+        'See you on CrimFig,\nThe CrimFig team',
+      ].join('\n\n'),
+    };
+  }
+
+  buildSupportEmailContent(kind: string, ticket: { id: string; ticket_number: string }) {
+    const target = new URL(kind === 'staff' ? '/admin/support' : '/support', config.APP.AUTH_WEB_URL);
+    target.searchParams.set('ticket', ticket.id);
+    const text = kind === 'ack'
+      ? `We received request ${ticket.ticket_number}. Sign in to view your request.`
+      : kind === 'reply'
+        ? `There is a new reply to request ${ticket.ticket_number}. Sign in to read it.`
+        : `A support request ${ticket.ticket_number} needs attention. Sign in to review it.`;
+    return { subject: `CrimFig Support ${ticket.ticket_number}`, textContent: `${text} ${target.href}` };
+  }
+
+  listTemplatePreviews() {
+    const ticket = { id: 'sample-ticket', ticket_number: 'CF-EXAMPLE' };
+    const error = {
+      environment: 'production',
+      service: 'auth',
+      httpMethod: 'GET',
+      normalizedRoute: '/api/v1/example',
+      statusCode: 500,
+      errorCategory: 'InternalError',
+      safeSummary: 'An example request returned an internal error.',
+      requestId: 'sample-request',
+      occurrenceCount: 1,
+      windowStartedAt: '2026-01-01T10:00:00Z',
+      windowEndsAt: '2026-01-01T10:05:00Z',
+      railwayLogUrl: 'https://example.invalid/logs',
+      monitorUrl: 'https://example.invalid/monitor',
+    };
+    return [
+      { id: 'welcome', name: 'Welcome email', ...this.buildWelcomeEmail() },
+      { id: 'verification', name: 'Email verification', ...this.buildVerificationEmail('Alex', 'sample-token') },
+      { id: 'password-reset', name: 'Password reset', ...this.buildPasswordResetEmail('Alex', 'sample-token') },
+      { id: 'org-invite', name: 'Organisation invitation', ...this.buildOrgInviteEmail('Alex', {
+        orgName: 'Example Studio', inviterName: 'Sam', role: 'MEMBER', inviteToken: 'sample-token',
+      }) },
+      { id: 'mfa-backup', name: 'MFA backup codes', ...this.buildMfaBackupCodesEmail('Alex', ['SAMPLE-0001', 'SAMPLE-0002']) },
+      { id: 'support-ack', name: 'Support request received', ...this.buildSupportEmailContent('ack', ticket) },
+      { id: 'support-reply', name: 'Support reply', ...this.buildSupportEmailContent('reply', ticket) },
+      { id: 'support-staff', name: 'Staff support notification', ...this.buildSupportEmailContent('staff', ticket) },
+      { id: 'error-alert', name: 'Platform error alert', ...this.buildErrorAlertEmailContent({ ...error, kind: 'initial' }) },
+      { id: 'error-summary', name: 'Platform error summary', ...this.buildErrorAlertEmailContent({
+        ...error, kind: 'window_summary', occurrenceCount: 5,
+      }) },
+    ];
   }
 
   /**

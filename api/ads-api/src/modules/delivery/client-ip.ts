@@ -1,3 +1,5 @@
+import { isIP } from 'node:net';
+
 /**
  * PLAN-0066 F1: client IP resolution with an explicit trust boundary.
  *
@@ -22,7 +24,7 @@ function first(value: string | string[] | undefined): string {
 }
 
 function plausibleIp(value: string): boolean {
-  return value.length > 0 && value.length <= 45 && /^[0-9a-fA-F:.]+$/.test(value);
+  return value.length <= 45 && !value.includes('%') && isIP(value) !== 0;
 }
 
 export function resolveClientIp(
@@ -39,7 +41,7 @@ export function resolveClientIp(
   if (hops > 0) {
     const xff = first(req.headers['x-forwarded-for']);
     if (xff) {
-      const parts = xff.split(',').map((p) => p.trim()).filter(Boolean);
+      const parts = xff.split(',').map((p) => p.trim());
       const candidate = parts[parts.length - hops];
       if (candidate && plausibleIp(candidate)) return candidate;
     }

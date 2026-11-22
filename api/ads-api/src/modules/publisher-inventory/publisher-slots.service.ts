@@ -656,12 +656,13 @@ export class PublisherSlotsService {
       .select({
         renders: sql<number>`count(*) filter (where ${adsInteractions.type} = 'render')::int`,
         impressions: sql<number>`count(*) filter (where ${adsInteractions.type} = 'impression')::int`,
-        viewableImpressions: sql<number>`count(*) filter (where ${adsInteractions.type} = 'viewable_impression' and ${adsInteractions.isValid} = true)::int`,
+        viewableImpressions: sql<number>`count(distinct coalesce(${adsInteractions.serveId}, ${adsInteractions.id}))
+          filter (where ${adsInteractions.type} = 'viewable_impression' and ${adsInteractions.isValid} = true)::int`,
         clicks: sql<number>`count(*) filter (where ${adsInteractions.type} = 'click' and ${adsInteractions.isValid} = true)::int`,
         filteredInvalid: sql<number>`count(*) filter (where ${adsInteractions.isValid} = false)::int`,
       })
       .from(adsInteractions)
-      .where(eq(adsInteractions.slotId, slot.id));
+      .where(and(eq(adsInteractions.slotId, slot.id), eq(adsInteractions.promoterId, promoterId)));
 
     return {
       slotId: slot.id,

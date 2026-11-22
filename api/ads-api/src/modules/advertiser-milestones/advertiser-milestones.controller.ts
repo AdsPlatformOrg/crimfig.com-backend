@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Req } from '@nestjs/common';
+import { Controller, Get, Post, Req, Header } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AdvertiserMilestonesService } from './advertiser-milestones.service';
 
@@ -8,6 +8,7 @@ export class AdvertiserMilestonesController {
   constructor(private readonly milestonesService: AdvertiserMilestonesService) {}
 
   @Get()
+  @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Get current advertiser achievements, badges, and bonus credit balances' })
   async getAchievements(@Req() req: any) {
     const userId = req.user.sub;
@@ -16,7 +17,8 @@ export class AdvertiserMilestonesController {
   }
 
   @Post('evaluate')
-  @ApiOperation({ summary: 'Trigger evaluation of eligible advertiser milestone achievements' })
+  @Header('Cache-Control', 'no-store')
+  @ApiOperation({ summary: 'Evaluate verified recognition badges without issuing credit' })
   async evaluateAchievements(@Req() req: any) {
     const userId = req.user.sub;
     const result = await this.milestonesService.evaluateCategoryAMilestones(userId);

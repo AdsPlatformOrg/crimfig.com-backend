@@ -8,6 +8,7 @@ import {
   Param,
   BadRequestException,
 } from '@nestjs/common';
+import { gate } from './reward-program-policy';
 import { PointsEngineService } from './points-engine.service';
 import { RewardsFundService } from './rewards-fund.service';
 import { RedemptionService } from './redemption.service';
@@ -54,6 +55,7 @@ export class RewardsController {
       .where(eq(schema.deferredRewardEntitlements.userId, userId));
 
     return {
+      paidEarningEnabled: gate('paid'),
       availablePoints: balance.availablePoints,
       pendingPoints: balance.pendingPoints,
       reservedPoints: balance.reservedPoints,

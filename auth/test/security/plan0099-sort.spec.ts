@@ -14,11 +14,16 @@ describe('PLAN0099 campaign sort allowlist', () => {
     for (const sort of CAMPAIGN_LIST_SORTS) {
       const query = dialect.sqlToQuery(campaignListOrder(sort));
       expect(query.sql.endsWith(sort === 'newest' || sort.endsWith('_desc') ? ' desc' : ' asc')).toBe(true);
-      if (/views|clicks|ctr/.test(sort)) {
+      if (/views|ctr/.test(sort)) {
         expect(query.sql).toContain('"ads_interactions"."is_valid" = true');
         expect(query.sql).toContain('END = "ads_campaigns"."id"');
         expect(query.sql).toContain('"ads_serves"."inventory_class"');
-        expect(query.params).toContain(sort.startsWith('views') ? 'impression' : 'click');
+        expect(query.params).toContain('impression');
+      }
+      if (/clicks|ctr/.test(sort)) {
+        expect(query.sql).toContain('click.valid is true');
+        expect(query.sql).toContain('ads_settlement_claims');
+        expect(query.sql).toContain('count(distinct event_id)');
       }
     }
   });

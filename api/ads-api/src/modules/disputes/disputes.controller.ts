@@ -7,6 +7,7 @@ import {
   Param,
   Query,
   Req,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DisputesService } from './disputes.service';
@@ -62,22 +63,9 @@ export class DisputesController {
    * POST /api/v1/disputes
    */
   @Post('disputes')
-  @ApiOperation({ summary: 'Open invalid traffic dispute or appeal' })
-  async createDispute(@Req() req: any, @Body() dto: CreateDisputeDto) {
-    const userId = req.user.sub;
-    const dispute = await this.disputesService.createDispute({
-      openedBy: userId,
-      role: dto.role,
-      scope: dto.scope,
-      campaignId: dto.campaignId,
-      placementId: dto.placementId,
-      periodFrom: dto.periodFrom,
-      periodTo: dto.periodTo,
-      reason: dto.reason,
-      details: dto.details,
-    });
-
-    return { status: 'success', data: dispute };
+  @ApiOperation({ summary: 'Open invalid traffic dispute or appeal (retired; moved to Help & Support)' })
+  async createDispute(@Req() _req: any, @Body() _dto: CreateDisputeDto) {
+    throw new ServiceUnavailableException('Customer dispute intake has moved to Help & Support.');
   }
 
   /**

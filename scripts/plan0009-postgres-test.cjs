@@ -6,7 +6,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { randomBytes } = require('node:crypto');
 const root = path.resolve(__dirname, '..');
-const postgresPort = process.argv.includes('--plan0099-sort') ? '25439' : '25432';
+const postgresPort = process.argv.includes('--report-access') ? '25451' : process.argv.includes('--support') ? '25440' : process.argv.includes('--milestones') ? '25449' : process.argv.includes('--plan0099-sort') ? '25439' :
+  process.argv.includes('--plan0144') ? '25444' : process.argv.includes('--plan0150') ? '25452' : '25432';
 const binaries = 'C:\\Program Files\\PostgreSQL\\17\\bin';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'crimfig-plan0009-pg-'));
 const data = path.join(temp, 'data');
@@ -154,7 +155,7 @@ try {
   if (providerEnv && !providerEnv.startsWith(root + path.sep)) throw new Error('Provider configuration must be inside this backend workspace');
   if (process.argv.includes('--plan0099-sort')) fs.mkdirSync(path.resolve(root, '../docs/reviews/plan-0099'), { recursive: true });
   const result = spawnSync(process.execPath, ['node_modules/jest/bin/jest.js', '--config', 'auth/jest.config.js',
-    '--runInBand', '--runTestsByPath', ...(process.argv.includes('--plan0116') ? ['auth/test/security/plan0116-fx-postgres.spec.ts'] : process.argv.includes('--plan0099-sort') ? ['auth/test/security/plan0099-sort-postgres.spec.ts','--json','--outputFile=../docs/reviews/plan-0099/backend-sort-integration-results.json'] : process.argv.includes('--gateway') ? ['auth/test/security/plan0097-gateway-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0097/gateway-integration-results.json'] : (process.argv.includes('--moderation') || process.argv.includes('--plan0123')) ? ['auth/test/security/plan0077-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0077/backend-integration-results.json'] : ['auth/test/security/funding-postgres.spec.ts']),
+    '--runInBand', '--runTestsByPath', ...(process.argv.includes('--report-access') ? ['auth/test/security/plan0144-access-postgres.spec.ts','--json','--outputFile=../docs/reviews/plan-0144/access-integration.json'] : process.argv.includes('--milestones') ? ['auth/test/security/plan0149-postgres.spec.ts','--json','--outputFile=../docs/reviews/plan-0149/backend-integration.json'] : process.argv.includes('--support') ? ['auth/test/security/plan0140-support-postgres.spec.ts','--json','--outputFile=../docs/reviews/plan-0140/backend-integration.json'] : process.argv.includes('--plan0116') ? ['auth/test/security/plan0116-fx-postgres.spec.ts'] : process.argv.includes('--plan0099-sort') ? ['auth/test/security/plan0099-sort-postgres.spec.ts','--json','--outputFile=../docs/reviews/plan-0099/backend-sort-integration-results.json'] : process.argv.includes('--gateway') ? ['auth/test/security/plan0097-gateway-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0097/gateway-integration-results.json'] : (process.argv.includes('--moderation') || process.argv.includes('--plan0123')) ? ['auth/test/security/plan0077-integration.spec.ts','--json','--outputFile=../docs/reviews/plan-0077/backend-integration-results.json'] : ['auth/test/security/funding-postgres.spec.ts']),
     ...(process.argv.includes('--delivery-readiness') ? ['--testNamePattern','PLAN0079 owner-scoped','--json','--outputFile=../docs/reviews/plan-0079/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0081-readiness') ? ['--testNamePattern','PLAN0081 readiness','--json','--outputFile=../docs/reviews/plan-0081/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0091') ? ['--testNamePattern','PLAN0079 owner-scoped|PLAN0080 website policy|funded settlement races|CPM fractions survive|unproven legacy events','--json','--outputFile=../docs/reviews/plan-0091/backend-integration-results.json'] : []),
@@ -165,6 +166,16 @@ try {
     ...(process.argv.includes('--plan0099') ? ['--testNamePattern','PLAN0099 Trash|PLAN0092 Billing HTTP'] : []),
     ...(process.argv.includes('--plan0096') ? ['--testNamePattern','PLAN0096 matched|PLAN0092 Billing HTTP','--json','--outputFile=../docs/reviews/plan-0096/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0097') ? ['--testNamePattern','PLAN0097 missing gateway|verified funding callback and webhook credit once','--json','--outputFile=../docs/reviews/plan-0097/backend-integration-results.json'] : []),
+    ...(process.argv.includes('--plan0150') ? ['--testNamePattern', [
+      'PLAN0150', 'verified funding callback and webhook credit once', 'duplicate transfer callbacks',
+      'transfer callback acknowledgement failure', 'funded settlement races', '72-hour clearance',
+      'clearance receipt failure', 'points reversal reconciles', 'event-specific cash rebates',
+      'concurrent withdrawal dispatch', 'lost transfer initialization acknowledgement',
+      'callback before dispatch acknowledgement', 'released earnings become debt',
+      'concurrent owner activations', 'competing campaigns cannot overdraw', 'campaign write failure',
+      'subscription checkout race', 'concurrent renewal worker replicas', 'lost renewal response',
+      'parallel account initialization', 'PLAN0104 signed redirects',
+    ].join('|'), '--json', '--outputFile=../docs/reviews/plan-0150/backend-integration.json'] : []),
     ...(process.argv.includes('--plan0104') ? ['--testNamePattern','PLAN0104|PLAN0102 daily reports|PLAN0103 network and legacy|PLAN0101 advertiser','--json','--outputFile=../docs/reviews/plan-0104/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0123-billing') ? ['--testNamePattern','PLAN0123'] : []),
     ...(process.argv.includes('--plan0124') ? ['--testNamePattern','PLAN0124'] : []),
@@ -172,6 +183,7 @@ try {
     ...(process.argv.includes('--plan0110') ? ['--testNamePattern','PLAN0110'] : []),
     ...(process.argv.includes('--plan0122') ? ['--testNamePattern','PLAN0122'] : []),
     ...(process.argv.includes('--plan0131') ? ['--testNamePattern','PLAN0131|PLAN0121 staff meta'] : []),
+    ...(process.argv.includes('--plan0144') ? ['--testNamePattern','PLAN0144|PLAN0102 daily reports|PLAN0104 signed redirects'] : []),
     ...(process.argv.includes('--plan0121') ? ['--testNamePattern','PLAN0121|PLAN0080 website policy HTTP'] : []),
     ...(process.argv.includes('--plan0116-funding') ? ['--testNamePattern','PLAN0116 funding'] : []),
     ...(process.argv.includes('--plan0113') ? ['--testNamePattern','PLAN0113'] : []),

@@ -20,7 +20,11 @@ export class WithdrawalDispatchService {
     if (!intent.claimed) return { reference, status: intent.status, confirmation: 'recovery_required' };
     try {
       const result = await this.authority.execute(intent);
-      // Submitted means provider acceptance, never completion. Terminal outcomes still require exact verified evidence.
+      const current = await this.ledger.dispatchIntent(userId, reference, false);
+      if (['completed', 'failed', 'reversed'].includes(current.status)) {
+        return { reference, status: current.status, refund: current.refund, confirmation: 'confirmed' };
+      }
+      // A submitted acknowledgement records provider acceptance. Verified terminal outcomes come from the ledger.
       return { reference, status: intent.status, confirmation: result.state === 'submitted' ? 'pending' : result.state === 'held' ? 'security_hold' : 'unconfirmed' };
     } catch {
       // Started is durable even if dispatch never reached provider. Keep reservation; never assume failure/refund.

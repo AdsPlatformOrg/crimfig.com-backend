@@ -12,9 +12,10 @@ import { RollingFraudAuditJob } from './jobs/rolling-fraud-audit.job';
 import { Day15AuditJob } from './jobs/day-15-audit.job';
 import { Day30AuditJob } from './jobs/day-30-audit.job';
 import { RewardsReconciliationJob } from './jobs/rewards-reconciliation.job';
+import { AdvertiserMilestonesModule } from '../advertiser-milestones/advertiser-milestones.module';
 
 @Module({
-  imports: [DatabaseModule, DashboardAuthModule],
+  imports: [DatabaseModule, DashboardAuthModule, AdvertiserMilestonesModule],
   controllers: [SchedulingMonitorController],
   providers: [
     CronJobRegistry,

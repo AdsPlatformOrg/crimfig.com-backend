@@ -13,6 +13,7 @@ const required = (key: string): string => {
 };
 
 export const config = {
+  SUPPORT: { OUTBOX_WORKER_ENABLED: process.env.SUPPORT_OUTBOX_WORKER_ENABLED === "true" },
   FINANCIAL_AUTH: {
     AUTHORITY_PUBLIC_KEYS: process.env.FINANCIAL_AUTHORITY_PUBLIC_KEYS || '{}',
     SIGNING_PRIVATE_KEY: process.env.FINANCIAL_AUTH_SIGNING_PRIVATE_KEY,

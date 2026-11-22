@@ -98,7 +98,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
   };
   beforeAll(async () => {
     const url = new URL(process.env.PLAN0009_PG_URL!);
-    if (url.hostname !== '127.0.0.1' || url.port !== '25432' || url.pathname !== '/plan0009_test' || url.username !== 'plan0009test') throw Error('Refusing non-disposable database');
+    if (url.hostname !== '127.0.0.1' || !['25432', '25444', '25452'].includes(url.port) || url.pathname !== '/plan0009_test' || url.username !== 'plan0009test') throw Error('Refusing non-disposable database');
     if (process.env.PLAN0009_REDIS_URL) {
       const redisUrl = new URL(process.env.PLAN0009_REDIS_URL);
       if (redisUrl.protocol !== 'redis:' || redisUrl.hostname !== '127.0.0.1' || redisUrl.port !== '26379' || !redisUrl.password) throw Error('Refusing non-disposable Redis');
@@ -111,6 +111,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
     const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsCampaignSubmissions, schema.adsCampaignMutations, schema.adsCampaignChanges, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsTrafficControls, schema.adsEvidenceRecords, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsClicks, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
     const enums = new Set<string>();
+    tables.splice(tables.indexOf(schema.adstationDirectCampaigns) + 1, 0, schema.adstationAdEvents as any);
     tables.splice(tables.indexOf(schema.adsCreatives), 0, schema.adsMediaAssets as any, schema.crimfigGeoTargets as any, schema.adsHouseCreatives as any);
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
       if (col.enum && !enums.has(col.enum.enumName)) {
@@ -124,6 +125,8 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       for (const fk of config.foreignKeys) { const ref = fk.reference(); columns.push(`foreign key (${ref.columns.map(col=>quote(col.name)).join(',')}) references ${quote(getTableName(ref.foreignTable))} (${ref.foreignColumns.map(col=>quote(col.name)).join(',')})`); }
       await pool.query(`create table ${quote(config.name)} (${columns.join(',')})`);
     }
+    await pool.query('alter table ads_campaigns drop column report_pseudonym');
+    await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0049_campaign_report_pseudonyms.sql'), 'utf8'));
     const clients = await Promise.all([pool.connect(),pool.connect(),pool.connect()]);
     try { const ids = await Promise.all(clients.map(client=>client.query('select pg_backend_pid() id'))); expect(new Set(ids.map(result=>result.rows[0].id)).size).toBe(3); } finally { clients.forEach(client=>client.release()); }
   }, 30000);
@@ -440,8 +443,109 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       const views=await new PromotersService(db).getWebsites(promoter.id);
       const view=views.find(item=>item.id===site.id)!;
       expect(view.ownershipChecks.html_meta.status).toBe('verified');
-      expect(view.ownershipChecks.dns_txt.status).toBe('not_verified');
+      expect(view.ownershipChecks.dns_txt.status).toBe('verified');
     } finally {
+      fetchProof.mockRestore();
+    }
+  });
+
+  test('PLAN0131 failed alternate verification cannot revive expired proof', async () => {
+    const [promoter] = await db.insert(schema.adsPromoters).values({ userId: owner, type: 'WEBSITE' }).returning();
+    const [site] = await db.insert(schema.adsPromoterWebsites).values({
+      promoterId: promoter.id, domain: 'publisher.example.test', url: 'https://publisher.example.test',
+      verificationToken: randomUUID(), verificationMethod: 'dns_txt', verificationStatus: 'verified',
+      verificationExpiresAt: new Date(Date.now() - 60000), policyStatus: 'approved',
+    }).returning();
+    const proofModule = require('../../../api/ads-api/src/modules/verification/website-proof');
+    const fetchProof = jest.spyOn(proofModule, 'fetchWebsiteProof').mockResolvedValue('<head></head>');
+    try {
+      await expect(new VerificationService(db).verifyWebsite(promoter.id, site.id, 'html_meta'))
+        .resolves.toMatchObject({ isVerified: false, status: 'failed' });
+      const { rows } = await pool.query(
+        'select verification_status, verification_method, verification_expires_at, policy_status from ads_promoter_websites where id = $1',
+        [site.id],
+      );
+      expect(rows).toEqual([{
+        verification_status: 'failed', verification_method: 'dns_txt',
+        verification_expires_at: null, policy_status: 'approved',
+      }]);
+    } finally {
+      fetchProof.mockRestore();
+    }
+  });
+
+  test('PLAN0131 HTML verification preserves legacy DNS proof with its original expiry', async () => {
+    const [promoter] = await db.insert(schema.adsPromoters).values({ userId: owner, type: 'WEBSITE' }).returning();
+    const token = randomUUID();
+    const verifiedAt = new Date(Date.now() - 86400000);
+    const [site] = await db.insert(schema.adsPromoterWebsites).values({
+      promoterId: promoter.id, domain: 'publisher.example.test', url: 'https://publisher.example.test',
+      verificationToken: token, verificationMethod: 'dns_txt', verificationStatus: 'verified',
+      verifiedAt, verificationExpiresAt: new Date(verifiedAt.getTime() + 30 * 86400000),
+    }).returning();
+    const proofModule = require('../../../api/ads-api/src/modules/verification/website-proof');
+    const fetchProof = jest.spyOn(proofModule, 'fetchWebsiteProof')
+      .mockResolvedValue('<head><meta name="crimfig-site-verification" content="' + token + '"></head>');
+    try {
+      await expect(new VerificationService(db).verifyWebsite(promoter.id, site.id, 'html_meta'))
+        .resolves.toMatchObject({ isVerified: true });
+      const websites = await new PromotersService(db).getWebsites(promoter.id);
+      expect(websites.find(website => website.id === site.id)).toMatchObject({
+        verificationMethod: 'html_file_and_meta_tag',
+        ownershipChecks: {
+          dns_txt: { status: 'verified', checkedAt: verifiedAt },
+          html_meta: { status: 'verified' },
+        },
+      });
+    } finally {
+      fetchProof.mockRestore();
+    }
+  });
+
+  test('PLAN0131 concurrent owner attempts persist only one result and its evidence', async () => {
+    const [promoter] = await db.insert(schema.adsPromoters).values({ userId: owner, type: 'WEBSITE' }).returning();
+    const token = randomUUID();
+    const [site] = await db.insert(schema.adsPromoterWebsites).values({
+      promoterId: promoter.id, domain: 'publisher.example.test', url: 'https://publisher.example.test',
+      verificationToken: token, verificationMethod: 'html_file_and_meta_tag',
+    }).returning();
+    let releaseFirstFetch!: (html: string) => void;
+    const firstFetch = new Promise<string>(resolve => { releaseFirstFetch = resolve; });
+    let signalFirstFetchStarted!: () => void;
+    const firstFetchStarted = new Promise<void>(resolve => { signalFirstFetchStarted = resolve; });
+    const proofModule = require('../../../api/ads-api/src/modules/verification/website-proof');
+    const fetchProof = jest.spyOn(proofModule, 'fetchWebsiteProof').mockImplementationOnce(() => {
+      signalFirstFetchStarted();
+      return firstFetch;
+    }).mockResolvedValueOnce('<head><meta name="crimfig-site-verification" content="' + token + '"></head>');
+    const service = new VerificationService(db);
+    const firstAttempt = Promise.allSettled([service.verifyWebsite(promoter.id, site.id, 'html_meta')]);
+    try {
+      await Promise.race([firstFetchStarted, firstAttempt.then(() => {
+        throw new Error('First verification completed before reaching the proof fixture');
+      })]);
+      await expect(service.verifyWebsite(promoter.id, site.id, 'html_meta'))
+        .resolves.toMatchObject({ isVerified: true, status: 'verified' });
+      releaseFirstFetch('<head></head>');
+      const [result] = await firstAttempt;
+      expect(result).toMatchObject({
+        status: 'rejected', reason: { message: 'Another verification attempt finished. Reload and try again.' },
+      });
+      const { rows } = await pool.query(
+        'select dimension, to_state from ads_supply_state_history where entity_id = $1 order by dimension',
+        [site.id],
+      );
+      expect(rows).toEqual([
+        { dimension: 'ownership_check_html_meta', to_state: 'verified' },
+        { dimension: 'ownership_status', to_state: 'verified' },
+      ]);
+      const websites = await new PromotersService(db).getWebsites(promoter.id);
+      expect(websites.find(website => website.id === site.id)).toMatchObject({
+        verificationStatus: 'verified', ownershipChecks: { html_meta: { status: 'verified' } },
+      });
+    } finally {
+      releaseFirstFetch('<head></head>');
+      await firstAttempt;
       fetchProof.mockRestore();
     }
   });
@@ -563,9 +667,50 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     expect((await pool.query('select count(*)::int count from ads_promoters')).rows[0].count).toBe(1);
     expect((await pool.query('select consent_given from ads_reels_consents')).rows).toEqual([{ consent_given: 0 }]);
     await pool.query('update ads_reels_consents set consent_given=1');
-    await Promise.all(types.map(type => service.getOrCreatePromoter(owner, type, 'replacement')));
+    await Promise.all(types.map(type => service.getOrCreatePromoter(owner, type)));
     expect((await pool.query('select consent_given from ads_reels_consents')).rows).toEqual([{ consent_given: 1 }]);
-    expect((await pool.query('select type,display_name from ads_promoters')).rows[0]).toEqual({ type: results[0].type, display_name: 'CrimFig Promoter' });
+    const profile = await service.getOrCreatePromoter(owner);
+    expect(profile.id).toBe(results[0].id);
+    expect(profile.displayName).toBe('CrimFig Promoter');
+  });
+  test('PLAN0150 Direct event claims and counters roll back together and concurrent replays count once', async () => {
+    const promoter = await new PromotersService(db).getOrCreatePromoter(owner, 'WEBSITE');
+    const [website] = await db.insert(schema.adsPromoterWebsites).values({
+      promoterId: promoter.id, url: 'https://direct.example.test', domain: 'direct.example.test',
+      verificationToken: randomUUID(), verificationMethod: 'dns_txt',
+    }).returning();
+    const [campaign] = await db.insert(schema.adstationDirectCampaigns).values({
+      websiteId: website.id, promoterId: promoter.id, clientName: 'Fixture client',
+      campaignTitle: 'Direct fixture', destinationUrl: website.url,
+    }).returning();
+    const service = new AdstationService(db);
+    const input = {
+      directCampaignId: campaign.id, websiteId: website.id, promoterId: promoter.id,
+      eventType: 'impression' as const, idempotencyKey: randomUUID(),
+    };
+    await pool.query("create function reject_direct_counter() returns trigger language plpgsql as $$ begin raise exception 'injected direct counter failure'; end $$");
+    await pool.query('create trigger reject_direct_counter before update on adstation_direct_campaigns for each row execute function reject_direct_counter()');
+    try {
+      await expect(service.recordDirectEvent(input)).rejects.toThrow();
+      expect((await pool.query('select id from adstation_ad_events')).rows).toEqual([]);
+    } finally {
+      await pool.query('drop trigger reject_direct_counter on adstation_direct_campaigns');
+      await pool.query('drop function reject_direct_counter()');
+    }
+
+    const retries = await Promise.all(Array.from({ length: 4 }, () => service.recordDirectEvent(input)));
+    expect(retries.map(result => result.status).sort())
+      .toEqual(['duplicate_ignored', 'duplicate_ignored', 'duplicate_ignored', 'recorded']);
+    expect(new Set(retries.map(result => result.eventId)).size).toBe(1);
+    await expect(service.recordDirectEvent({ ...input, eventType: 'click' })).rejects.toThrow('Direct event identity changed');
+    const distinct = await Promise.all(Array.from({ length: 4 }, () => service.recordDirectEvent({
+      ...input, idempotencyKey: randomUUID(),
+    })));
+    expect(distinct.every(event => event.status === 'recorded')).toBe(true);
+    expect((await pool.query('select delivered_impressions::int, delivered_clicks::int from adstation_direct_campaigns')).rows)
+      .toEqual([{ delivered_impressions: 5, delivered_clicks: 0 }]);
+    expect((await pool.query('select count(*)::int as events from adstation_ad_events')).rows).toEqual([{ events: 5 }]);
+    expect((await pool.query('select id from billing_transactions')).rows).toEqual([]);
   });
   test('consent initialization failure rolls back a new promoter and a retry recovers', async () => {
     await pool.query("create function reject_consent() returns trigger language plpgsql as $$ begin raise exception 'injected consent failure'; end $$");
@@ -947,6 +1092,45 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     };
     return {campaign,publisher,promoter,creative,placement,add,svc:new AdSettlementService(db)};
   }
+  test('PLAN0104 expired click opportunities release only when no timely payable event is pending', async () => {
+    const fixture = await settlementFixture();
+    const timely = await fixture.add();
+    const late = await fixture.add();
+    const now = Date.now();
+    const eventDeadline = new Date(now - 60000);
+    await db.update(schema.adsInteractions).set({
+      createdAt: new Date(now - 120000), financialEligibility: 'pending',
+    }).where(eq(schema.adsInteractions.id, timely.event.id));
+    await db.update(schema.adsInteractions).set({
+      createdAt: new Date(now - 30000), financialEligibility: 'pending',
+    }).where(eq(schema.adsInteractions.id, late.event.id));
+
+    async function reserve(state: 'HELD' | 'ISSUED', serveId?: string) {
+      const [reservation] = await db.insert(schema.adsOpportunityReservations).values({
+        campaignId: fixture.campaign.id, opportunityId: randomUUID(), state, serveId,
+        pricingModel: 'cpc', eventDeadline, expiresAt: new Date(now - 1000),
+      }).returning();
+      return reservation.id;
+    }
+    const abandoned = await reserve('HELD');
+    const timelyId = await reserve('ISSUED', timely.serve.id);
+    const lateId = await reserve('ISSUED', late.serve.id);
+    const authority = new AdOpportunityService(db);
+    await Promise.all([authority.reconcile([fixture.campaign.id]), authority.reconcile([fixture.campaign.id])]);
+    const { rows } = await pool.query(
+      'select id, state, release_reason from ads_opportunity_reservations where campaign_id = $1',
+      [fixture.campaign.id],
+    );
+    const states = Object.fromEntries(rows.map(row => [row.id, [row.state, row.release_reason]]));
+    expect(states).toEqual({
+      [abandoned]: ['EXPIRED', 'PAYABLE_WINDOW_CLOSED'],
+      [lateId]: ['EXPIRED', 'PAYABLE_WINDOW_CLOSED'],
+      [timelyId]: ['ISSUED', null],
+    });
+    const { rows: claims } = await pool.query('select id from ads_settlement_claims');
+    expect(claims).toEqual([]);
+  });
+
   test('PLAN0103 network and legacy attribution survives real HTTP without cross-owner or invalid metrics', async () => {
     const f = await settlementFixture(100_000_000n, 'cpc', false);
     const foreign = randomUUID();
@@ -1083,6 +1267,11 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
         expect((await get('campaign=invalid',staff.id)).status).toBe(400);
         const audit=await get(filter,staff.id);
         expect(audit.status).toBe(200);
+        const pseudonym = audit.body.data.items[0].campaign;
+        expect(pseudonym).toMatch(/^ad-[0-9a-f]{32}$/);
+        expect(audit.body.data.items.every((item: any) => item.campaign === pseudonym)).toBe(true);
+        await pool.query("update ads_campaigns set title = 'Renamed private title' where id = $1", [f.campaign.id]);
+        expect((await get(filter, staff.id)).body.data.items[0].campaign).toBe(pseudonym);
         expect(audit.body.data.counts).toEqual({all:4,redirects:4,valid:1,rejected:1,missing:2,billed:0});
         expect((await get(filter+'&outcome=missing',staff.id)).body.data.items).toEqual(expect.arrayContaining([
           expect.objectContaining({event_id:null,valid:null,reason:'IP_BINDING_MISMATCH'}),
@@ -1094,7 +1283,13 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       } finally { await app.close(); }
       const rows=(await pool.query("select is_valid,invalid_reason,verification_version from ads_interactions where type='click' order by created_at")).rows;
       expect(rows).toEqual([{is_valid:true,invalid_reason:null,verification_version:2},{is_valid:false,invalid_reason:'DUP_CLICK',verification_version:0}]);
-      expect((await pool.query('select count(*)::int n from ads_evidence_records')).rows[0].n).toBe(2);
+      const journal = await pool.query(`
+        select count(*)::int as records, count(distinct evidence.event_id)::int as events
+        from ads_evidence_records evidence
+        join ads_interactions interaction on interaction.id = evidence.event_id
+        where interaction.serve_id = $1 and interaction.type = 'click'
+      `, [serve.id]);
+      expect(journal.rows).toEqual([{ records: 2, events: 2 }]);
       expect((await pool.query('select count(*)::int n from ads_settlement_claims')).rows[0].n).toBe(0);
     } finally {process.env=prior;}
   },30000);
@@ -1135,9 +1330,18 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect(await promoters.getWebsites(f.promoter.id)).toEqual([expect.objectContaining({
         id: website.id, impressionCount: '0', clickCount: '0',
       })]);
+      if (!cpm) {
+        await db.insert(schema.adsInteractions).values([true, true, false].map(isValid => ({
+          serveId: serve.id, promoterId: f.promoter.id, type: 'viewable_impression' as const, isValid,
+          eventId: randomUUID(),
+        })));
+        expect(await promoters.getWebsites(f.promoter.id)).toEqual([expect.objectContaining({
+          id: website.id, impressionCount: '1', clickCount: '0',
+        })]);
+      }
       await f.svc.settle(f.campaign.id,randomUUID(),new Date());
       expect(await promoters.getWebsites(f.promoter.id)).toEqual([expect.objectContaining({
-        id: website.id, impressionCount: cpm ? '1' : '0', clickCount: cpm ? '0' : '1',
+        id: website.id, impressionCount: '1', clickCount: cpm ? '0' : '1',
       })]);
       const fractional=(await get(range,owner)).body.data;
       expect(fractional.totals).toMatchObject({spend:price.toString(),posted:cpm?'0':'100000000',
@@ -1166,7 +1370,22 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect(advertiser.body.data.breakdown.some((row:any)=>row.creativeId===f.creative.id && row.spend===spend)).toBe(true);
       expect((await get(range,f.publisher)).body.data.totals.spend).toBe('0');
       const earnings=(await get(range+'&role=promoter',f.publisher)).body.data;
-      expect(earnings.totals).toMatchObject({billableImpressions:cpm?'2':'0',billableClicks:cpm?'0':'2',spend:'0',
+      expect(advertiser.body.data.breakdown).toEqual(expect.arrayContaining([
+        expect.objectContaining({ campaignId: f.campaign.id, campaign: f.campaign.title }),
+      ]));
+      expect(earnings.breakdown).not.toHaveLength(0);
+      for (const row of earnings.breakdown) {
+        expect(row.campaignId).toMatch(/^[0-9a-f]{64}$/);
+        expect(row.campaignId).not.toBe(f.campaign.id);
+        if (row.creativeId) {
+          expect(row.creativeId).toMatch(/^[0-9a-f]{64}$/);
+          expect(row.creativeId).not.toBe(f.creative.id);
+        }
+        expect(row).not.toHaveProperty('campaign');
+        expect(row).not.toHaveProperty('creative');
+      }
+      expect(earnings.totals).not.toHaveProperty('spend');
+      expect(earnings.totals).toMatchObject({billableImpressions:cpm?'2':'0',billableClicks:cpm?'0':'2',
         adjustments:cpm?'0':'-10000000'});
       if (!cpm) {
         expect(BigInt(earnings.totals.confirmed)).toBeGreaterThan(0n);
@@ -1183,6 +1402,31 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
       expect((await consumer.readDailyReport('advertiser',range,new AbortController().signal)).totals.spend).toBe(spend);
     } finally {await app.close();}
   },30000);
+
+  test('PLAN0144 report pseudonyms backfill old campaigns and remain stable across reruns', async () => {
+    const f = await settlementFixture();
+    const client = await pool.connect();
+    try {
+      await client.query('begin');
+      await client.query('alter table ads_campaigns disable trigger assign_campaign_report_pseudonym');
+      const legacy = await client.query('update ads_campaigns set report_pseudonym = null where id = $1 returning report_pseudonym', [f.campaign.id]);
+      expect(legacy.rows[0].report_pseudonym).toBeNull();
+      await client.query('alter table ads_campaigns enable trigger assign_campaign_report_pseudonym');
+      await client.query('commit');
+    } catch (error) {
+      await client.query('rollback');
+      throw error;
+    } finally {
+      client.release();
+    }
+    const backfill = async () => (await pool.query('select backfill_campaign_report_pseudonyms() as count')).rows[0].count;
+    expect(await backfill()).toBe(1);
+    const [updated] = await db.select().from(schema.adsCampaigns).where(eq(schema.adsCampaigns.id, f.campaign.id));
+    expect(updated.reportPseudonym).toMatch(/^ad-[0-9a-f]{32}$/);
+    expect(await backfill()).toBe(0);
+    const [unchanged] = await db.select().from(schema.adsCampaigns).where(eq(schema.adsCampaigns.id, f.campaign.id));
+    expect(unchanged.reportPseudonym).toBe(updated.reportPseudonym);
+  });
 
   test('PLAN0110 supported account preferences persist without changing another account',async()=>{
     await pool.query('alter table users add column if not exists updated_at timestamp default now()');
@@ -1544,7 +1788,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [f.publisher])).rows[0].balance_usd_cents).toBe(5);
     expect((await pool.query('select status from billing_transactions where id=$1', [oldItem.billing_transaction_id])).rows[0].status).toBe('completed');
     const [campaign] = await db.insert(schema.adsCampaigns).values({ advertiserId: owner, title: 'New funded generation', budgetUsdCents: 500,
-      remainingBudgetUsdCents: 500, status: 'paused', moderationStatus: 'approved', pricingVersion: 2, pricingModel: 'cpc' }).returning();
+      remainingBudgetUsdCents: 500, status: 'paused', ...currentApprovalFixture(), pricingVersion: 2, pricingModel: 'cpc' }).returning();
     await new CampaignEscrowService(db).change(owner, campaign.id, 'reserve', undefined, 'active');
     const [stack] = await db.insert(schema.adsCreativeStacks).values({ campaignId: campaign.id, name: 'Ad Stack #1', position: 1 }).returning();
     const [creative] = await db.insert(schema.adsCreatives).values({ campaignId: campaign.id, adStackId: stack.id, headline: 'Reviewed', destinationUrl: 'https://example.test', status: 'active', reviewStatus: 'approved' }).returning();
@@ -1822,8 +2066,15 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     try {const results=await Promise.allSettled([tokens().rotateRefreshToken(session.raw),tokens().revokeRefreshToken(session.raw,owner)]);expect(results.every(item=>item.status==='rejected')).toBe(true);expect(await liveTokens(session.familyId)).toHaveLength(1);}
     finally {await connection.query('rollback');connection.release();}
   },15000);
+  function currentApprovalFixture() {
+    const submissionId = randomUUID();
+    return {
+      moderationStatus: 'approved' as const, contentRevision: 1, approvedRevision: 1,
+      currentSubmissionId: submissionId, approvedSubmissionId: submissionId,
+    };
+  }
   async function campaign(balance=2000) {
-    const [row]=await db.insert(schema.adsCampaigns).values({advertiserId:owner,title:'Fixture',budgetUsdCents:1000,remainingBudgetUsdCents:1000,status:'paused',moderationStatus:'approved'}).returning();
+    const [row]=await db.insert(schema.adsCampaigns).values({advertiserId:owner,title:'Fixture',budgetUsdCents:1000,remainingBudgetUsdCents:1000,status:'paused',...currentApprovalFixture()}).returning();
     await db.insert(schema.billingWallets).values({userId:owner,balanceUsdCents:balance});return row;
   }
   const escrow = () => new CampaignEscrowService(db);
@@ -1848,7 +2099,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await Promise.all(Array.from({length:4},()=>escrow().change(owner,row.id,'release',undefined,'paused')));expect((await pool.query('select balance_usd_cents from billing_wallets')).rows[0].balance_usd_cents).toBe(2000);expect((await pool.query('select count(*)::int count from billing_transactions')).rows[0].count).toBe(2);
   });
   test('competing campaigns cannot overdraw one advertiser wallet',async()=>{
-    const first=await campaign(1500);const [second]=await db.insert(schema.adsCampaigns).values({advertiserId:owner,title:'Second fixture',budgetUsdCents:1000,remainingBudgetUsdCents:1000,status:'paused',moderationStatus:'approved'}).returning();
+    const first=await campaign(1500);const [second]=await db.insert(schema.adsCampaigns).values({advertiserId:owner,title:'Second fixture',budgetUsdCents:1000,remainingBudgetUsdCents:1000,status:'paused',...currentApprovalFixture()}).returning();
     const results=await Promise.allSettled([first,second].map(row=>escrow().change(owner,row.id,'reserve',undefined,'active')));expect(results.filter(item=>item.status==='fulfilled')).toHaveLength(1);expect((await pool.query('select balance_usd_cents from billing_wallets')).rows[0].balance_usd_cents).toBe(500);expect((await pool.query('select count(*)::int count from ads_campaign_escrows')).rows[0].count).toBe(1);
   });
   test('campaign write failure rolls back debit, escrow and receipt together',async()=>{
@@ -2027,32 +2278,35 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
   });
 
   test('concurrent withdrawal dispatch calls provider once and recovery never sends another payout',async()=>{
-    const bank=await reservableWithdrawal();const reserved=await withdrawalLedger().reserve(owner,randomUUID(),bank,500);
+    const bank=await reservableWithdrawal();const reserved=await withdrawalLedger().reserve(owner,randomUUID(),bank,500,undefined,'1'.repeat(64));
     const proof={reference:reserved.reference,amount:50000,currency:'NGN',domain:'test',recipient:{recipient_code:'RCP_fixture'},transfer_code:'TRF_fixture',status:'pending'};
-    const provider:any={initiateTransfer:jest.fn(async()=>proof),verifyTransfer:jest.fn(async()=>({...proof,status:'success'}))};
-    const dispatcher=()=>new WithdrawalDispatchService(withdrawalLedger(),provider);
+    const provider:any={verifyTransfer:jest.fn(async()=>({...proof,status:'success'}))};
+    const authority:any={assertReleased:jest.fn(),execute:jest.fn(async()=>({state:'submitted'}))};
+    const dispatcher=()=>new WithdrawalDispatchService(withdrawalLedger(),provider,authority);
     await Promise.all(Array.from({length:5},()=>dispatcher().dispatch(owner,reserved.reference)));
-    expect(provider.initiateTransfer).toHaveBeenCalledTimes(1);expect(await withdrawalWallet()).toEqual({available:1000,locked:500});
+    expect(authority.execute).toHaveBeenCalledTimes(1);expect(await withdrawalWallet()).toEqual({available:1000,locked:500});
     const result=await dispatcher().recover(owner,reserved.reference);expect(result.status).toBe('completed');
-    expect(provider.initiateTransfer).toHaveBeenCalledTimes(1);expect(provider.verifyTransfer).toHaveBeenCalledTimes(1);
+    expect(authority.execute).toHaveBeenCalledTimes(1);expect(provider.verifyTransfer).toHaveBeenCalledTimes(1);
     expect(await withdrawalWallet()).toEqual({available:1000,locked:0});
   });
   test('lost transfer initialization acknowledgement stays reserved across new instances without replay',async()=>{
-    const bank=await reservableWithdrawal();const reserved=await withdrawalLedger().reserve(owner,randomUUID(),bank,500);
-    const provider:any={initiateTransfer:jest.fn(async()=>{throw Error('lost acknowledgement');}),verifyTransfer:jest.fn(async()=>{throw Error('not found is not absence proof');})};
-    await new WithdrawalDispatchService(withdrawalLedger(),provider).dispatch(owner,reserved.reference);
-    await new WithdrawalDispatchService(withdrawalLedger(),provider).dispatch(owner,reserved.reference);
-    await new WithdrawalDispatchService(withdrawalLedger(),provider).recover(owner,reserved.reference);
-    expect(provider.initiateTransfer).toHaveBeenCalledTimes(1);expect(await withdrawalWallet()).toEqual({available:1000,locked:500});
-    await expect(new WithdrawalDispatchService(withdrawalLedger(),provider).recover(randomUUID(),reserved.reference)).rejects.toThrow();
+    const bank=await reservableWithdrawal();const reserved=await withdrawalLedger().reserve(owner,randomUUID(),bank,500,undefined,'1'.repeat(64));
+    const provider:any={verifyTransfer:jest.fn(async()=>{throw Error('not found is not absence proof');})};
+    const authority:any={assertReleased:jest.fn(),execute:jest.fn(async()=>{throw Error('lost acknowledgement');})};
+    const dispatcher=()=>new WithdrawalDispatchService(withdrawalLedger(),provider,authority);
+    await dispatcher().dispatch(owner,reserved.reference);
+    await dispatcher().dispatch(owner,reserved.reference);
+    await dispatcher().recover(owner,reserved.reference);
+    expect(authority.execute).toHaveBeenCalledTimes(1);expect(await withdrawalWallet()).toEqual({available:1000,locked:500});
+    await expect(dispatcher().recover(randomUUID(),reserved.reference)).rejects.toThrow();
     expect(provider.verifyTransfer).toHaveBeenCalledTimes(1);
   });
   test('callback before dispatch acknowledgement cannot be overwritten with pending',async()=>{
-    const bank=await reservableWithdrawal();const reserved=await withdrawalLedger().reserve(owner,randomUUID(),bank,500);
+    const bank=await reservableWithdrawal();const reserved=await withdrawalLedger().reserve(owner,randomUUID(),bank,500,undefined,'1'.repeat(64));
     const proof={reference:reserved.reference,amount:50000,currency:'NGN',domain:'test',recipient:{recipient_code:'RCP_fixture'},transfer_code:'TRF_fixture',status:'success'};
-    const provider:any={initiateTransfer:jest.fn(async()=>{await withdrawalLedger().complete(reserved.reference,proof);return {...proof,status:'pending'};})};
-    const result=await new WithdrawalDispatchService(withdrawalLedger(),provider).dispatch(owner,reserved.reference);
-    expect(result.status).toBe('completed');expect(await withdrawalWallet()).toEqual({available:1000,locked:0});
+    const authority:any={assertReleased:jest.fn(),execute:jest.fn(async()=>{await withdrawalLedger().complete(reserved.reference,proof);return {state:'submitted'};})};
+    const result=await new WithdrawalDispatchService(withdrawalLedger(),{} as any,authority).dispatch(owner,reserved.reference);
+    expect(result).toMatchObject({status:'completed',confirmation:'confirmed'});expect(await withdrawalWallet()).toEqual({available:1000,locked:0});
   });
 
   test('duplicate cancellation refunds only an undispatched owned withdrawal once',async()=>{
@@ -2074,6 +2328,19 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
   });
 
   const withdrawalHooks=()=>new WebhooksService(db,{verifyWebhookSignature:()=>true} as any,{} as any,withdrawalLedger());
+  test('PLAN0150 rejected transfer replay preserves the successful acknowledgement', async () => {
+    const { proof } = await withdrawalFixture();
+    const hooks = withdrawalHooks();
+    const webhook = (data: unknown) => hooks.handlePaystackWebhook(
+      JSON.stringify({ event: 'transfer.success', data }), 'synthetic',
+    );
+    await expect(webhook(proof)).resolves.toEqual({ status: 'success' });
+    await expect(webhook({ ...proof, amount: proof.amount + 1 })).rejects.toThrow('requires retry/reconciliation');
+    expect((await pool.query('select processed, error_message from billing_provider_events')).rows)
+      .toEqual([{ processed: true, error_message: null }]);
+    expect(await withdrawalWallet()).toEqual({ available: 100, locked: 700 });
+  });
+
   test('duplicate transfer callbacks use one ledger effect and separate event-type receipts',async()=>{
     const {reference,proof}=await withdrawalFixture();
     await Promise.all(Array.from({length:4},()=>withdrawalHooks().handlePaystackWebhook(JSON.stringify({event:'transfer.success',data:proof}),'synthetic')));
@@ -2102,6 +2369,28 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     await expect(withdrawalLedger().dispatchIntent(owner,reserved.reference,true)).rejects.toThrow();
     expect((await withdrawalLedger().dispatchIntent(owner,reserved.reference,false)).dispatchStarted).toBe(false);
     await withdrawalLedger().cancel(owner,reserved.reference);expect(await withdrawalWallet()).toEqual({available:1500,locked:0});
+  });
+
+  test('PLAN0150 rejected funding replay cannot overwrite a processed webhook receipt', async () => {
+    const row = await intent();
+    const psp = { paymentDomain: () => 'test', verifyWebhookSignature: () => true } as any;
+    const hooks = new WebhooksService(db, psp, service(psp));
+    const webhook = (data: unknown) => hooks.handlePaystackWebhook(
+      JSON.stringify({ event: 'charge.success', data }), 'synthetic',
+    );
+    const valid = proof(row);
+    const changed = { ...valid, amount: valid.amount + 1 };
+    await expect(webhook(changed)).rejects.toThrow('does not match');
+    expect((await pool.query('select processed, error_message from billing_provider_events')).rows)
+      .toEqual([{ processed: false, error_message: 'Funding confirmation requires retry/reconciliation' }]);
+    expect((await pool.query('select balance_usd_cents from billing_wallets')).rows).toEqual([]);
+
+    await expect(webhook(valid)).resolves.toEqual({ status: 'success' });
+    await expect(webhook(changed)).rejects.toThrow('does not match');
+    expect((await pool.query('select processed, error_message from billing_provider_events')).rows)
+      .toEqual([{ processed: true, error_message: null }]);
+    expect((await pool.query('select balance_usd_cents, version from billing_wallets')).rows)
+      .toEqual([{ balance_usd_cents: 500, version: 1 }]);
   });
 
   test.each(['callback-first','webhook-first','concurrent'])('verified funding callback and webhook credit once: %s',async order=>{
@@ -2758,6 +3047,22 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
 
       // Fund advertiser wallet (250c) and run restore: debits 200c, refunds promoter +110c recovered penalty, restores carry & interaction!
       await pool.query('update billing_wallets set balance_usd_cents = 250 where user_id = $1', [owner]);
+      const [claim] = await db.select().from(schema.adsSettlementClaims)
+        .where(eq(schema.adsSettlementClaims.interactionId, click1.event.id));
+      const reviewId = randomUUID();
+      await db.insert(schema.billingProviderEvents).values({
+        id: reviewId, provider: 'paystack', eventType: 'internal.ad.rejection',
+        reference: `internal.ad.rejection:${claim.escrowId}:${claim.promoterId}:${reviewId}`,
+        processed: true, processedAt: new Date(), rawPayload: { fixture: true },
+      });
+      const blockedRestore = await restoreOverturnedEventCash(db, window);
+      expect(blockedRestore).toMatchObject({ restoredCount: 0, skippedFullChainRejected: 1 });
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [owner])).rows[0].balance_usd_cents).toBe(250);
+      expect((await pool.query('select balance_usd_cents from billing_wallets where user_id=$1', [f.publisher])).rows[0].balance_usd_cents).toBe(110);
+      expect((await pool.query('select is_valid from ads_interactions where id=$1', [click1.event.id])).rows[0].is_valid).toBe(false);
+      await db.update(schema.billingProviderEvents).set({ errorMessage: 'review_dismissed' })
+        .where(eq(schema.billingProviderEvents.id, reviewId));
+
       const restApplied = await restoreOverturnedEventCash(db, window);
       expect(restApplied.restoredCount).toBe(1);
       expect(restApplied.restoredDebitUsdCents).toBe(200);

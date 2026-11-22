@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { AdvertiserMilestonesService } from '../../advertiser-milestones/advertiser-milestones.service';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import type * as schema from '@crimfig/database/schema';
 import { DATABASE_TOKEN } from '../../database/database.module';
@@ -23,6 +24,7 @@ export class RewardsReconciliationJob implements CronJobHandler {
   constructor(
     @Inject(DATABASE_TOKEN)
     private readonly db: NodePgDatabase<typeof schema>,
+    @Optional() private readonly milestones?: AdvertiserMilestonesService,
   ) {}
 
   async execute(
@@ -73,16 +75,19 @@ export class RewardsReconciliationJob implements CronJobHandler {
       (cohort) => cohort.unsupportedPoints !== '0',
     ).length;
 
+    const milestoneCursor = typeof context.lastCheckpoint?.milestoneCursor === 'string' ? context.lastCheckpoint.milestoneCursor : null;
+    const milestones = this.milestones ? await this.milestones.reconcile(milestoneCursor, context.mode === 'ACTIVE', () => context.assertLeaseOwnership()) : null;
     const checkpoint = {
       lastReconciledFrom: lower,
       lastReconciledUntil: upper,
       mode: context.mode,
       allowAutomaticFinancialCorrections: context.allowAutomaticFinancialCorrections,
+      milestoneCursor: milestones?.cursor ?? null,
     };
     await context.saveCheckpoint(checkpoint);
 
     return {
-      processedCount: pointsObservations.length + housePreview.length,
+      processedCount: pointsObservations.length + housePreview.length + (milestones?.processed ?? 0),
       checkpoint,
       summary: {
         mode: context.mode,
@@ -96,6 +101,7 @@ export class RewardsReconciliationJob implements CronJobHandler {
         cashRestores,
         pointsReconciliation,
         houseReconciliation,
+        advertiserRecognition: milestones,
       },
     };
   }

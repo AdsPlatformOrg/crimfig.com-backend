@@ -228,6 +228,9 @@ export class DeliveryController {
   ) {
     const clientIp = req ? extractClientIp(req) : undefined;
     const userAgent = req?.headers['user-agent'];
+    const privacyControl = [req?.headers['sec-gpc']].flat().some(
+      value => typeof value === 'string' && value.split(',').some(signal => signal.trim() === '1'),
+    );
 
     const ad = await this.deliveryService.getAdForPlacement(
       token,
@@ -241,8 +244,9 @@ export class DeliveryController {
         ? {
             containerWidth: typeof containerWidth === 'string' && /^[1-9][0-9]{0,3}$/.test(containerWidth) ? Number(containerWidth) : undefined,
             measurementConsent: consent === 'granted',
-            privacyControl: req.headers['sec-gpc'] === '1',
-            continuityProof: typeof req.headers['x-cf-cpc-consent'] === 'string' ? req.headers['x-cf-cpc-consent'] : undefined,
+            privacyControl,
+            continuityProof: !privacyControl && consent === 'granted' && typeof req.headers['x-cf-cpc-consent'] === 'string'
+              ? req.headers['x-cf-cpc-consent'] : undefined,
             consentState: consent === 'granted' || consent === 'denied' ? consent : 'unknown',
             transportRequestId: 'requestId' in req && typeof req.requestId === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(req.requestId)
               ? req.requestId : undefined,

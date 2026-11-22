@@ -68,7 +68,8 @@ export class WebhooksService {
       return { status: 'success' };
     } catch {
       await this.db.update(billingProviderEvents).set({ errorMessage: 'Transfer outcome requires retry/reconciliation' })
-        .where(and(eq(billingProviderEvents.provider, 'paystack'), eq(billingProviderEvents.reference, reference)));
+        .where(and(eq(billingProviderEvents.provider, 'paystack'), eq(billingProviderEvents.reference, reference),
+          eq(billingProviderEvents.processed, false)));
       // Receipt is authoritative even if callback acknowledgement failed after its commit.
       throw new ServiceUnavailableException('Transfer outcome requires retry/reconciliation');
     }
@@ -99,7 +100,8 @@ export class WebhooksService {
     } catch (error) {
       // The funding receipt remains authoritative if event acknowledgement storage fails after commit.
       await this.db.update(billingProviderEvents).set({ errorMessage: 'Funding confirmation requires retry/reconciliation' })
-        .where(and(eq(billingProviderEvents.provider, 'paystack'), eq(billingProviderEvents.reference, reference)));
+        .where(and(eq(billingProviderEvents.provider, 'paystack'), eq(billingProviderEvents.reference, reference),
+          eq(billingProviderEvents.processed, false)));
       throw error;
     }
   }

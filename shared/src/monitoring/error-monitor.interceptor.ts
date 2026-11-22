@@ -66,6 +66,7 @@ export class ErrorMonitorCaptureInterceptor implements NestInterceptor {
     }
 
     const rawPath: string = req?.route?.path || req?.originalUrl || req?.url || '/<unresolved>';
+    if (req?.__skipErrorMonitorCapture) return next.handle();
     // Prevent recursive self-capture on error-monitor ingestion or admin polling endpoints
     if (/\/(?:admin|internal)\/error-monitor\b/i.test(rawPath)) {
       return next.handle();

@@ -1344,7 +1344,7 @@ export class CampaignsService {
         campaignId: string; observed: number; billed: number;
       }>(sql`
         select campaign_id as "campaignId", count(*)::int as observed,
-          count(distinct event_id) filter (where ${billedClick})::int as billed
+          count(distinct event_id) filter (where click.valid is true and ${billedClick})::int as billed
         from (${observedClickRows({ campaign: sql.join(rowIds.map(id => sql`${id}`), sql`, `) })}) click
         group by campaign_id
       `) : { rows: [] };

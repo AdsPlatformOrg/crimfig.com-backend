@@ -1,6 +1,39 @@
 import { DeliveryService } from '../../../api/ads-api/src/modules/delivery/delivery.service';
 const {JSDOM}=require('jsdom');
 const tick=async()=>{await new Promise(done=>setImmediate(done));await new Promise(done=>setImmediate(done));};
+
+test.each(['custom', 'tcf', 'gpp', 'gpc', 'withdrawn'])('PLAN0104 SDK consent source %s controls optional continuity only', async mode => {
+  const previous = process.env.ADS_PUBLIC_URL;
+  process.env.ADS_PUBLIC_URL = 'https://ads.example.test';
+  const dom = new JSDOM('<ins class="crimfig-pub-slot" data-ad-slot="cf-slot-test"></ins>', {
+    url: 'https://publisher.example.test', runScripts: 'outside-only',
+  });
+  const win = dom.window;
+  const observed = jest.fn();
+  win.crimfigCpcConsent = jest.fn(() => mode === 'withdrawn'
+    ? { state: 'withdrawn' }
+    : { state: 'granted', proof: 'x'.repeat(111) });
+  if (mode === 'tcf') win.__tcfapi = () => {};
+  if (mode === 'gpp') win.__gpp = () => {};
+  if (mode === 'gpc') Object.defineProperty(win.navigator, 'globalPrivacyControl', { value: true });
+  win.fetch = async (url: string, init: RequestInit) => {
+    observed(new URL(url), init);
+    return { ok: true, json: async () => ({ data: null }) };
+  };
+  try {
+    win.eval(new DeliveryService({} as any, {} as any, {} as any, {} as any).getEmbedScript());
+    win.document.dispatchEvent(new win.Event('DOMContentLoaded'));
+    await tick();
+    expect(observed).toHaveBeenCalledTimes(1);
+    const [url, options] = observed.mock.calls[0];
+    expect(url.searchParams.get('consent')).toBe(mode === 'custom' ? 'granted' : 'unknown');
+    expect(options.headers['X-CF-CPC-Consent']).toBe(mode === 'custom' ? 'x'.repeat(111) : undefined);
+  } finally {
+    dom.window.close();
+    if (previous === undefined) delete process.env.ADS_PUBLIC_URL;
+    else process.env.ADS_PUBLIC_URL = previous;
+  }
+});
 describe('PLAN0079 actual generated SDK DOM integration with synthetic nonbillable delivery',()=>{
  const previous={...process.env};afterEach(()=>{process.env={...previous};});
  async function run(width:number,height:number,viewport:number,fail=false,format?:string){

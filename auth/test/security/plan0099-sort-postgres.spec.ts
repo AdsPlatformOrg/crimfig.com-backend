@@ -39,7 +39,7 @@ run('PLAN0099 real PostgreSQL campaign column sorting', () => {
     await pool.query('create table apps(id uuid primary key)');
     // Actual Drizzle columns/defaults/enums/unique constraints/FKs, not the serialized mock adapter.
     // User identity is a minimal FK fixture; no production migrations or existing records are used.
-    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsTrafficControls, schema.adsEvidenceRecords, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
+    const tables = [schema.billingExchangeRates, schema.billingWallets, schema.billingTransactions, schema.billingSavedCards, schema.billingProviderEvents, schema.refreshTokens, schema.adsCampaigns, schema.adsCampaignEscrows, schema.billingBankAccounts, schema.billingWithdrawalRequests, schema.billingSubscriptions, schema.adsCreativeStacks, schema.adsCreatives, schema.adsPromoters, schema.adsReelsConsents, schema.adsPromoterWebsites, schema.adsPromoterApps, schema.adstationSlots, schema.adstationDirectCampaigns, schema.adsSupplyStateHistory, schema.adsTrafficControls, schema.adsEvidenceRecords, schema.adsPlacements, schema.adsServes, schema.adsInteractions, schema.adsClicks, schema.adsAuctionDecisions, schema.adsOpportunityReservations, schema.adsEventAssessments, schema.adsSettlementBatches, schema.adsPromoterSettlementItems, schema.adsSettlementClaims, schema.adsSettlementCarries, schema.adsDeepAuditRuns, schema.adsSettlementRebates, schema.adsPromoterPenalties, schema.oauthClients];
     const enums = new Set<string>();
     tables.splice(tables.indexOf(schema.adsCreatives), 0, schema.adsMediaAssets as any, schema.crimfigGeoTargets as any, schema.adsHouseCreatives as any);
     for (const table of tables) for (const col of getTableConfig(table).columns as any[]) {
@@ -117,14 +117,19 @@ run('PLAN0099 real PostgreSQL campaign column sorting', () => {
     expect((await pool.query('select count(*)::int as n from billing_transactions')).rows[0].n).toBe(0);
     expect((await service.campaignPage(randomUUID(), 'all', 1, 1, '', 'views_desc')).items).toEqual([]);
 
-    for (const sort of ['title_desc', 'budget_desc', 'spend_desc', 'creatives_desc', 'views_desc', 'clicks_desc', 'status_desc']) {
+    for (const sort of ['title_desc', 'budget_desc', 'spend_desc', 'creatives_desc', 'views_desc', 'status_desc']) {
       const result = await page(sort);
       expect(result.total).toBe(3);
       expect(result.items.map(item => item.id)).toEqual([second.id]);
     }
     expect((await page('views_desc')).items[0].impressionsCount).toBe(8);
-    expect((await page('ctr_desc')).items[0].id).toBe(own.campaign.id); // 50% versus 25%.
-    for (const sort of ['budget', 'spend', 'creatives', 'views', 'clicks', 'ctr', 'status']) {
+    const tied = [own.campaign.id, second.id, empty.id].sort().reverse();
+    for (const sort of ['clicks', 'clicks_desc', 'ctr', 'ctr_desc']) {
+      const result = await service.campaignPage(owner, 'all', 1, 25, '', sort);
+      expect(result.items.map(item => item.id)).toEqual(tied);
+      expect(result.items.every(item => item.billedClicksCount === 0)).toBe(true);
+    }
+    for (const sort of ['budget', 'spend', 'creatives', 'views', 'status']) {
       expect((await page(sort)).items[0].id).toBe(empty.id);
     }
     expect((await page('title')).items[0].id).toBe(own.campaign.id);

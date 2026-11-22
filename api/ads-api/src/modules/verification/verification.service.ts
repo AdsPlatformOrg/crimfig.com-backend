@@ -111,6 +111,32 @@ export class VerificationService {
       // Ownership proof cannot erase a concurrent staff rejection or suspension.
       const nextPolicyStatus=isVerified&&current.policyStatus==='unverified'?'testing':current.policyStatus;
       const now=new Date();
+      const proofHash = proofTokenHash(token);
+      // Legacy proofs live on the website row until a successful check switches methods.
+      if (isVerified && method !== current.verificationMethod &&
+          current.verificationStatus === 'verified' && current.verificationExpiresAt) {
+        const priorMethod = current.verificationMethod === 'dns_txt' ? 'dns_txt' : 'html_meta';
+        const dimension = `ownership_check_${priorMethod}`;
+        const [existing] = await tx.select({ id: adsSupplyStateHistory.id })
+          .from(adsSupplyStateHistory)
+          .where(and(
+            eq(adsSupplyStateHistory.entityType, 'website'),
+            eq(adsSupplyStateHistory.entityId, websiteId),
+            eq(adsSupplyStateHistory.dimension, dimension),
+            eq(adsSupplyStateHistory.reason, proofHash),
+          )).limit(1);
+        if (!existing) {
+          await tx.insert(adsSupplyStateHistory).values({
+            entityType: 'website',
+            entityId: websiteId,
+            dimension,
+            toState: 'verified',
+            reason: proofHash,
+            // History expires 30 days after createdAt, so keep the legacy expiration.
+            createdAt: new Date(current.verificationExpiresAt.getTime() - 30 * 86400000),
+          });
+        }
+      }
       const [saved]=await tx.update(adsPromoterWebsites).set({
         verificationStatus:isVerified?'verified':preserveProof?'verified':'failed',verifiedAt:isVerified?now:preserveProof?current.verifiedAt:null,
         ...(requestedMethod && isVerified ? { verificationMethod: method } : {}),
@@ -119,7 +145,7 @@ export class VerificationService {
         verificationFailures:isVerified?0:(current.verificationFailures||0)+1,updatedAt:now,
       }).where(eq(adsPromoterWebsites.id,websiteId)).returning();
       await tx.insert(adsSupplyStateHistory).values({entityType:'website',entityId:websiteId,dimension:'ownership_status',fromState:current.verificationStatus,toState:saved.verificationStatus,actorRole:staff?'ads_staff':'owner',actorId:staff?.actorId,reason:staff ? (isVerified ? 'OWNERSHIP_RETEST_CONFIRMED_' : 'OWNERSHIP_RETEST_FAILED_') + staff.method.toUpperCase() : isVerified?'OWNERSHIP_PROOF_CONFIRMED':'OWNERSHIP_PROOF_FAILED'});
-      await tx.insert(adsSupplyStateHistory).values({entityType:'website',entityId:websiteId,dimension:`ownership_check_${method==='dns_txt'?'dns_txt':'html_meta'}`,toState:isVerified?'verified':'not_verified',actorRole:staff?'ads_staff':'owner',actorId:staff?.actorId,reason:proofTokenHash(token)});
+      await tx.insert(adsSupplyStateHistory).values({entityType:'website',entityId:websiteId,dimension:`ownership_check_${method==='dns_txt'?'dns_txt':'html_meta'}`,toState:isVerified?'verified':'not_verified',actorRole:staff?'ads_staff':'owner',actorId:staff?.actorId,reason:proofHash});
       return saved;
     });
 

@@ -10,6 +10,10 @@ const tableNames: Record<ReleaseService, string[]> = {
     'ads_promoters', 'ads_promoter_websites', 'ads_placements', 'adstation_slots',
     'ads_serves', 'ads_interactions', 'ads_clicks', 'ads_opportunity_reservations',
     'ads_auction_decisions', 'ads_event_assessments', 'ads_evidence_records',
+    'advertiser_achievements', 'advertiser_recognition_awards', 'advertiser_recognition_evaluations',
+    'billing_wallets', 'billing_transactions', 'billing_provider_events', 'ads_campaign_escrows',
+    'ads_settlement_claims', 'ads_settlement_batches', 'ads_promoter_settlement_items',
+    'ads_moderation_decisions', 'ads_settlement_rebates',
   ],
   billing: [
     'users', 'billing_wallets', 'billing_transactions', 'billing_exchange_rates',
