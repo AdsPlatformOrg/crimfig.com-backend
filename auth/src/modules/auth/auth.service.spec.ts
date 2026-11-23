@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException, ConflictException } from '@nestjs/common';
+import { UnauthorizedException, ConflictException, BadRequestException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { TokensService } from '../tokens/tokens.service';
 import { EmailService } from '../email/email.service';
@@ -11,6 +11,7 @@ jest.mock('argon2');
 jest.mock('../../config/config', () => ({
   config: {
     JWT: { ACCESS_SECRET: 'auth-service-test-secret' },
+    APP: { AUTH_WEB_URL: 'https://auth.crimfig.com' },
   }
 }));
 
@@ -162,6 +163,81 @@ describe('AuthService', () => {
       await expect(
         service.signup({ email: 'existing@crimfig.com', password: 'SecurePassword123!' }),
       ).rejects.toThrow(ConflictException);
+    });
+  });
+
+  describe('avatar presets and defaults', () => {
+    it('rejects unknown or retired avatar presets before touching the database', async () => {
+      await expect(service.updateAvatarPreset('usr_valid', 'does-not-exist')).rejects.toThrow(BadRequestException);
+      await expect(service.updateAvatarPreset('usr_valid', 'chibi-violet')).rejects.toThrow(BadRequestException);
+      expect(mockDb.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects profile lookups and avatar updates when user does not exist', async () => {
+      mockDb.select = jest.fn().mockReturnValue({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+      mockDb.update = jest.fn().mockReturnValue({
+        set: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([]),
+          }),
+        }),
+      });
+
+      await expect(service.getProfile('missing_user')).rejects.toThrow(UnauthorizedException);
+      await expect(service.updateAvatarPreset('missing_user', 'geo-1')).rejects.toThrow(UnauthorizedException);
+    });
+
+    it('exposes Orbit (geo-1) as default and defaults new users without a saved preset to Orbit', async () => {
+      const catalog = service.avatarCatalog();
+      expect(catalog.defaultId).toBe('geo-1');
+      expect(catalog.attribution.license).toBe('CC0-1.0');
+
+      mockDb.select = jest.fn().mockReturnValue({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{
+              id: 'usr_new',
+              email: 'new@crimfig.com',
+              preferredLocale: 'en',
+              avatarPresetId: null,
+              avatarVersion: 1,
+            }]),
+          }),
+        }),
+      });
+
+      const profile = await service.getProfile('usr_new');
+      expect(profile.avatar.kind).toBe('default');
+      expect(profile.avatar.presetId).toBe('geo-1');
+      expect(profile.avatar.label).toBe('Orbit');
+      expect(profile.avatar.url).toContain('/avatars/chibi/geo-1.webp');
+    });
+
+    it('preserves saved retired ninja selections in getProfile while blocking re-selection', async () => {
+      mockDb.select = jest.fn().mockReturnValue({
+        from: jest.fn().mockReturnValue({
+          where: jest.fn().mockReturnValue({
+            limit: jest.fn().mockResolvedValue([{
+              id: 'usr_legacy',
+              email: 'legacy@crimfig.com',
+              preferredLocale: 'en',
+              avatarPresetId: 'chibi-violet',
+              avatarVersion: 3,
+            }]),
+          }),
+        }),
+      });
+
+      const profile = await service.getProfile('usr_legacy');
+      expect(profile.avatar.kind).toBe('preset');
+      expect(profile.avatar.presetId).toBe('chibi-violet');
+      expect(profile.avatar.label).toBe('Violet');
     });
   });
 });

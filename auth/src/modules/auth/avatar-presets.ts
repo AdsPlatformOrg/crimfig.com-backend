@@ -43,16 +43,16 @@ export const AVATAR_PRESETS: readonly AvatarPreset[] = [
 const AVAILABLE_NINJA_IDS = new Set(['chibi-indigo', 'chibi-crimson', 'chibi-jade', 'chibi-slate', 'chibi-amber']);
 export const SELECTABLE_AVATAR_PRESETS = AVATAR_PRESETS.filter(preset => preset.collection || AVAILABLE_NINJA_IDS.has(preset.id));
 
-export const DEFAULT_AVATAR_PRESET_ID = 'chibi-indigo';
+export const DEFAULT_AVATAR_PRESET_ID = 'geo-1';
 
 export const AVATAR_ATTRIBUTION: AvatarAttribution = {
-  title: '2D Chibi Ninja - 8 Actions',
-  artist: 'ashuuya',
+  title: 'CrimFig Original Avatars & 2D Chibi Ninja - 8 Actions',
+  artist: 'CrimFig (Geometric & Portraits); ashuuya (Chibi Ninjas, CC0 1.0)',
   sourceUrl: 'https://opengameart.org/content/2d-chibi-ninja-8-actions',
   license: 'CC0-1.0',
   licenseUrl: 'https://creativecommons.org/publicdomain/zero/1.0/',
-  summary: 'Chibi ninja avatar illustrations adapted from “2D Chibi Ninja - 8 Actions” by ashuuya (OpenGameArt), verified as CC0 1.0. Images were cropped, recolored, and composed for CrimFig.',
-  modifications: 'Head and shoulders cropped from the original idle/walk sprite frames, centered on a transparent square canvas, nearest-neighbor upscaled to 512 × 512, and the blue cloth recolored per avatar. No franchise characters, logos, or third-party marks were added.',
+  summary: 'Geometric Characters and Portraits are original CrimFig artwork free for platform use. Chibi Ninjas are CC0 1.0 Public Domain adapted from “2D Chibi Ninja - 8 Actions” by ashuuya (OpenGameArt), free for commercial use.',
+  modifications: 'Geometric and Portrait avatars are original 512 × 512 CrimFig shape illustrations. Chibi Ninjas were cropped, centered, upscaled to 512 × 512, and recolored from CC0 sprite frames with no franchise marks.',
 };
 
 export function getAvatarPreset(id: string | null | undefined): AvatarPreset | undefined {
