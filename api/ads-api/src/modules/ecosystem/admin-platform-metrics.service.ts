@@ -289,14 +289,16 @@ export class AdminPlatformMetricsService {
       houseServesInWindow: intCount(sv.house_serves),
     };
 
-    const dailySeries: PlatformMetricsDailyPoint[] = (dailySeriesRes.rows ?? []).map((row: any) => ({
-      date: String(row.date),
-      usersSignedUp: intCount(row.users_signed_up),
-      websitesSetup: intCount(row.websites_setup),
-      websitesVerified: intCount(row.websites_verified),
-      slotsCreated: intCount(row.slots_created),
-      slotsAdded: intCount(row.slots_added),
-    }));
+    const dailySeries: PlatformMetricsDailyPoint[] = (dailySeriesRes.rows ?? [])
+      .filter((row: any) => typeof row?.date === 'string' && row.date.length > 0)
+      .map((row: any) => ({
+        date: row.date,
+        usersSignedUp: intCount(row.users_signed_up),
+        websitesSetup: intCount(row.websites_setup),
+        websitesVerified: intCount(row.websites_verified),
+        slotsCreated: intCount(row.slots_created),
+        slotsAdded: intCount(row.slots_added),
+      }));
 
     return {
       windowDays,

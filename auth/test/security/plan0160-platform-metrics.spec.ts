@@ -1,10 +1,10 @@
 import { BadRequestException } from '@nestjs/common';
-import { ADS_ROLES_KEY } from '../security/ads-staff-grants';
-import { AdminPlatformMetricsController } from './admin-platform-metrics.controller';
+import { ADS_ROLES_KEY } from '../../../api/ads-api/src/modules/security/ads-staff-grants';
+import { AdminPlatformMetricsController } from '../../../api/ads-api/src/modules/ecosystem/admin-platform-metrics.controller';
 import {
   AdminPlatformMetricsService,
   parseMetricsWindowDays,
-} from './admin-platform-metrics.service';
+} from '../../../api/ads-api/src/modules/ecosystem/admin-platform-metrics.service';
 
 describe('AdminPlatformMetricsService & Controller (PLAN-0160)', () => {
   it('rejects unsupported window day queries before touching the database', async () => {
@@ -40,7 +40,7 @@ describe('AdminPlatformMetricsService & Controller (PLAN-0160)', () => {
 
   it('preserves genuine zeros and computes clamped 0% dial rates without NaN', async () => {
     const db = {
-      execute: jest.fn().mockResolvedValue({ rows: [{}] }),
+      execute: jest.fn().mockResolvedValue({ rows: [] }),
     };
     const service = new AdminPlatformMetricsService(db as any);
 
