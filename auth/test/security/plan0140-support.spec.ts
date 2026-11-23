@@ -19,9 +19,10 @@ describe('Support policy & service negative-first checks', () => {
     expect(() => checkSupportTransition('closed', 'in_progress')).not.toThrow();
   });
 
-  test('references preserve all digits with minimum seven', () => {
-    expect(ticketReference(1)).toBe('#0000001');
-    expect(ticketReference('10000001')).toBe('#10000001');
+  test('references preserve all digits with minimum two', () => {
+    expect(ticketReference(1)).toBe('#01');
+    expect(ticketReference(1013)).toBe('#1013');
+    expect(ticketReference('100000001')).toBe('#100000001');
   });
 
   test('rejects invalid input and ungranted staff access before database writes', async () => {
@@ -47,12 +48,12 @@ describe('Support policy & service negative-first checks', () => {
     expect(SUPPORT_STAFF_MAIL).toEqual({ to: 'support@crimfig.com', bcc: 'jedaccthree@gmail.com' });
 
     const email = new EmailService();
-    const ticket = { id: '11111111-1111-4111-8111-111111111111', ticket_number: '#0000001' };
+    const ticket = { id: '11111111-1111-4111-8111-111111111111', ticket_number: '#01' };
     const ack = email.buildSupportEmailContent('ack', ticket);
     const reply = email.buildSupportEmailContent('reply', ticket);
     const staff = email.buildSupportEmailContent('staff', ticket);
 
-    expect(ack.textContent).toContain('#0000001');
+    expect(ack.textContent).toContain('#01');
     expect(ack.textContent).toContain('support@crimfig.com');
     expect(ack.textContent).not.toContain('/admin/support');
     expect(ack.textContent).not.toContain('jedaccthree@gmail.com');

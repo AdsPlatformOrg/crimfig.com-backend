@@ -10,4 +10,4 @@ const transitions: Record<string, readonly string[]> = {
 export function checkSupportTransition(from: string, to: string) {
  if (from !== to && !transitions[from]?.includes(to)) throw new BadRequestException('Invalid ticket status transition');
 }
-export function ticketReference(value: string | number) { return '#' + String(value).padStart(7, '0'); }
+export function ticketReference(value: string | number) { return '#' + String(value).padStart(2, '0'); }
