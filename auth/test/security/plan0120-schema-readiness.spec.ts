@@ -20,14 +20,23 @@ function fixture() {
     }
     for (const index of table.indexes) indexes.push({ table_name: table.name, name: index.config.name });
   }
+  const audit = { ready: true };
   const db = { execute: jest.fn(async (query: any) => {
     const text = query.queryChunks.map((chunk: any) => chunk.value?.join('') ?? '').join('');
+    if (text.includes('report_access_audit')) return { rows: [audit] };
     return { rows: text.includes('information_schema') ? columns : text.includes('pg_enum') ? enums : indexes };
   }) };
-  return { db, columns, enums, indexes };
+  return { db, columns, enums, indexes, audit };
 }
 
 describe('release schema readiness', () => {
+  it('keeps Ads unready until the report access audit migration is applied', async () => {
+    const f = fixture();
+    f.audit.ready = false;
+    await expect(requiredAdsSchema(f.db)).rejects.toThrow('Required report access audit schema unavailable');
+    f.audit.ready = true;
+    await expect(requiredAdsSchema(f.db)).resolves.toBeUndefined();
+  });
   it('rejects an Ads release when the recognition migration is missing', async () => {
     const f = fixture();
     for (let index = f.columns.length - 1; index >= 0; index--) {
