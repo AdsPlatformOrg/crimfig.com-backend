@@ -1,5 +1,5 @@
 import {
-  Injectable, Inject, BadRequestException, UnauthorizedException, ConflictException,
+  Injectable, Inject, BadRequestException, UnauthorizedException, ConflictException, ServiceUnavailableException,
 } from '@nestjs/common';
 import { eq, and, isNull } from 'drizzle-orm';
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
@@ -26,6 +26,7 @@ const { generateSecret, generateURI, verifySync } = require('otplib');
 
 const BACKUP_CODE_COUNT = 8;
 const BACKUP_CODE_LENGTH = 8;
+const MFA_ENROLLMENT_ENABLED = false;
 
 function validTotp(code: string, secret: string, now = Date.now()): boolean {
   if (!/^\d{6}$/.test(code)) return false;
@@ -87,6 +88,10 @@ export class MfaService {
     qrCodeDataUrl: string;
     otpauthUrl: string;
   }> {
+    if (!MFA_ENROLLMENT_ENABLED) {
+      throw new ServiceUnavailableException('Multi-factor authentication setup is not enabled yet and is coming soon.');
+    }
+
     // Block if MFA already active
     const existingActive = await this.db.query.mfaDevices.findFirst({
       where: and(
@@ -116,6 +121,10 @@ export class MfaService {
   }
 
   async confirmTotpEnrollment(userId: string, userEmail: string, code: string): Promise<{ backupCodes: string[] }> {
+    if (!MFA_ENROLLMENT_ENABLED) {
+      throw new ServiceUnavailableException('Multi-factor authentication setup is not enabled yet and is coming soon.');
+    }
+
     const device = await this.db.query.mfaDevices.findFirst({
       where: and(
         eq(schema.mfaDevices.userId, userId),
@@ -283,6 +292,7 @@ export class MfaService {
       mfaEnabled: !!activeDevice,
       totpConfigured: !!activeDevice,
       backupCodesRemaining: backupDevices.length,
+      enrollmentAvailable: false,
     };
   }
 
