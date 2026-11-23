@@ -661,10 +661,11 @@ export class DeliveryService {
       trigger.setAttribute('data-cf-rating-trigger', 'true');
       trigger.setAttribute('aria-label', 'Ads by CrimFig — Rate this advert');
       trigger.setAttribute('aria-expanded', 'false');
-      trigger.style.cssText = 'position:absolute;top:4px;right:4px;z-index:6;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;border:1px solid rgba(255,255,255,0.22);background:rgba(23,27,42,0.84);color:#FFFFFF;font:600 10px/1.2 Poppins,Arial,sans-serif;cursor:pointer;opacity:0.78;transition:opacity 0.15s ease;';
+      trigger.style.cssText = 'position:absolute;top:4px;right:4px;z-index:6;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;border:1px solid rgba(255,255,255,0.16);background:rgba(23,27,42,0.56);color:#FFFFFF;font:600 10px/1.2 Poppins,Arial,sans-serif;cursor:pointer;opacity:0.72;transition:opacity 0.15s ease,background-color 0.15s ease;';
       var dot = document.createElement('span');
+      dot.setAttribute('data-cf-attribution-icon', 'true');
       dot.textContent = 'i';
-      dot.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:999px;background:#D4143A;color:#FFFFFF;font-size:9px;font-weight:700;';
+      dot.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:999px;background:rgba(255,255,255,0.72);color:#475569;font-size:9px;font-weight:700;transition:background-color 0.15s ease,color 0.15s ease;';
       var attrLabel = document.createElement('span');
       attrLabel.setAttribute('data-cf-attribution-label', 'true');
       attrLabel.textContent = 'Ads by CrimFig';
@@ -772,8 +773,22 @@ export class DeliveryService {
         }
       });
 
-      function showAttribution() { attrLabel.style.display = 'inline'; trigger.style.opacity = '1'; }
-      function hideAttribution() { if (document.activeElement !== trigger) { attrLabel.style.display = 'none'; trigger.style.opacity = '0.78'; } }
+      function showAttribution() {
+        attrLabel.style.display = 'inline';
+        trigger.style.opacity = '1';
+        trigger.style.background = 'rgba(23,27,42,0.88)';
+        dot.style.background = '#FFFFFF';
+        dot.style.color = '#171B2A';
+      }
+      function hideAttribution() {
+        if (document.activeElement !== trigger && overlay.style.display !== 'flex') {
+          attrLabel.style.display = 'none';
+          trigger.style.opacity = '0.72';
+          trigger.style.background = 'rgba(23,27,42,0.56)';
+          dot.style.background = 'rgba(255,255,255,0.72)';
+          dot.style.color = '#475569';
+        }
+      }
       hostCard.addEventListener('pointerenter', showAttribution);
       hostCard.addEventListener('mouseenter', showAttribution);
       hostCard.addEventListener('pointerleave', hideAttribution);
