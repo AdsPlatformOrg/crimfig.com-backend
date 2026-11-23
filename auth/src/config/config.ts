@@ -13,7 +13,7 @@ const required = (key: string): string => {
 };
 
 export const config = {
-  SUPPORT: { OUTBOX_WORKER_ENABLED: process.env.SUPPORT_OUTBOX_WORKER_ENABLED === "true" },
+  SUPPORT: { OUTBOX_WORKER_ENABLED: process.env.SUPPORT_OUTBOX_WORKER_ENABLED ? process.env.SUPPORT_OUTBOX_WORKER_ENABLED === 'true' : process.env.NODE_ENV !== 'test' },
   FINANCIAL_AUTH: {
     AUTHORITY_PUBLIC_KEYS: process.env.FINANCIAL_AUTHORITY_PUBLIC_KEYS || '{}',
     SIGNING_PRIVATE_KEY: process.env.FINANCIAL_AUTH_SIGNING_PRIVATE_KEY,
@@ -77,8 +77,8 @@ export const config = {
   },
 
   APP: {
-    AUTH_WEB_URL: publicAppOrigin('auth',process.env.AUTH_WEB_URL),
-    ADS_WEB_URL: publicAppOrigin('ads',process.env.ADS_WEB_URL),
+    AUTH_WEB_URL: publicAppOrigin('auth', process.env.AUTH_WEB_URL),
+    ADS_WEB_URL: publicAppOrigin('ads', process.env.ADS_WEB_URL),
 
   },
 

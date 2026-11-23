@@ -52,16 +52,16 @@ export class EmailService {
 
   // ── Private helper ───────────────────────────────────────────────────────
 
-  async sendSupportEmail(params: {to: string; bcc?: string; subject: string; textContent: string}): Promise<ErrorAlertEmailDeliveryResult> {
-    if (!this.client) return {accepted:false,error:'BREVO_CLIENT_NOT_INITIALIZED'};
+  async sendSupportEmail(params: { to: string; bcc?: string; subject: string; textContent: string }): Promise<ErrorAlertEmailDeliveryResult> {
+    if (!this.client) return { accepted: false, error: 'BREVO_CLIENT_NOT_INITIALIZED' };
     try {
       await this.client.transactionalEmails.sendTransacEmail({
-        sender:{name:config.EMAIL.FROM_NAME,email:config.EMAIL.FROM},
-        to:[{email:params.to}], ...(params.bcc ? {bcc:[{email:params.bcc}]} : {}),
-        subject:params.subject, textContent:params.textContent,
+        sender: { name: config.EMAIL.FROM_NAME, email: config.EMAIL.FROM },
+        to: [{ email: params.to }], ...(params.bcc ? { bcc: [{ email: params.bcc }] } : {}),
+        subject: params.subject, textContent: params.textContent,
       });
-      return {accepted:true};
-    } catch { return {accepted:false,error:'SUPPORT_MAIL_FAILED'}; }
+      return { accepted: true };
+    } catch { return { accepted: false, error: 'SUPPORT_MAIL_FAILED' }; }
   }
 
   private async send(params: {
@@ -278,11 +278,11 @@ export class EmailService {
     const target = new URL(kind === 'staff' ? '/admin/support' : '/support', config.APP.AUTH_WEB_URL);
     target.searchParams.set('ticket', ticket.id);
     const text = kind === 'ack'
-      ? `We received request ${ticket.ticket_number}. Sign in to view your request.`
+      ? `We received request ${ticket.ticket_number}. Sign in to view your request: ${target.href} — or email support@crimfig.com.`
       : kind === 'reply'
-        ? `There is a new reply to request ${ticket.ticket_number}. Sign in to read it.`
-        : `A support request ${ticket.ticket_number} needs attention. Sign in to review it.`;
-    return { subject: `CrimFig Support ${ticket.ticket_number}`, textContent: `${text} ${target.href}` };
+        ? `There is a new reply to request ${ticket.ticket_number}. Sign in to read it: ${target.href} — or email support@crimfig.com.`
+        : `A support request ${ticket.ticket_number} needs attention. Sign in to review it: ${target.href}`;
+    return { subject: `CrimFig Support ${ticket.ticket_number}`, textContent: text };
   }
 
   listTemplatePreviews() {
@@ -306,17 +306,21 @@ export class EmailService {
       { id: 'welcome', name: 'Welcome email', ...this.buildWelcomeEmail() },
       { id: 'verification', name: 'Email verification', ...this.buildVerificationEmail('Alex', 'sample-token') },
       { id: 'password-reset', name: 'Password reset', ...this.buildPasswordResetEmail('Alex', 'sample-token') },
-      { id: 'org-invite', name: 'Organisation invitation', ...this.buildOrgInviteEmail('Alex', {
-        orgName: 'Example Studio', inviterName: 'Sam', role: 'MEMBER', inviteToken: 'sample-token',
-      }) },
+      {
+        id: 'org-invite', name: 'Organisation invitation', ...this.buildOrgInviteEmail('Alex', {
+          orgName: 'Example Studio', inviterName: 'Sam', role: 'MEMBER', inviteToken: 'sample-token',
+        })
+      },
       { id: 'mfa-backup', name: 'MFA backup codes', ...this.buildMfaBackupCodesEmail('Alex', ['SAMPLE-0001', 'SAMPLE-0002']) },
       { id: 'support-ack', name: 'Support request received', ...this.buildSupportEmailContent('ack', ticket) },
       { id: 'support-reply', name: 'Support reply', ...this.buildSupportEmailContent('reply', ticket) },
       { id: 'support-staff', name: 'Staff support notification', ...this.buildSupportEmailContent('staff', ticket) },
       { id: 'error-alert', name: 'Platform error alert', ...this.buildErrorAlertEmailContent({ ...error, kind: 'initial' }) },
-      { id: 'error-summary', name: 'Platform error summary', ...this.buildErrorAlertEmailContent({
-        ...error, kind: 'window_summary', occurrenceCount: 5,
-      }) },
+      {
+        id: 'error-summary', name: 'Platform error summary', ...this.buildErrorAlertEmailContent({
+          ...error, kind: 'window_summary', occurrenceCount: 5,
+        })
+      },
     ];
   }
 
