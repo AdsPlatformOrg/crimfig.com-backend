@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, Req } from '@nestjs/common';
+import { Controller, Get, Post, Put, Body, Param, Req, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { PromotersService } from './promoters.service';
 import { IsString, IsIn, IsOptional, IsBoolean } from 'class-validator';
@@ -55,6 +55,17 @@ export class PromotersController {
     const userId = req.user.sub;
     const profile = await this.promotersService.getOrCreatePromoter(userId);
     return { status: 'success', data: profile };
+  }
+
+  @Get('profile/existing')
+  @ApiOperation({ summary: 'Read the current user’s promoter profile without creating one' })
+  async getExistingProfile(@Req() req: any) {
+    try {
+      return { status: 'success', data: await this.promotersService.getExistingPromoter(req.user.sub) };
+    } catch (error) {
+      if (error instanceof NotFoundException) return { status: 'success', data: null };
+      throw error;
+    }
   }
 
   @Post('register')

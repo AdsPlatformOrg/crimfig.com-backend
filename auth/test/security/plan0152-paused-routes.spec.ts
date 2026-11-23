@@ -1,8 +1,22 @@
-import { ServiceUnavailableException } from '@nestjs/common';
+import { NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConversionsController } from '../../../api/ads-api/src/modules/conversions/conversions.controller';
 import { DisputesController } from '../../../api/ads-api/src/modules/disputes/disputes.controller';
+import { PromotersController } from '../../../api/ads-api/src/modules/promoters/promoters.controller';
 
 describe('PLAN-0152 paused conversions and standalone disputes routes', () => {
+  it('reads a promoter profile for the current account without provisioning one', async () => {
+    const existing = { userId: 'owner-1', displayName: 'Promoter' };
+    const service = {
+      getExistingPromoter: jest.fn().mockResolvedValueOnce(existing).mockRejectedValueOnce(new NotFoundException()),
+      getOrCreatePromoter: jest.fn(),
+    };
+    const controller = new PromotersController(service as any);
+    const request = { user: { sub: 'owner-1' } };
+    await expect(controller.getExistingProfile(request)).resolves.toEqual({ status: 'success', data: existing });
+    await expect(controller.getExistingProfile(request)).resolves.toEqual({ status: 'success', data: null });
+    expect(service.getExistingPromoter).toHaveBeenNthCalledWith(1, 'owner-1');
+    expect(service.getOrCreatePromoter).not.toHaveBeenCalled();
+  });
   it('pauses pixel/S2S conversion ingestion and API key issuance while preserving reads, revocation, and reversals', async () => {
     const service = {
       ingestConversion: jest.fn(),
@@ -54,5 +68,11 @@ describe('PLAN-0152 paused conversions and standalone disputes routes', () => {
 
     const list = await controller.getDisputes({ user: { sub: 'user-1' } });
     expect(list).toEqual({ status: 'success', data: [{ id: 'disp-1' }] });
+    await expect(controller.resolveDispute('disp-1', { user: { sub: 'staff-1' } }, {
+      status: 'resolved_upheld', outcome: 'Existing case reviewed',
+    })).resolves.toEqual({ status: 'success', data: { id: 'disp-1', status: 'resolved_upheld' } });
+    expect(disputesService.resolveDispute).toHaveBeenCalledWith('disp-1', expect.objectContaining({
+      adminId: 'staff-1', status: 'resolved_upheld',
+    }));
   });
 });
