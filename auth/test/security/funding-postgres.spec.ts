@@ -1385,6 +1385,18 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
         expect(row).not.toHaveProperty('creative');
       }
       expect(earnings.totals).not.toHaveProperty('spend');
+      const metricsOnly = (report: any) => [
+        report.totals, report.comparison.totals,
+        ...report.daily.map(({ date, incomplete, ...metrics }: any) => metrics),
+        ...report.breakdown.map(({ campaignId, creativeId, campaign, creative, ...metrics }: any) => metrics),
+      ];
+      for (const values of metricsOnly(earnings)) {
+        expect(Object.keys(values).sort()).toEqual(['adjustments','billableClicks','billableImpressions','confirmed','pending']);
+      }
+      for (const values of metricsOnly(advertiser.body.data)) {
+        expect(Object.keys(values).sort()).toEqual(['billableClicks','billableImpressions','billedClicks','clicks',
+          'cpcSpend','cpmSpend','credits','impressions','posted','spend','validClicks']);
+      }
       expect(earnings.totals).toMatchObject({billableImpressions:cpm?'2':'0',billableClicks:cpm?'0':'2',
         adjustments:cpm?'0':'-10000000'});
       if (!cpm) {
