@@ -52,7 +52,7 @@ export class ReportAuditService {
     const action = reportAction(String(request.path ?? '').split('?')[0]);
     if (!action) return;
     const actor = typeof request.user?.sub === 'string' && uuid.test(request.user.sub) ? request.user.sub : null;
-    const roles = actor ? [...this.grants.rolesFor(actor)] : [];
+    const roles = actor ? [...await this.grants.rolesFor(actor)] : [];
     const correlation = request.reportCorrelationId ??
       (typeof request.correlationId === 'string' && uuid.test(request.correlationId) ? request.correlationId : randomUUID());
     request.reportCorrelationId = correlation;
@@ -72,7 +72,7 @@ export class ReportAuditService {
             const alert = await tx.execute(sql`INSERT INTO report_access_alerts(actor_key,kind,hour_start)
               VALUES (${actor ?? 'anonymous'},${kind},date_trunc('hour',now())) ON CONFLICT DO NOTHING RETURNING kind`);
             if (alert.rows.length) {
-              for (const userId of this.grants.accountsWithRole('report_auditor')) {
+              for (const userId of await this.grants.accountsWithRole('report_auditor')) {
                 await tx.insert(schema.userNotifications).values({ userId, app: 'ads', eventType: 'reports.access_alert', severity: 'warning',
                   title: 'Report access needs review', message: kind === 'repeated_denials' ? 'Repeated report access denials were recorded.' : 'Frequent contact reveals were recorded.',
                   actionUrl: '/admin/reports?view=access', payload: { kind, actorId: actor, correlationId: correlation } });

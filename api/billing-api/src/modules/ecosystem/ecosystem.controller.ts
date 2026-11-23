@@ -86,7 +86,7 @@ export class EcosystemController {
 
   @Get('staff-status')
   @ApiOperation({ summary: 'Check billing staff privilege status and assigned roles for current authenticated session' })
-  getStaffStatus(@Req() req: any) {
+  async getStaffStatus(@Req() req: any) {
     const userId = req.user?.sub;
     if (!userId) {
       return {
@@ -98,7 +98,7 @@ export class EcosystemController {
         },
       };
     }
-    const roles = this.staffGrants.rolesFor(userId);
+    const roles = await this.staffGrants.rolesFor(userId);
     return {
       status: 'success',
       data: {

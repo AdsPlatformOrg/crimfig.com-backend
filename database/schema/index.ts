@@ -13,6 +13,7 @@
 
 // ─── Core Auth & Identity ──────────────────────────────────────────────────────
 export * from './users';
+export * from './platform_access';
 export * from './individual_profiles';
 export * from './organizations';
 export * from './organization_members';

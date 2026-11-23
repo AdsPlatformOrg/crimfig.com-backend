@@ -52,8 +52,7 @@ export class FinancialAuthorizationService {
       || !identity.recoveryClearedAt || new Date(identity.recoveryClearedAt).getTime() > now) return false;
     if (challenge.purpose === 'independent_review') {
       // Financial review explicitly excludes inherited Ads grants.
-      let grants: any; try { grants = JSON.parse(config.FINANCIAL_AUTH.EXPLICIT_PLATFORM_GRANTS); } catch { return false; }
-      if (!Array.isArray(grants?.[challenge.actorId]) || !grants[challenge.actorId].includes('super_admin')) return false;
+      if (!(await schema.readPlatformRoles(tx, challenge.actorId, 'auth_finance', true)).includes('super_admin')) return false;
     }
     if (!checkAttempts) return true;
     const [attempts] = await tx.select({ count: sql<number>`coalesce(sum(${schema.financialChallenges.attempts}),0)::integer` })

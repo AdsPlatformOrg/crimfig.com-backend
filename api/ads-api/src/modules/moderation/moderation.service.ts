@@ -179,7 +179,7 @@ export class ModerationService {
     if(!uuidPattern.test(params.submissionId||'')||!['acquire','renew','release','takeover'].includes(action))throw new BadRequestException('Current submission and supported claim action required.');
     if(action!=='acquire'&&!uuidPattern.test(params.claimId||''))throw new BadRequestException('A current claim ID is required.');
     if((params.reason?.length||0)>2000)throw new BadRequestException('Claim reason is too long.');
-    const roles=this.staffGrants.rolesFor(actorId),admin=roles.includes('ads_admin')||roles.includes('super_admin');
+    const roles=await this.staffGrants.rolesFor(actorId),admin=roles.includes('ads_admin')||roles.includes('super_admin');
     if(!admin&&!roles.includes(params.stage==='reviewer'?'ads_reviewer':'ads_manager'))throw new ForbiddenException('Your Ads staff role cannot claim this review.');
     if(action==='takeover'&&(!admin||!params.reason?.trim()))throw new ForbiddenException('Administrative takeover requires an administrator and recorded reason.');
     if(!this.claimsEnabled())throw new ServiceUnavailableException('Advisory claims are not enabled. Normal review is still available.');
@@ -291,7 +291,7 @@ export class ModerationService {
       const target = type === 'campaign' ? campaign : child;
       const submittedContent = type === 'campaign' ? snapshot?.campaign : (type === 'creative' ? snapshot?.creatives : snapshot?.stacks)?.find(row => row.id === id);
       const content = submittedContent && snapshot?.campaign?.id === campaign.id && (type === 'campaign' || submittedContent.campaignId === campaign.id) ? submittedContent : null;
-      const roles = this.staffGrants.rolesFor(actorId);
+      const roles = await this.staffGrants.rolesFor(actorId);
       const admin = roles.includes('ads_admin') || roles.includes('super_admin');
       const reason = !current || !content ? 'Current immutable submission unavailable. Reload before reviewing.' :
         campaign.advertiserId === actorId ? 'Owners cannot review their own campaigns.' :
@@ -397,7 +397,7 @@ export class ModerationService {
       throw new BadRequestException('Review text is too long.');
     }
 
-    const actorRoles = this.staffGrants.rolesFor(params.reviewerId);
+    const actorRoles = await this.staffGrants.rolesFor(params.reviewerId);
     const permitted = stage === 'override' ? actorRoles.includes('super_admin') :
       actorRoles.some(role => role === 'super_admin' || role === 'ads_admin' || role === (stage === 'primary' ? 'ads_reviewer' : 'ads_manager'));
     if (!permitted) throw new ForbiddenException('Your Ads staff role cannot perform this review.');
@@ -405,6 +405,8 @@ export class ModerationService {
 
     return this.db.transaction(async (tx) => {
       const c = await this.workflow.lock(tx, campaignId);
+      const currentRoles = await this.staffGrants.rolesFor(params.reviewerId, tx);
+      if (!(stage === 'override' ? currentRoles.includes('super_admin') : currentRoles.some(role => role === 'super_admin' || role === 'ads_admin' || role === (stage === 'primary' ? 'ads_reviewer' : 'ads_manager')))) throw new ForbiddenException('Your staff permission changed before this review');
       if (c.advertiserId === params.reviewerId) {
         throw new BadRequestException('Owners cannot review their own campaigns.');
       }
@@ -462,7 +464,7 @@ export class ModerationService {
 
       // Check Reviewer separation: Platform admin (super_admin / ads_admin) can approve as both Reviewer 1 and Reviewer 2,
       // but must do so in two separate review actions. Standard reviewers must be distinct persons.
-      const reviewerRoles = this.staffGrants.rolesFor(params.reviewerId);
+      const reviewerRoles = await this.staffGrants.rolesFor(params.reviewerId);
       const isPlatformAdmin = reviewerRoles.includes('super_admin') || reviewerRoles.includes('ads_admin');
 
       const before = await this.workflow.snapshot(tx, c);

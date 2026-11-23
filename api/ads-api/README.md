@@ -28,12 +28,11 @@ deleted accounts are rejected. Identity headers and demo-user fallbacks have bee
 
 ## Staff permissions
 
-`ADS_STAFF_ROLE_GRANTS` is a server-managed JSON object mapping existing account UUIDs
-to role arrays. The default `{}` grants nobody staff access. Invalid JSON, account IDs or
-unknown roles fail startup. This is a transitional deployment-owned authority because the
-current schema has no platform staff assignment table. Store it in restricted server
-configuration; changes require a restart/redeploy. No role is taken from a JWT, request
-header, request body or organization membership. No user/grant was seeded by this change.
+Platform Admin and staff assignments are authoritative database rows in platform_user_role_grants, scoped to Ads, Auth, Billing or independent financial review. platform_roles defines the supported catalog; platform_role_change_requests and append-only platform_role_audit record independently reviewed changes. Every protected request reads current ACTIVE-account grants; expired/revoked assignments take effect across existing sessions and replicas. Database failures never restore environment privileges.
+
+The Platform access page at /admin/access uses Auth's /api/v1/auth/platform-access endpoints. Creating or reviewing a change requires fresh eligible TOTP under the existing MFA recovery policy. A different active Platform Admin approves the unchanged proposal within 15 minutes. The last eligible administrator per scope is protected. Normal profile/signup APIs cannot assign roles. Tokens, request data and organization ownership never confer staff membership.
+
+ADS_STAFF_ROLE_GRANTS, AUTH_STAFF_ROLE_GRANTS and BILLING_STAFF_ROLE_GRANTS are legacy import sources only, unused by the upgraded runtime. Remove them from their former services only after all services have completed PLAN-0156 cutover and membership has been verified. Keep BILLING_SETTLEMENT_OPERATOR_IDS, BILLING_REFUND_OPERATOR_IDS, worker identities and financial/MFA signing configuration: these remain separate authorities.
 
 | Action | Explicit grant required |
 | --- | --- |

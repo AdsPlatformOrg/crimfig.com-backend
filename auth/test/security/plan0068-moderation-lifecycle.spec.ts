@@ -1,3 +1,4 @@
+import { grantFixture } from './platform-grant-fixture';
 import {
   adsCampaigns,
   adsCreativeStacks,
@@ -38,7 +39,8 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
         return null;
       }),
     } as any;
-    staffGrants = new AdsStaffGrants(configService);
+    const authority=JSON.parse(configService.get<string>('ADS_STAFF_ROLE_GRANTS')!);
+    staffGrants = {rolesFor:jest.fn(async(id:string)=>authority[id]??[])} as any;
   });
 
   afterEach(() => {
@@ -87,7 +89,7 @@ describe('PLAN-0068 Moderation Lifecycle and Dual Review Invariants', () => {
     });
 
     it('rejects standard Review 2 if performed by the same reviewer as Review 1', async () => {
-      jest.spyOn(staffGrants,'rolesFor').mockImplementation(id => id === reviewer1Id ? ['ads_reviewer','ads_manager'] : []);
+      jest.spyOn(staffGrants,'rolesFor').mockImplementation(async id => id === reviewer1Id ? ['ads_reviewer','ads_manager'] : []);
       const c = {
         id: campaignId,
         advertiserId,

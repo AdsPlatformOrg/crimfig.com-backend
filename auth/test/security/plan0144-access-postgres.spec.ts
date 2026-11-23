@@ -28,9 +28,7 @@ run('PLAN0144 real PostgreSQL and HTTP report access', () => {
   let pool: Pool, app: any, origin: string, audit: ReportAuditService;
   const admin = randomUUID(), finance = randomUUID(), auditor = randomUUID(), reveal = randomUUID(), owner = randomUUID();
   const jwt = new JwtService({ secret: 'plan0144-disposable-access-secret' });
-  const grants = new AdsStaffGrants(new ConfigService({ ADS_STAFF_ROLE_GRANTS: JSON.stringify({
-    [admin]: ['ads_admin'], [finance]: ['ads_finance'], [auditor]: ['report_auditor'], [reveal]: ['ads_support','report_contact_reveal'],
-  }) }));
+  let grants: AdsStaffGrants;
   beforeAll(async () => {
     const url = new URL(process.env.PLAN0009_PG_URL!);
     if (url.hostname !== '127.0.0.1' || url.port !== '25451' || url.pathname !== '/plan0009_test' || url.username !== 'plan0009test') throw new Error('Refusing non-disposable database');
@@ -41,6 +39,9 @@ run('PLAN0144 real PostgreSQL and HTTP report access', () => {
     await pool.query("CREATE TABLE user_notifications(id uuid DEFAULT gen_random_uuid(),user_id uuid,app text,event_type text,severity text,title text,message text,action_url text,is_read boolean DEFAULT false,read_at timestamptz,is_archived boolean DEFAULT false,payload jsonb,created_at timestamptz DEFAULT now())");
     await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0051_report_access_audit.sql'), 'utf8'));
     for (const id of [admin,finance,auditor,reveal,owner]) await pool.query("INSERT INTO users VALUES($1,$2,'+2348012345678','ACTIVE')", [id, id === owner ? 'private-contact@example.test' : id + '@example.test']);
+    await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0054_platform_access.sql'), 'utf8'));
+    for(const [userId,roles]of Object.entries({[admin]:['ads_admin'],[finance]:['ads_finance'],[auditor]:['report_auditor'],[reveal]:['ads_support','report_contact_reveal']}))for(const role of roles)await pool.query("INSERT INTO platform_user_role_grants(user_id,role_key,scope,state,source) VALUES($1,$2,'ads','active','isolated-fixture')",[userId,role]);
+    grants=new AdsStaffGrants(drizzle(pool));
     database = drizzle(pool, { schema });
     audit = new ReportAuditService(database, grants);
     app = await NestFactory.create(LocalModule, { logger: false });

@@ -6,7 +6,7 @@ export type ReleaseService = 'ads' | 'billing' | 'auth';
 
 const tableNames: Record<ReleaseService, string[]> = {
   ads: [
-    'users', 'ads_campaigns', 'ads_creative_stacks', 'ads_creatives', 'ads_house_creatives',
+    'users', 'platform_roles', 'platform_user_role_grants', 'platform_role_change_requests', 'platform_role_audit', 'ads_campaigns', 'ads_creative_stacks', 'ads_creatives', 'ads_house_creatives',
     'ads_promoters', 'ads_promoter_websites', 'ads_placements', 'adstation_slots',
     'ads_serves', 'ads_interactions', 'ads_clicks', 'ads_opportunity_reservations',
     'ads_auction_decisions', 'ads_event_assessments', 'ads_evidence_records',
@@ -19,14 +19,14 @@ const tableNames: Record<ReleaseService, string[]> = {
     'platform_admin_silent_alerts', 'bonus_promo_impressions',
   ],
   billing: [
-    'users', 'billing_wallets', 'billing_transactions', 'billing_exchange_rates',
+    'users', 'platform_roles', 'platform_user_role_grants', 'billing_wallets', 'billing_transactions', 'billing_exchange_rates',
     'billing_subscriptions', 'billing_provider_events', 'billing_bank_accounts',
     'billing_withdrawal_requests', 'ads_campaigns', 'ads_campaign_escrows',
     'ads_opportunity_reservations', 'ads_settlement_claims', 'ads_settlement_batches',
     'ads_settlement_carries', 'ads_promoter_settlement_items',
   ],
   auth: [
-    'users', 'individual_profiles', 'organizations', 'organization_members',
+    'users', 'platform_roles', 'platform_user_role_grants', 'platform_role_change_requests', 'platform_role_audit', 'individual_profiles', 'organizations', 'organization_members',
     'apps', 'user_app_consents', 'mfa_devices', 'oauth_clients', 'refresh_tokens',
   ],
 };

@@ -44,7 +44,7 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Check auth staff privilege status and assigned roles for current authenticated session' })
-  getStaffStatus(@CurrentUser() user: JwtPayload) {
+  async getStaffStatus(@CurrentUser() user: JwtPayload) {
     const userId = user?.sub;
     if (!userId) {
       return {
@@ -56,7 +56,7 @@ export class AuthController {
         },
       };
     }
-    const roles = this.staffGrants.rolesFor(userId);
+    const roles = await this.staffGrants.rolesFor(userId);
     return {
       status: 'success',
       data: {

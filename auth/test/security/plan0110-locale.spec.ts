@@ -28,7 +28,9 @@ describe('PLAN0110 account locale contract',()=>{
       return;
     }
     const source=readFileSync(frontendLocalePath,'utf8');
-    const tags=[...source.matchAll(/\['([^']+)',/g)].map(match=>match[1]);
+    const registry=source.match(/export const locales\s*=\s*\[([\s\S]*?)\]\s*as const/);
+    expect(registry).not.toBeNull();
+    const tags=[...registry![1].matchAll(/\['([^']+)',/g)].map(match=>match[1]);
     expect(tags).toEqual([...SUPPORTED_LOCALES]);
   });
 });

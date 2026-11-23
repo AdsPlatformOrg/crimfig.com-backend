@@ -22,7 +22,7 @@ export class AuthStaffRoleGuard implements CanActivate {
     private readonly staffGrants: AuthStaffGrants,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const requiredRoles = this.reflector.getAllAndOverride<AuthStaffRole[]>(
       AUTH_ROLES_KEY,
       [context.getHandler(), context.getClass()],
@@ -38,7 +38,7 @@ export class AuthStaffRoleGuard implements CanActivate {
       throw new ForbiddenException('Platform Administrator authorization is required.');
     }
 
-    const assignedRoles = this.staffGrants.rolesFor(userId);
+    const assignedRoles = await this.staffGrants.rolesFor(userId);
     const hasRequiredRole = requiredRoles.some((role) => assignedRoles.includes(role));
     if (!hasRequiredRole) {
       throw new ForbiddenException(

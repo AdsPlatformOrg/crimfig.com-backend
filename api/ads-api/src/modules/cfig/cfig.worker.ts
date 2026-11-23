@@ -57,8 +57,8 @@ export class CfigWorker implements OnModuleInit, OnModuleDestroy {
       const actor = process.env.ADS_CFIG_FINALIZER_ACTOR_ID ?? "";
       if (
         !/^[0-9a-f-]{36}$/i.test(actor) ||
-        !this.grants
-          .rolesFor(actor)
+        !(await this.grants
+          .rolesFor(actor))
           .some((r) => r === "super_admin" || r === "ads_finance")
       )
         throw new Error("Configured financial finalizer identity required");

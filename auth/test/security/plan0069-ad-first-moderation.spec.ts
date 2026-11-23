@@ -1,3 +1,4 @@
+import { grantFixture } from './platform-grant-fixture';
 import {
   adsCampaigns,
   adsCreativeStacks,
@@ -37,7 +38,8 @@ describe('PLAN-0069 Ad-First Moderation & Serving Gating Invariants', () => {
         return null;
       }),
     } as any;
-    staffGrants = new AdsStaffGrants(configService);
+    const authority=JSON.parse(configService.get<string>('ADS_STAFF_ROLE_GRANTS')!);
+    staffGrants = {rolesFor:jest.fn(async(id:string)=>authority[id]??[])} as any;
   });
 
   afterEach(() => {

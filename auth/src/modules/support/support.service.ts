@@ -13,13 +13,14 @@ const ticketColumns = sql`id,ticket_number,category,subject,status,priority,assi
 @Injectable()
 export class SupportService {
  constructor(@Inject(DATABASE_TOKEN) private readonly db: NodePgDatabase<typeof schema>, private readonly grants: AuthStaffGrants, private readonly email: EmailService) {}
- requireStaff(userId: string) {
-  if (!this.grants.rolesFor(userId).some(role => role === 'super_admin' || role === 'support_agent')) throw new ForbiddenException('Platform Support authorization required');
+ async requireStaff(userId: string, conn:any=this.db) {
+  if (!(await this.grants.rolesFor(userId,conn)).some(role => role === 'super_admin' || role === 'support_agent')) throw new ForbiddenException('Platform Support authorization required');
  }
  private async transaction<T>(run: (tx: any) => Promise<T>): Promise<T> {
   return this.db.transaction(async tx => { await tx.execute(sql`SET LOCAL lock_timeout = '3s'`); await tx.execute(sql`SET LOCAL statement_timeout = '8s'`); return run(tx); });
  }
  private async lock(tx: any, id: string, userId: string, staff: boolean) {
+  if(staff) await this.requireStaff(userId,tx);
   const result = await tx.execute(sql`SELECT id,user_id,status FROM support_tickets WHERE id=${id}::uuid AND (${staff} OR user_id=${userId}::uuid) FOR UPDATE`);
   if (!result.rows[0]) throw new NotFoundException('Request not found'); return result.rows[0];
  }
@@ -42,7 +43,7 @@ export class SupportService {
   });
  }
  async list(userId: string, query: SupportQueryDto, staff=false) {
-  if(staff) this.requireStaff(userId);
+  if(staff) await this.requireStaff(userId);
   const offset=Number(query.offset||0);if(!Number.isSafeInteger(offset)||offset<0||offset>100000) throw new BadRequestException('Invalid offset');
   return (await this.db.execute<any>(sql`SELECT ${ticketColumns} FROM support_tickets WHERE (${staff} OR user_id=${userId}::uuid)
    AND (${query.status??null}::text IS NULL OR status::text=${query.status??null})
@@ -55,7 +56,7 @@ export class SupportService {
    ORDER BY updated_at DESC,id LIMIT 50 OFFSET ${offset}`)).rows;
  }
  async detail(userId: string,id: string,staff=false): Promise<Record<string, any>> {
-  if(staff) this.requireStaff(userId);
+  if(staff) await this.requireStaff(userId);
   const ticket=(await this.db.execute<any>(sql`SELECT ${ticketColumns} FROM support_tickets WHERE id=${id}::uuid AND (${staff} OR user_id=${userId}::uuid)`)).rows[0];
   if(!ticket) throw new NotFoundException('Request not found');
   const messages=(await this.db.execute<any>(sql`SELECT id,body,is_staff_reply,is_internal_note,created_at FROM support_messages WHERE ticket_id=${id}::uuid AND (${staff} OR is_internal_note=false) ORDER BY created_at,id`)).rows;
@@ -63,7 +64,7 @@ export class SupportService {
   return {...ticket,messages,...(staff?{audit}:{})};
  }
  async reply(userId: string,id: string,dto: ReplySupportDto,staff=false,internal=false) {
-  if(staff) this.requireStaff(userId); else if(internal) throw new ForbiddenException();
+  if(staff) await this.requireStaff(userId); else if(internal) throw new ForbiddenException();
   if(!dto.body.trim()) throw new BadRequestException('Enter a message');
   return this.transaction(async tx=>{
    const ticket=await this.lock(tx,id,userId,staff); const fingerprint=hash([dto.body,internal]);
@@ -81,9 +82,9 @@ export class SupportService {
   });
  }
  async update(userId:string,id:string,dto:UpdateSupportDto) {
-  this.requireStaff(userId);
+  await this.requireStaff(userId);
   if(dto.unassign && dto.assignedTo) throw new BadRequestException('Choose an assignee or unassign');
-  if(dto.assignedTo) this.requireStaff(dto.assignedTo);
+  if(dto.assignedTo) await this.requireStaff(dto.assignedTo);
   return this.transaction(async tx=>{
    const ticket=await this.lock(tx,id,userId,true);if(dto.status) checkSupportTransition(ticket.status,dto.status);
    await tx.execute(sql`UPDATE support_tickets SET status=coalesce(${dto.status??null}::support_ticket_status,status),priority=coalesce(${dto.priority??null}::support_ticket_priority,priority),

@@ -1,4 +1,5 @@
 import { SupportModule } from './modules/support/support.module';
+import { PlatformAccessModule } from './modules/platform-access/platform-access.module';
 import { Module } from '@nestjs/common';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './modules/auth/auth.module';
@@ -23,6 +24,7 @@ import { FinancialAuthorizationModule } from './modules/financial-authorization/
 
     // ─── Core Modules ─────────────────────────────────────────────────────
     SupportModule,
+    PlatformAccessModule,
     DatabaseModule,     // Drizzle ORM + PostgreSQL connection (global)
     EmailModule,        // Brevo transactional email (global)
     HealthModule,       // /api/health endpoint

@@ -1,3 +1,4 @@
+import { grantFixture } from './platform-grant-fixture';
 import { VerificationService } from '../../../api/ads-api/src/modules/verification/verification.service';
 import { AdsOperationsController } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.controller';
 import { AdsOperationsService } from '../../../api/ads-api/src/modules/ads-operations/ads-operations.service';
@@ -39,18 +40,18 @@ const adstation = { updateWebsiteAdstationStatus: jest.fn(async () => ({ status:
 const promoters = { getOrCreatePromoter: jest.fn(async (userId: string) => ({ id: `promoter-${userId}` })) };
 const verification = { retestWebsite: jest.fn(async () => ({ isVerified: true, status: 'verified', errorMessage: null, website: { verificationToken: 'internal' } })) };
 let status = 'ACTIVE';
-const database = { query: { users: { findFirst: jest.fn(async () => ({ id, email: 'current@example.test', status })) } } };
+const database = { ...grantFixture({}), query: { users: { findFirst: jest.fn(async () => ({ id, email: 'current@example.test', status })) } } };
 
-describe('Ads staff grant configuration', () => {
-  it('defaults to no permissions and validates every account and role', () => {
-    expect(new AdsStaffGrants({ get: () => undefined } as any).rolesFor(id)).toEqual([]);
-    for (const raw of ['[]', 'null', '{', '{"demo":["ads_admin"]}', JSON.stringify({ [id]: ['admin'] }), JSON.stringify({ [id]: 'ads_admin' })]) {
-      expect(() => new AdsStaffGrants(config(raw))).toThrow();
-    }
-    expect(new AdsStaffGrants(config(JSON.stringify({ [id.toUpperCase()]: ['ads_reviewer', 'ads_reviewer'] }))).rolesFor(id)).toEqual(['ads_reviewer']);
+describe('Ads database staff grants', () => {
+  it('uses only current database grants and propagates authority failures', async () => {
+    const db=grantFixture({[id]:['ads_reviewer']});
+    const grants=new AdsStaffGrants(db);
+    await expect(grants.rolesFor(id)).resolves.toEqual(['ads_reviewer']);
+    await expect(grants.rolesFor('invalid')).resolves.toEqual([]);
+    db.execute.mockRejectedValueOnce(new Error('database unavailable'));
+    await expect(grants.rolesFor(id)).rejects.toMatchObject({status:503});
   });
 });
-
 describe('Ads production guards and controllers over HTTP', () => {
   let app: INestApplication, base: string, grants: AdsStaffGrants;
   const jwt = new JwtService({ secret });
@@ -108,7 +109,7 @@ describe('Ads production guards and controllers over HTTP', () => {
     });
     expect((await request()).status).toBe(403);
     expect(verification.retestWebsite).not.toHaveBeenCalled();
-    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_admin']);
+    jest.spyOn(grants, 'rolesFor').mockResolvedValue(['ads_admin']);
     const response = await request();
     expect(response.status).toBe(201);
     expect(verification.retestWebsite).toHaveBeenCalledWith(id, 'html_meta', id);
@@ -119,7 +120,7 @@ describe('Ads production guards and controllers over HTTP', () => {
     const body = JSON.stringify({ campaignId: id, requestId: id, periodEnd: '2026-01-01T00:00:00.000Z' });
     expect((await fetch(`${base}/api/v1/ads/billing/settlements/funded`, { method: 'POST', headers: headers(), body })).status).toBe(403);
     expect(settlement.settleFundedCampaign).not.toHaveBeenCalled();
-    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_finance']);
+    jest.spyOn(grants, 'rolesFor').mockResolvedValue(['ads_finance']);
     expect((await fetch(`${base}/api/v1/ads/billing/settlements/funded`, { method: 'POST', headers: headers(), body })).status).toBe(201);
     expect(settlement.settleFundedCampaign).toHaveBeenCalledWith(id, id, '2026-01-01T00:00:00.000Z');
   });
@@ -140,7 +141,7 @@ describe('Ads production guards and controllers over HTTP', () => {
     ['super_admin', `campaigns/${id}/primary-review`, 201], ['ads_support', `promoters/${id}/suspend`, 403],
     ['ads_admin', `promoters/${id}/suspend`, 201],
   ])('enforces %s on %s', async (role, route, expected) => {
-    jest.spyOn(grants, 'rolesFor').mockReturnValue([role as any]);
+    jest.spyOn(grants, 'rolesFor').mockResolvedValue([role as any]);
     const res = await fetch(`${base}/api/v1/admin/ads/moderation/${route}`, { method: 'POST', headers: headers(), body: '{}' });
     expect(res.status).toBe(expected);
   });
@@ -153,17 +154,17 @@ describe('Ads production guards and controllers over HTTP', () => {
       ['ads_finance', 403, 403],
       ['super_admin', 200, 200],
     ] as const) {
-      jest.spyOn(grants, 'rolesFor').mockReturnValue([role as any]);
+      jest.spyOn(grants, 'rolesFor').mockResolvedValue([role as any]);
       expect((await fetch(`${base}/api/v1/admin/ads/moderation/campaigns/${id}/submission`, { headers: headers() })).status).toBe(subStatus);
       expect((await fetch(`${base}/api/v1/admin/ads/moderation/campaigns/${id}/change-audit`, { headers: headers() })).status).toBe(auditStatus);
     }
   });
 
   it('keeps support read-only and finance isolated from moderation', async () => {
-    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_support']);
+    jest.spyOn(grants, 'rolesFor').mockResolvedValue(['ads_support']);
     expect((await fetch(`${base}/api/v1/admin/ads/moderation/queue`, { headers: headers() })).status).toBe(200);
     expect((await fetch(`${base}/api/v1/ads/billing/settlements`, { headers: headers() })).status).toBe(403);
-    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_finance']);
+    jest.spyOn(grants, 'rolesFor').mockResolvedValue(['ads_finance']);
     expect((await fetch(`${base}/api/v1/ads/billing/settlements`, { headers: headers() })).status).toBe(200);
   });
 
@@ -178,10 +179,10 @@ describe('Ads production guards and controllers over HTTP', () => {
     const preview = `${base}/api/v1/uploads/review-media/file`;
     expect((await fetch(preview)).status).toBe(401);
     expect((await fetch(preview, { headers: headers() })).status).toBe(403);
-    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_finance']);
+    jest.spyOn(grants, 'rolesFor').mockResolvedValue(['ads_finance']);
     expect((await fetch(preview, { headers: headers() })).status).toBe(403);
     expect(uploads.getMediaStream).not.toHaveBeenCalled();
-    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_reviewer']);
+    jest.spyOn(grants, 'rolesFor').mockResolvedValue(['ads_reviewer']);
     const res = await fetch(preview, { headers: headers() });
     expect(res.status).toBe(200); expect(res.headers.get('cache-control')).toBe('no-store');
     expect(await res.text()).toBe('preview');
@@ -208,10 +209,10 @@ describe('Ads production guards and controllers over HTTP', () => {
     expect((await fetch(`${base}/api/v1/adstation/admin/websites/site-1/reinstate`, { method: 'POST', headers: headers() })).status).toBe(403);
     expect(adstation.updateWebsiteAdstationStatus).not.toHaveBeenCalled();
 
-    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_reviewer']);
+    jest.spyOn(grants, 'rolesFor').mockResolvedValue(['ads_reviewer']);
     expect((await fetch(`${base}/api/v1/adstation/admin/websites/site-1/suspend`, { method: 'POST', headers: headers(), body: JSON.stringify({ reason: 'fraud' }) })).status).toBe(403);
 
-    jest.spyOn(grants, 'rolesFor').mockReturnValue(['ads_admin']);
+    jest.spyOn(grants, 'rolesFor').mockResolvedValue(['ads_admin']);
     expect((await fetch(`${base}/api/v1/adstation/admin/websites/site-1/suspend`, { method: 'POST', headers: headers(), body: JSON.stringify({ reason: 'fraud' }) })).status).toBe(201);
     expect(adstation.updateWebsiteAdstationStatus).toHaveBeenCalledWith('site-1', true, 'fraud', id);
 

@@ -32,7 +32,8 @@ export class AdsAccessGuard extends AccessTokenGuard {
     }
     request.user = { sub: user.id, email: user.email, type: 'access' };
     const required = this.reflector.getAllAndOverride<AdsStaffRole[]>(ADS_ROLES_KEY, [context.getHandler(), context.getClass()]);
-    if (required?.length && !required.some(role => this.staff.rolesFor(user.id).includes(role))) {
+    request.platformRoles = required?.length ? await this.staff.rolesFor(user.id) : [];
+    if (required?.length && !required.some(role => request.platformRoles.includes(role))) {
       throw new ForbiddenException('This action requires an assigned Ads staff role');
     }
     } catch (error) {

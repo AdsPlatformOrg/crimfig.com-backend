@@ -14,7 +14,7 @@ function fixture() {
     try { table = getTableConfig(value as any); } catch { continue; }
     for (const column of table.columns) {
       const type = column.getSQLType().replace(/\(\d+(?:,\s*\d+)?\)/g, '').replace(/"/g, '');
-      columns.push({ table_name: table.name, column_name: column.name, udt_name: types[type] ?? type });
+      columns.push({ table_name: table.name, column_name: column.name, udt_name: type.endsWith('[]') ? '_' + (types[type.slice(0,-2)] ?? type.slice(0,-2)) : types[type] ?? type });
       const definition = (column as any).enum;
       if (definition) for (const value of definition.enumValues) enums.push({ name: definition.enumName, value });
     }

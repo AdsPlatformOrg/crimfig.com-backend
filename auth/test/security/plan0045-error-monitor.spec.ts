@@ -1,3 +1,4 @@
+import { grantFixture } from './platform-grant-fixture';
 process.env.DB_HOST = process.env.DB_HOST || '127.0.0.1';
 process.env.DB_NAME = process.env.DB_NAME || 'crimfig_test';
 process.env.DB_USER = process.env.DB_USER || 'postgres';
@@ -401,7 +402,7 @@ describe('PLAN-0045: Platform Error Monitor in Auth & Email Notifications', () =
         }),
       }) as any;
 
-    it('allows only super_admin and denies support_agent, auth_admin, regular users, and anonymous requests with 403', () => {
+    it('allows only super_admin and denies support_agent, auth_admin, regular users, and anonymous requests with 403', async () => {
       const prevGrants = process.env.AUTH_STAFF_ROLE_GRANTS;
       process.env.AUTH_STAFF_ROLE_GRANTS = JSON.stringify({
         [SUPER_ADMIN_ID]: ['super_admin'],
@@ -410,15 +411,15 @@ describe('PLAN-0045: Platform Error Monitor in Auth & Email Notifications', () =
       });
 
       try {
-        const grants = new AuthStaffGrants();
+        const grants = new AuthStaffGrants(grantFixture(JSON.parse(process.env.AUTH_STAFF_ROLE_GRANTS!)));
         const reflector = new Reflector();
         const guard = new AuthStaffRoleGuard(reflector, grants);
 
-        expect(guard.canActivate(makeContext(SUPER_ADMIN_ID))).toBe(true);
-        expect(() => guard.canActivate(makeContext(SUPPORT_AGENT_ID))).toThrow(ForbiddenException);
-        expect(() => guard.canActivate(makeContext(AUTH_ADMIN_ID))).toThrow(ForbiddenException);
-        expect(() => guard.canActivate(makeContext(REGULAR_USER_ID))).toThrow(ForbiddenException);
-        expect(() => guard.canActivate(makeContext(undefined))).toThrow(ForbiddenException);
+        await expect(guard.canActivate(makeContext(SUPER_ADMIN_ID))).resolves.toBe(true);
+        await expect(guard.canActivate(makeContext(SUPPORT_AGENT_ID))).rejects.toBeInstanceOf(ForbiddenException);
+        await expect(guard.canActivate(makeContext(AUTH_ADMIN_ID))).rejects.toBeInstanceOf(ForbiddenException);
+        await expect(guard.canActivate(makeContext(REGULAR_USER_ID))).rejects.toBeInstanceOf(ForbiddenException);
+        await expect(guard.canActivate(makeContext(undefined))).rejects.toBeInstanceOf(ForbiddenException);
       } finally {
         process.env.AUTH_STAFF_ROLE_GRANTS = prevGrants;
       }
