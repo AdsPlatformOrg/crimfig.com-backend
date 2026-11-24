@@ -41,6 +41,7 @@ import {
   adstationSlots,
   adsEmbedRunAudits,
   adsServes,
+  adsServeRatings,
   adsMediaAssets,
   adsCreativeStacks,
   adsAuctionDecisions,
@@ -732,12 +733,12 @@ export class DeliveryService {
           });
           statusEl.textContent = 'Thanks for rating this advert.';
           closeBtn.textContent = 'Close';
-          sendBeaconPost(rateBase + '/api/v1/delivery/rating', withClaims(servedAd, {
+          sendBeaconPost(rateBase + '/api/v1/delivery/rating', {
             eventId: eventIdentity(),
             occurredAt: new Date().toISOString(),
             impToken: servedAd.impToken,
             rating: opt.id
-          }));
+          });
         });
         optionButtons.push({ id: opt.id, el: btn });
         choicesRow.appendChild(btn);
@@ -2683,87 +2684,37 @@ export class DeliveryService {
     rating: 'love' | 'like' | 'dislike';
     eventId?: string;
     occurredAt?: string;
-    clientIp?: string;
-    claims?: {
-      pageViewId?: string;
-      slotInstanceId?: string;
-      opportunityId?: string;
-      sdkInitId?: string;
-      instanceIndex?: number;
-      instancesDetected?: number;
-    };
-    userAgent?: string;
-    referrer?: string;
   }) {
     if (!['love', 'like', 'dislike'].includes(params.rating)) {
       throw new BadRequestException('Unsupported advert rating');
     }
-    if (!params.impToken || typeof params.impToken !== 'string') {
-      return null;
-    }
-    const payload =
-      this.tokenService.verifyToken(params.impToken, params.clientIp) ||
-      this.tokenService.verifyToken(params.impToken, params.clientIp, { allowIpMismatch: true });
-    if (!payload) {
-      return null;
-    }
-    const isHouseOrShadowServe = payload.campaignId === HOUSE_CAMPAIGN_UUID;
-    if (!(await this.boundServe(payload, isHouseOrShadowServe))) {
-      return null;
-    }
-
-    return this.db.transaction(async (tx) => {
-      await tx.execute(sql`set local lock_timeout='5s'`);
-      await tx.execute(sql`set local statement_timeout='8s'`);
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-rating:${payload.servedId}`}, 0))`);
-
-      const [serveRecord] = await tx
-        .select({
-          id: adsServes.id,
-          contentSnapshot: adsServes.contentSnapshot,
-        })
-        .from(adsServes)
-        .where(eq(adsServes.id, payload.servedId))
-        .limit(1);
-      if (!serveRecord) {
-        return null;
-      }
-
-      const observations = await tx
-        .select({
-          pageViewId: sql<string>`max(${adsInteractions.pageViewId}::text)`,
-          slotInstanceId: sql<string>`max(${adsInteractions.slotInstanceId}::text)`,
-          opportunityId: sql<string>`max(${adsInteractions.opportunityId}::text)`,
-          sdkInitId: sql<string>`max(${adsInteractions.sdkInitId}::text)`,
-        })
-        .from(adsInteractions)
-        .where(eq(adsInteractions.serveId, payload.servedId));
-      for (const prior of observations) {
-        assertInstanceBinding(prior, params.claims ?? {});
-      }
-
-      const existingSnapshot =
-        serveRecord.contentSnapshot && typeof serveRecord.contentSnapshot === 'object'
-          ? (serveRecord.contentSnapshot as Record<string, unknown>)
-          : {};
-      const nextRating = {
-        rating: params.rating,
-        eventId: params.eventId ?? crypto.randomUUID(),
-        occurredAt: params.occurredAt ?? null,
-        updatedAt: new Date().toISOString(),
-      };
-      await tx
-        .update(adsServes)
-        .set({
-          contentSnapshot: {
-            ...existingSnapshot,
-            visitorRating: nextRating,
-          },
-        })
-        .where(eq(adsServes.id, payload.servedId));
-
-      return nextRating;
+    // Ratings use the signed serve identity without paid interaction restrictions.
+    const payload = this.tokenService.verifyToken(params.impToken, undefined, {
+      allowIpMismatch: true,
+      allowExpired: true,
     });
+    if (!payload) throw new BadRequestException('Invalid advert rating token');
+    const [serve] = await this.db.select({ id: adsServes.id }).from(adsServes)
+      .where(eq(adsServes.id, payload.servedId)).limit(1);
+    if (!serve) {
+      throw new NotFoundException('Advert serve not found');
+    }
+
+    const values = {
+      rating: params.rating,
+      eventId: params.eventId ?? crypto.randomUUID(),
+      occurredAt: params.occurredAt ? new Date(params.occurredAt) : null,
+      updatedAt: new Date(),
+    };
+    const [saved] = await this.db.insert(adsServeRatings)
+      .values({ serveId: serve.id, ...values })
+      .onConflictDoUpdate({
+        target: adsServeRatings.serveId,
+        set: values,
+        setWhere: sql`${adsServeRatings.eventId} <> ${values.eventId}::uuid`,
+      })
+      .returning();
+    return saved;
   }
 
   async logInteraction(params: {

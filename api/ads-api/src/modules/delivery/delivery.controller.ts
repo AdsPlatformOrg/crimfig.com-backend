@@ -5,7 +5,7 @@ import { resolveClientIp, resolveClaimedIp } from './client-ip';
 import { Public } from '@crimfig/shared';
 import { APPROVED_IMAGE_PRESET_IDS } from '../uploads/image-ad-presets';
 import type { Response, Request } from 'express';
-import { IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, IsUUID, IsISO8601 } from 'class-validator';
+import { Allow, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, IsUUID, IsISO8601 } from 'class-validator';
 
 function pickClaims(dto: any) {
   return {
@@ -94,12 +94,13 @@ export class RateAdvertDto {
   impToken: string;
   @IsIn(['love', 'like', 'dislike'])
   rating: 'love' | 'like' | 'dislike';
-  @IsOptional() @IsUUID() pageViewId?: string;
-  @IsOptional() @IsUUID() slotInstanceId?: string;
-  @IsOptional() @IsUUID() opportunityId?: string;
-  @IsOptional() @IsUUID() sdkInitializationId?: string;
-  @IsOptional() @IsInt() @Min(0) @Max(1000) instanceIndex?: number;
-  @IsOptional() @IsInt() @Min(0) @Max(1000) instancesDetected?: number;
+  // Cached SDK versions may still include instance claims. Ratings ignore them.
+  @Allow() pageViewId?: unknown;
+  @Allow() slotInstanceId?: unknown;
+  @Allow() opportunityId?: unknown;
+  @Allow() sdkInitializationId?: unknown;
+  @Allow() instanceIndex?: unknown;
+  @Allow() instancesDetected?: unknown;
 }
 
 @ApiTags('Ad Delivery & Embed')
@@ -197,20 +198,12 @@ export class DeliveryController {
   @Post('rating')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Record non-billable visitor sentiment rating (love, like, dislike) for a served advert' })
-  async rateAdvert(@Body() dto: RateAdvertDto, @Req() req: Request) {
-    const clientIp = extractClientIp(req);
-    const userAgent = req.headers['user-agent'];
-    const referrer = req.headers['referer'];
-
+  async rateAdvert(@Body() dto: RateAdvertDto) {
     await this.deliveryService.recordAdvertRating({
       impToken: dto.impToken,
       rating: dto.rating,
       eventId: dto.eventId,
       occurredAt: dto.occurredAt,
-      clientIp,
-      claims: pickClaims(dto),
-      userAgent,
-      referrer,
     });
   }
 

@@ -379,6 +379,13 @@
       "when": 1795392000001,
       "tag": "0054_platform_access",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1795478400000,
+      "tag": "0055_ads_serve_ratings",
+      "breakpoints": true
     }
   ]
 }

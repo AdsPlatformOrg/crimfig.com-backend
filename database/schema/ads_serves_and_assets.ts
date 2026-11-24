@@ -254,3 +254,23 @@ export const adsModerationDecisions = pgTable(
 export type AdsModerationDecision = typeof adsModerationDecisions.$inferSelect;
 export type NewAdsModerationDecision =
   typeof adsModerationDecisions.$inferInsert;
+
+export const adsServeRatings = pgTable("ads_serve_ratings", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  serveId: uuid("serve_id")
+    .notNull()
+    .unique()
+    .references(() => adsServes.id, { onDelete: "cascade" }),
+  rating: varchar("rating", { length: 16 }).notNull(),
+  eventId: uuid("event_id").notNull(),
+  occurredAt: timestamp("occurred_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type AdsServeRating = typeof adsServeRatings.$inferSelect;
+export type NewAdsServeRating = typeof adsServeRatings.$inferInsert;

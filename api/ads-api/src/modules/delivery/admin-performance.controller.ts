@@ -97,6 +97,50 @@ export function performanceRates(row: any) {
 export class AdminPerformanceController {
   constructor(@Inject(DATABASE_TOKEN) private readonly db: any) {}
 
+  @Get("feedback")
+  @ApiOperation({ summary: "Summarize visitor ratings by advert" })
+  async feedback(@Query() query: Record<string, string>) {
+    const { from, to, limit, page } = performanceWindow({ range: "30d", ...query });
+    const cohort = sql`
+      FROM ads_serve_ratings r
+      JOIN ads_serves s ON s.id = r.serve_id
+      WHERE r.updated_at >= ${from}::timestamptz AND r.updated_at < ${to}::timestamptz
+        AND coalesce(s.house_creative_id, s.creative_id) IS NOT NULL
+    `;
+    if (query.creativeId) {
+      const recent = await this.db.execute(sql`
+        SELECT r.id, r.rating, r.updated_at AS "receivedAt"
+        ${cohort}
+        AND coalesce(s.house_creative_id, s.creative_id) = ${query.creativeId}::uuid
+        ORDER BY r.updated_at DESC, r.id DESC LIMIT ${limit} OFFSET ${(page - 1) * limit}
+      `);
+      return { status: "success", data: recent.rows };
+    }
+    const result = await this.db.execute(sql`
+      WITH totals AS (
+        SELECT coalesce(s.house_creative_id, s.creative_id) AS id,
+          (s.house_creative_id IS NOT NULL) AS house,
+          CASE WHEN s.house_creative_id IS NULL THEN s.campaign_id END AS "campaignId",
+          count(*)::int AS total,
+          count(*) FILTER (WHERE r.rating = 'love')::int AS love,
+          count(*) FILTER (WHERE r.rating = 'like')::int AS "like",
+          count(*) FILTER (WHERE r.rating = 'dislike')::int AS dislike,
+          max(r.updated_at) AS "lastRatingAt"
+        ${cohort}
+        GROUP BY 1, 2, 3
+      )
+      SELECT t.*, coalesce(nullif(h.title, ''), nullif(c.headline, '')) AS title,
+        campaign.title AS "campaignTitle"
+      FROM totals t
+      LEFT JOIN ads_house_creatives h ON t.house AND h.id = t.id
+      LEFT JOIN ads_creatives c ON NOT t.house AND c.id = t.id
+      LEFT JOIN ads_campaigns campaign ON campaign.id = t."campaignId"
+      ORDER BY t."lastRatingAt" DESC, t.id
+      LIMIT ${limit} OFFSET ${(page - 1) * limit}
+    `);
+    return { status: "success", data: result.rows };
+  }
+
   @Get("readiness/operations")
   async readinessOperations() {
     return this.db.transaction(async (tx: any) => {
