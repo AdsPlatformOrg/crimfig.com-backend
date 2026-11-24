@@ -127,10 +127,10 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     }
     await pool.query('alter table ads_campaigns drop column report_pseudonym');
     await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0049_campaign_report_pseudonyms.sql'), 'utf8'));
+    await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0055_ads_serve_ratings.sql'), 'utf8'));
     const clients = await Promise.all([pool.connect(),pool.connect(),pool.connect()]);
     try { const ids = await Promise.all(clients.map(client=>client.query('select pg_backend_pid() id'))); expect(new Set(ids.map(result=>result.rows[0].id)).size).toBe(3); } finally { clients.forEach(client=>client.release()); }
   }, 30000);
-    await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0055_ads_serve_ratings.sql'), 'utf8'));
   beforeEach(async () => {
     await pool.query('truncate ads_settlement_batches,billing_provider_events,billing_saved_cards,billing_transactions,billing_wallets,billing_exchange_rates,refresh_tokens,ads_campaign_escrows,ads_campaigns,users,apps cascade');
     owner=randomUUID();rateId=randomUUID();
