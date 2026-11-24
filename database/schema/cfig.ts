@@ -144,3 +144,15 @@ export const cfigAllocations = pgTable("cfig_allocations", {
     .notNull()
     .defaultNow(),
 });
+
+/** Dedicated USD backing reserve pool for $cfig conversions and manual owner seed commitments (PLAN-0168). */
+export const cfigConversionReserve = pgTable("cfig_conversion_reserve", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  currency: text("currency").notNull().default("USD").unique(),
+  availableCents: bigint("available_cents", { mode: "number" }).notNull().default(0),
+  reservedCents: bigint("reserved_cents", { mode: "number" }).notNull().default(0),
+  spentCents: bigint("spent_cents", { mode: "number" }).notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
