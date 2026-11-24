@@ -130,6 +130,7 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
     const clients = await Promise.all([pool.connect(),pool.connect(),pool.connect()]);
     try { const ids = await Promise.all(clients.map(client=>client.query('select pg_backend_pid() id'))); expect(new Set(ids.map(result=>result.rows[0].id)).size).toBe(3); } finally { clients.forEach(client=>client.release()); }
   }, 30000);
+    await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0055_ads_serve_ratings.sql'), 'utf8'));
   beforeEach(async () => {
     await pool.query('truncate ads_settlement_batches,billing_provider_events,billing_saved_cards,billing_transactions,billing_wallets,billing_exchange_rates,refresh_tokens,ads_campaign_escrows,ads_campaigns,users,apps cascade');
     owner=randomUUID();rateId=randomUUID();
@@ -1095,6 +1096,26 @@ run('PLAN-0009 real PostgreSQL funding, session and escrow boundaries', () => {
   test('PLAN0104 expired click opportunities release only when no timely payable event is pending', async () => {
     const fixture = await settlementFixture();
     const timely = await fixture.add();
+  test('ad feedback saves a signed serve rating and summarizes it without financial writes', async () => {
+    const fixture = await settlementFixture(undefined, 'cpc', false);
+    const { serve } = await fixture.add();
+    const verification = { verifyToken: jest.fn(() => ({ servedId: serve.id })) };
+    const delivery = new DeliveryService(db, verification as any, {} as any, {} as any);
+    const eventId = randomUUID();
+    await delivery.recordAdvertRating({ impToken: 'fixture', eventId, rating: 'love' });
+    await delivery.recordAdvertRating({ impToken: 'fixture', eventId, rating: 'love' });
+    await delivery.recordAdvertRating({ impToken: 'fixture', eventId: randomUUID(), rating: 'like' });
+    const report = new AdminPerformanceController(db);
+    const query = { to: new Date(Date.now() + 1000).toISOString() };
+    await expect(report.feedback({ ...query, creativeId: 'invalid' })).rejects.toThrow('Invalid creativeId');
+    await expect(report.feedback(query)).resolves.toMatchObject({ data: [
+      { id: fixture.creative.id, title: 'Reviewed', total: 1, love: 0, like: 1, dislike: 0 },
+    ] });
+    await expect(report.feedback({ ...query, creativeId: fixture.creative.id }))
+      .resolves.toMatchObject({ data: [{ rating: 'like' }] });
+    expect((await pool.query('select id from billing_transactions')).rows).toEqual([]);
+  });
+
     const late = await fixture.add();
     const now = Date.now();
     const eventDeadline = new Date(now - 60000);

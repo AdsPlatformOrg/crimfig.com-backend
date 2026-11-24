@@ -166,6 +166,7 @@ try {
     ...(process.argv.includes('--plan0099') ? ['--testNamePattern','PLAN0099 Trash|PLAN0092 Billing HTTP'] : []),
     ...(process.argv.includes('--plan0096') ? ['--testNamePattern','PLAN0096 matched|PLAN0092 Billing HTTP','--json','--outputFile=../docs/reviews/plan-0096/backend-integration-results.json'] : []),
     ...(process.argv.includes('--plan0097') ? ['--testNamePattern','PLAN0097 missing gateway|verified funding callback and webhook credit once','--json','--outputFile=../docs/reviews/plan-0097/backend-integration-results.json'] : []),
+    ...(process.argv.includes('--ad-feedback') ? ['--testNamePattern', 'ad feedback saves a signed serve rating'] : []),
     ...(process.argv.includes('--plan0150') ? ['--testNamePattern', [
       'PLAN0150', 'verified funding callback and webhook credit once', 'duplicate transfer callbacks',
       'transfer callback acknowledgement failure', 'funded settlement races', '72-hour clearance',

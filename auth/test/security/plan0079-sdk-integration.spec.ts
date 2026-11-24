@@ -1,4 +1,6 @@
 import { DeliveryService } from '../../../api/ads-api/src/modules/delivery/delivery.service';
+import { RateAdvertDto } from '../../../api/ads-api/src/modules/delivery/delivery.controller';
+import { validate } from 'class-validator';
 const {JSDOM}=require('jsdom');
 const tick=async()=>{await new Promise(done=>setImmediate(done));await new Promise(done=>setImmediate(done));};
 
@@ -105,92 +107,42 @@ test('PLAN0133 generated SDK measures parent width, waits for visibility and nev
   }
 });
 
-test('PLAN0134 negative & positive: DeliveryService.recordAdvertRating enforces valid rating, bound token, and slot binding with zero financial writes', async () => {
-  const tokenService = {
-    verifyToken: jest.fn(),
-  };
-  let updateSetArg: any = null;
-  let storedSnapshot: Record<string, unknown> = { headline: 'Ad', adType: 'image' };
-  const priorObservations = [
-    { pageViewId: '00000000-0000-4000-8000-000000000011', slotInstanceId: '00000000-0000-4000-8000-000000000022', opportunityId: '00000000-0000-4000-8000-000000000033', sdkInitId: '00000000-0000-4000-8000-000000000044' },
-  ];
-  const serveFound = true;
-  const tx = {
-    execute: jest.fn(async () => ({})),
-    select: jest.fn((projection?: any) => ({
-      from: jest.fn(() => ({
-        where: jest.fn(() => {
-          if (projection && 'pageViewId' in projection) {
-            return Promise.resolve(priorObservations);
-          }
-          return {
-            limit: jest.fn(async () => (serveFound ? [{ id: 'serve-1', contentSnapshot: storedSnapshot }] : [])),
-          };
-        }),
-      })),
-    })),
-    update: jest.fn(() => ({
-      set: jest.fn((val: any) => {
-        updateSetArg = val;
-        if (val?.contentSnapshot) storedSnapshot = val.contentSnapshot;
-        return { where: jest.fn(async () => []) };
-      }),
-    })),
-  };
+test('PLAN0134 legacy SDK metadata does not invalidate a rating', async () => {
+  const dto = Object.assign(new RateAdvertDto(), {
+    impToken: 'signed-serve-fixture', rating: 'like', pageViewId: 'legacy',
+    slotInstanceId: 'legacy', instanceIndex: 1500,
+  });
+  await expect(validate(dto, { whitelist: true, forbidNonWhitelisted: true })).resolves.toEqual([]);
+});
+
+test('PLAN0134 ratings require a signed serve and write only to the rating table', async () => {
+  const tokenService = { verifyToken: jest.fn() };
+  const returning = jest.fn();
+  const onConflictDoUpdate = jest.fn(() => ({ returning }));
+  const values = jest.fn(() => ({ onConflictDoUpdate }));
+  const lookup = jest.fn().mockResolvedValue([]);
   const db = {
-    select: jest.fn(() => ({
-      from: jest.fn(() => ({
-        where: jest.fn(() => ({
-          limit: jest.fn(async () => [{ id: 'serve-1', campaignId: 'camp-1', placementId: 'place-1', promoterId: 'prom-1', creativeId: 'cre-1' }]),
-        })),
-      })),
-    })),
-    transaction: jest.fn(async (cb: any) => cb(tx)),
+    select: jest.fn(() => ({ from: () => ({ where: () => ({ limit: lookup }) }) })),
+    insert: jest.fn(() => ({ values })), update: jest.fn(), transaction: jest.fn(),
   };
-  const opportunities = { claim: jest.fn() };
-  const service = new DeliveryService(db as any, tokenService as any, {} as any, {} as any, undefined, opportunities as any);
-  jest.spyOn(service as any, 'boundServe').mockImplementation(async (payload: any) => payload?.servedId === 'serve-1');
+  const service = new DeliveryService(db as any, tokenService as any, {} as any, {} as any);
 
-  // Negative 1: invalid rating value rejects before DB access
-  await expect(service.recordAdvertRating({ impToken: 'tok', rating: 'neutral' as any })).rejects.toThrow('Unsupported advert rating');
-  expect(db.transaction).not.toHaveBeenCalled();
-
-  // Negative 2: invalid impToken returns null without DB write
+  await expect(service.recordAdvertRating({ impToken: 'token', rating: 'neutral' as any })).rejects.toThrow('Unsupported advert rating');
   tokenService.verifyToken.mockReturnValue(null);
-  await expect(service.recordAdvertRating({ impToken: 'forged', rating: 'love' })).resolves.toBeNull();
-  expect(tx.update).not.toHaveBeenCalled();
-
-  // Negative 3: unbound serve returns null without DB write
-  tokenService.verifyToken.mockReturnValue({ servedId: 'serve-unbound', campaignId: 'camp-1' });
-  await expect(service.recordAdvertRating({ impToken: 'unbound', rating: 'love' })).resolves.toBeNull();
-  expect(tx.update).not.toHaveBeenCalled();
-
-  // Negative 4: mismatched slotInstanceId rejects and performs no update
+  await expect(service.recordAdvertRating({ impToken: 'forged', rating: 'love' })).rejects.toThrow('Invalid advert rating token');
   tokenService.verifyToken.mockReturnValue({ servedId: 'serve-1', campaignId: 'camp-1' });
-  await expect(
-    service.recordAdvertRating({
-      impToken: 'valid',
-      rating: 'like',
-      claims: { pageViewId: '00000000-0000-4000-8000-000000000011', slotInstanceId: '00000000-0000-4000-8000-000000000999' },
-    }),
-  ).rejects.toThrow();
-  expect(tx.update).not.toHaveBeenCalled();
+  await expect(service.recordAdvertRating({ impToken: 'valid', rating: 'love' })).rejects.toThrow('Advert serve not found');
+  expect(db.insert).not.toHaveBeenCalled();
 
-  // Positive: valid love rating, then updated to dislike, zero billing/opportunity claims
-  const validClaims = {
-    pageViewId: '00000000-0000-4000-8000-000000000011',
-    slotInstanceId: '00000000-0000-4000-8000-000000000022',
-    opportunityId: '00000000-0000-4000-8000-000000000033',
-    sdkInitId: '00000000-0000-4000-8000-000000000044',
-  };
-  const first = await service.recordAdvertRating({ impToken: 'valid', rating: 'love', claims: validClaims });
-  expect(first?.rating).toBe('love');
-  expect(updateSetArg?.contentSnapshot?.visitorRating?.rating).toBe('love');
-
-  const second = await service.recordAdvertRating({ impToken: 'valid', rating: 'dislike', claims: validClaims });
-  expect(second?.rating).toBe('dislike');
-  expect(updateSetArg?.contentSnapshot?.visitorRating?.rating).toBe('dislike');
-  expect(opportunities.claim).not.toHaveBeenCalled();
+  lookup.mockResolvedValue([{ id: 'serve-1' }]);
+  returning.mockResolvedValueOnce([{ rating: 'love' }]).mockResolvedValueOnce([{ rating: 'dislike' }]);
+  await expect(service.recordAdvertRating({ impToken: 'valid', rating: 'love' })).resolves.toMatchObject({ rating: 'love' });
+  await expect(service.recordAdvertRating({ impToken: 'valid', rating: 'dislike' })).resolves.toMatchObject({ rating: 'dislike' });
+  expect(tokenService.verifyToken).toHaveBeenLastCalledWith('valid', undefined, { allowIpMismatch: true, allowExpired: true });
+  expect(db.insert).toHaveBeenCalledWith(require('@crimfig/database/schema').adsServeRatings);
+  expect(values).toHaveBeenLastCalledWith(expect.objectContaining({ serveId: 'serve-1', rating: 'dislike' }));
+  expect(db.update).not.toHaveBeenCalled();
+  expect(db.transaction).not.toHaveBeenCalled();
 });
 
 test('PLAN0134 SDK DOM: hover reveals Ads by CrimFig, rating overlay offers Love/Like/Dislike + Cancel/Close, Dislike hides ad on close without extra ad/billing calls', async () => {
