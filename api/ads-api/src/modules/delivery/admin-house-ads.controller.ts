@@ -43,11 +43,13 @@ export class CreateHouseCreativeDto {
   @IsString()
   title: string;
 
+  @IsOptional()
   @IsString()
-  headline: string;
+  headline?: string;
 
+  @IsOptional()
   @IsString()
-  bodyText: string;
+  bodyText?: string;
 
   @IsOptional()
   @IsString()
@@ -275,11 +277,21 @@ export class AdminHouseAdsController {
   @ApiOperation({ summary: 'Create a new house ad creative' })
   async createHouseCreative(@Body() dto: CreateHouseCreativeDto, @Req() req: any) {
     if (dto.destinationUrl !== undefined) requireHouseDestination(dto.destinationUrl);
+    const adType = dto.adType || 'image';
+    if (adType === 'text' && process.env.ADS_PUBLISHER_TEXT_DELIVERY_ENABLED !== 'true') {
+      throw new BadRequestException('Text House Ads are not enabled yet and are coming soon.');
+    }
+    if (adType === 'video' && process.env.CREATIVE_VIDEO_AUTHORING_ENABLED !== 'true') {
+      throw new BadRequestException('Video House Ads are not enabled yet and are coming soon.');
+    }
     await this.validateAssets(dto,req.user.sub);
-    if ((dto.adType || 'image') === 'image' && !dto.imageUrl) {
+    if (adType === 'image' && !dto.imageUrl) {
       throw new BadRequestException('Image creative requires imageUrl');
     }
-    if (dto.adType === 'video' && !dto.videoUrl) {
+    if (adType === 'text' && (!dto.headline?.trim() || !dto.bodyText?.trim())) {
+      throw new BadRequestException('Text creative requires headline and bodyText');
+    }
+    if (adType === 'video' && !dto.videoUrl) {
       throw new BadRequestException('Video creative requires videoUrl');
     }
 
@@ -290,9 +302,9 @@ export class AdminHouseAdsController {
       .insert(adsHouseCreatives)
       .values({
         title: dto.title,
-        headline: dto.headline,
-        bodyText: dto.bodyText,
-        ctaText: dto.ctaText || 'Start Advertising',
+        headline: dto.headline ?? '',
+        bodyText: dto.bodyText ?? '',
+        ctaText: dto.ctaText ?? (adType === 'image' ? '' : 'Start Advertising'),
         destinationUrl: dto.destinationUrl === undefined ? defaultHouseDestination() : requireHouseDestination(dto.destinationUrl),
         adType: dto.adType || 'image',
         format: dto.format || 'banner',

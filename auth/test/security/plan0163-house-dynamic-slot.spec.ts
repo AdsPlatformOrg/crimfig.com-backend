@@ -42,6 +42,29 @@ describe('PLAN-0163 House Preset Resolution & Dynamic Slot Matching', () => {
     await expect(
       controller.createHouseCreative(
         {
+          title: 'Disabled text',
+          adType: 'text',
+          headline: 'H',
+          bodyText: 'B',
+        } as any,
+        { user: { sub: randomUUID() } },
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      controller.createHouseCreative(
+        {
+          title: 'Disabled video',
+          adType: 'video',
+          videoUrl: 'https://ads.crimfig.com/uploads/media/v.mp4',
+        } as any,
+        { user: { sub: randomUUID() } },
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    await expect(
+      controller.createHouseCreative(
+        {
           title: 'Bad preset',
           headline: 'H',
           bodyText: 'B',
@@ -102,8 +125,6 @@ describe('PLAN-0163 House Preset Resolution & Dynamic Slot Matching', () => {
     await controller.createHouseCreative(
       {
         title: 'Leaderboard',
-        headline: 'H',
-        bodyText: 'B',
         adType: 'image',
         imageUrl: 'https://ads.crimfig.com/uploads/media/house.png',
         width: 728,
@@ -112,6 +133,9 @@ describe('PLAN-0163 House Preset Resolution & Dynamic Slot Matching', () => {
       { user: { sub: randomUUID() } },
     );
     expect(insertedValues).toMatchObject({
+      headline: '',
+      bodyText: '',
+      ctaText: '',
       targetPreset: 'leaderboard',
       renditionWidth: 728,
       renditionHeight: 90,
