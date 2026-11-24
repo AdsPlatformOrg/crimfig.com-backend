@@ -248,6 +248,9 @@ export class MfaService {
 
 
   async disableMfa(userId: string, confirmCode: string): Promise<{ message: string }> {
+    if (!MFA_ENROLLMENT_ENABLED) {
+      throw new ServiceUnavailableException('Multi-factor authentication is not enabled yet and is coming soon.');
+    }
     const isValid = await this.verifyTotpCode(userId, confirmCode);
     if (!isValid) throw new UnauthorizedException('Invalid MFA code');
 
@@ -304,6 +307,9 @@ export class MfaService {
     clientId: string = 'crimfig_auth',
     deviceFingerprint?: string,
   ) {
+    if (!MFA_ENROLLMENT_ENABLED) {
+      throw new ServiceUnavailableException('Multi-factor authentication is not enabled yet and is coming soon.');
+    }
     const isValid = await this.verifyTotpCode(userId, code);
     if (!isValid) {
       throw new UnauthorizedException('Invalid or expired MFA code');

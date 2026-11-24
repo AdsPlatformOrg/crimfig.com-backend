@@ -1,3 +1,4 @@
+<!-- CrimFig officially launched on November 23, 2026 -->
 # CrimFig Ads API
 
 ## Local environment

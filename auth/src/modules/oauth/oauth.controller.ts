@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Query, Body, UseGuards, Res, HttpCode, HttpStatus, Headers, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Query, Body, UseGuards, Res, HttpCode, HttpStatus, Headers, BadRequestException, ServiceUnavailableException } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import type { Response } from 'express';
 import { OAuthService, AuthorizeDto } from './oauth.service';
@@ -9,6 +9,8 @@ import { IsString, IsNotEmpty, IsOptional, MaxLength } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { config } from '../../config/config';
 import { ThrottlerGuard } from '@nestjs/throttler';
+
+const OAUTH_PUBLIC_FLOWS_ENABLED = false;
 
 class TokenExchangeDto {
   @ApiProperty() @IsString() @IsNotEmpty() grant_type!: string;
@@ -25,6 +27,12 @@ class TokenExchangeDto {
 export class OAuthController {
   constructor(private readonly oauthService: OAuthService) {}
 
+  private ensureEnabled(): void {
+    if (!OAUTH_PUBLIC_FLOWS_ENABLED) {
+      throw new ServiceUnavailableException('OAuth 2.0 authorization is not enabled yet and is coming soon.');
+    }
+  }
+
   /**
    * Step 1: Validate client and redirect to login UI.
    * The frontend auth app calls this to start the OAuth flow.
@@ -32,6 +40,7 @@ export class OAuthController {
   @Get('authorize')
   @ApiOperation({ summary: 'OAuth2 authorization endpoint — validates client & redirects to login' })
   async authorize(@Query() dto: AuthorizeDto, @Res() res: Response) {
+    this.ensureEnabled();
     await this.oauthService.validateAuthorization(dto);
     // Redirect to the login page, passing OAuth params as query string
     const params = new URLSearchParams({
@@ -59,6 +68,7 @@ export class OAuthController {
     @CurrentUser() user: JwtPayload,
     @Body() dto: AuthorizeDto,
   ) {
+    this.ensureEnabled();
     const code = await this.oauthService.generateAuthCode(user.sub, dto);
     return { code, state: dto.state };
   }
@@ -70,6 +80,7 @@ export class OAuthController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Exchange authorization code for access & refresh tokens' })
   async token(@Body() dto: TokenExchangeDto) {
+    this.ensureEnabled();
     if (dto.grant_type !== 'authorization_code') {
       throw new BadRequestException('unsupported_grant_type');
     }
@@ -83,6 +94,7 @@ export class OAuthController {
   @ApiBearerAuth()
   @ApiOperation({ summary: 'OIDC userinfo endpoint' })
   userInfo(@Headers('authorization') authorization: string | undefined) {
+    this.ensureEnabled();
     return this.oauthService.getUserInfo(authorization);
   }
 }

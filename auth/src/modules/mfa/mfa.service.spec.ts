@@ -21,10 +21,14 @@ describe('MfaService (PLAN-0157)', () => {
 
     await expect(service.initiateTotpEnrollment('usr_1', 'user@crimfig.com')).rejects.toThrow(ServiceUnavailableException);
     await expect(service.confirmTotpEnrollment('usr_1', 'user@crimfig.com', '123456')).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.verifyLoginChallenge('usr_1', '123456', 'crimfig_auth')).rejects.toThrow(ServiceUnavailableException);
+    await expect(service.disableMfa('usr_1', '123456')).rejects.toThrow(ServiceUnavailableException);
     expect(db.query.mfaDevices.findFirst).not.toHaveBeenCalled();
+    expect(db.query.mfaDevices.findMany).not.toHaveBeenCalled();
     expect(db.insert).not.toHaveBeenCalled();
     expect(db.update).not.toHaveBeenCalled();
     expect(emailService.sendMfaBackupCodesEmail).not.toHaveBeenCalled();
+    expect(tokensService.issueTokenPair).not.toHaveBeenCalled();
   });
 
   it('reports enrollmentAvailable as false in getMfaStatus while preserving account status fields', async () => {

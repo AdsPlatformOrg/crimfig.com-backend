@@ -4,14 +4,14 @@ import { cpcVisitorContinuity } from './cpc-visitor-continuity';
 import { matchesDeviceTarget } from './device-targeting';
 import { responsiveImageBounds } from './image-sizing';
 import { APPROVED_IMAGE_AD_PRESETS, selectGeneralSlotImage } from '../uploads/image-ad-presets';
-import {intersectCreativeSlotSizes} from '../uploads/creative-size-policy';
+import { intersectCreativeSlotSizes } from '../uploads/creative-size-policy';
 import { adsPublicOrigin } from '@crimfig/shared';
-import {houseProgramRequested} from '../cfig/cfig-allocation';
+import { houseProgramRequested } from '../cfig/cfig-allocation';
 import { assertEventReplay, assertInstanceBinding } from './interaction-binding';
-import {DeliveryDeadlineError,DELIVERY_RUNTIME,requireDeliveryTime,withinDeliveryBudget} from './delivery-budgets';
-import {EvidenceService} from './evidence.service';
-import {OpportunityClient,OpportunityConflictError,OpportunityHttpError} from '../billing/opportunity-client';
-import {adDigest,approvedAdPolicy,stableAdValue} from '@crimfig/shared';
+import { DeliveryDeadlineError, DELIVERY_RUNTIME, requireDeliveryTime, withinDeliveryBudget } from './delivery-budgets';
+import { EvidenceService } from './evidence.service';
+import { OpportunityClient, OpportunityConflictError, OpportunityHttpError } from '../billing/opportunity-client';
+import { adDigest, approvedAdPolicy, stableAdValue } from '@crimfig/shared';
 import { currentApproval } from '../campaigns/campaign-workflow';
 import { paidDeliveryReadiness } from './paid-delivery-policy';
 import { evaluateDirectSlotReadiness } from '../adstation/adstation-gating';
@@ -168,9 +168,9 @@ export class DeliveryService {
     private readonly tokenService: ImpressionTokenService,
     private readonly auctionEngine: AuctionEngineService,
     private readonly fraudRules: FraudRulesService,
-    @Optional() private readonly opportunities?:OpportunityClient,
-    @Optional() private readonly evidence?:EvidenceService,
-  ) {}
+    @Optional() private readonly opportunities?: OpportunityClient,
+    @Optional() private readonly evidence?: EvidenceService,
+  ) { }
 
   private publicBaseUrl(): string {
     return adsPublicOrigin();
@@ -216,12 +216,12 @@ export class DeliveryService {
       placementMatches &&
       ((serve.inventoryClass === 'house' || serve.inventoryClass === 'shadow')
         ? !serve.campaignId &&
-          !serve.creativeId &&
-          payload.campaignId === HOUSE_CAMPAIGN_UUID &&
-          (!serve.houseCreativeId || serve.houseCreativeId === payload.creativeId) &&
-          serve.billingPriceNanos === 0n
+        !serve.creativeId &&
+        payload.campaignId === HOUSE_CAMPAIGN_UUID &&
+        (!serve.houseCreativeId || serve.houseCreativeId === payload.creativeId) &&
+        serve.billingPriceNanos === 0n
         : serve.campaignId === payload.campaignId &&
-          serve.creativeId === payload.creativeId) &&
+        serve.creativeId === payload.creativeId) &&
       (serve.promoterId === payload.promoterId || !serve.promoterId) &&
       (isHouseAd || serve.ipHash === payload.ipHash) &&
       serve.servedAt.getTime() <= payload.timestamp &&
@@ -479,7 +479,7 @@ export class DeliveryService {
   }
 
   var imageBounds = ${responsiveImageBounds.toString()};
-  var imageFormats = ${JSON.stringify(Object.fromEntries([...APPROVED_IMAGE_AD_PRESETS.map(p=>[p.id,{width:p.width,height:p.height}]),['banner',{width:728,height:250}],['card',{width:336,height:280}],['sidebar_sticky',{width:300,height:600}]]))};
+  var imageFormats = ${JSON.stringify(Object.fromEntries([...APPROVED_IMAGE_AD_PRESETS.map(p => [p.id, { width: p.width, height: p.height }]), ['banner', { width: 728, height: 250 }], ['card', { width: 336, height: 280 }], ['sidebar_sticky', { width: 300, height: 600 }]]))};
   function renderAdCard(container, ad, mode, slotApiBase, state) {
     var activeBase = slotApiBase || apiBase;
     var slotFormat=container.getAttribute('data-ad-format');
@@ -915,7 +915,7 @@ export class DeliveryService {
       city?: string;
       device?: string;
     },
-    exclusions: Array<{campaignId: string; creativeId: string; reasonCode: string; stage: string}> = [],
+    exclusions: Array<{ campaignId: string; creativeId: string; reasonCode: string; stage: string }> = [],
   ): Promise<any[]> {
     if (candidates.length === 0) return [];
     const campaignIds = [
@@ -990,32 +990,32 @@ export class DeliveryService {
       const countries =
         targeting.geoMode === 'targeted'
           ? [
-              ...new Set(
-                targeting.rows.flatMap((row) =>
-                  this.parseStringArray(row.resolvedCountries),
-                ),
+            ...new Set(
+              targeting.rows.flatMap((row) =>
+                this.parseStringArray(row.resolvedCountries),
               ),
-            ]
+            ),
+          ]
           : this.parseStringArray(candidate.targetCountries);
       const subdivisions =
         targeting.geoMode === 'targeted'
           ? [
-              ...new Set(
-                targeting.rows.flatMap((row) =>
-                  this.parseStringArray(row.resolvedSubdivisions),
-                ),
+            ...new Set(
+              targeting.rows.flatMap((row) =>
+                this.parseStringArray(row.resolvedSubdivisions),
               ),
-            ]
+            ),
+          ]
           : this.parseStringArray(candidate.targetStates);
       const cities =
         targeting.geoMode === 'targeted'
           ? [
-              ...new Set(
-                targeting.rows.flatMap((row) =>
-                  this.parseStringArray(row.resolvedCities),
-                ),
+            ...new Set(
+              targeting.rows.flatMap((row) =>
+                this.parseStringArray(row.resolvedCities),
               ),
-            ]
+            ),
+          ]
           : [];
       if (targeting.geoMode === 'targeted' && targeting.rows.length === 0)
         return reject('GEO_TARGETS_MISSING');
@@ -1179,7 +1179,7 @@ export class DeliveryService {
                 VALUES ('self_dealing_risk', 'warning', ${params.promoter.userId}::uuid,
                         'Self-dealing blocked on bonus-credit delivery: advertiser bonus campaign skipped on own website.',
                         ${JSON.stringify({ websiteId: params.website.id, slotId: params.slot.id })}::jsonb)`,
-          ).catch(() => {});
+          ).catch(() => { });
         }
         return null;
       }
@@ -1289,8 +1289,8 @@ export class DeliveryService {
   private async serveHouseOrShadowAd(params: {
     containerWidth?: number;
     requestId: string;
-    serveBefore?:number;
-    parentOpportunityId?:string;
+    serveBefore?: number;
+    parentOpportunityId?: string;
     consentState?: 'granted' | 'denied' | 'unknown';
     slotTagId: string;
     slotId: string | null;
@@ -1341,227 +1341,231 @@ export class DeliveryService {
     };
     const recordHash = this.auctionEngine.computeDecisionHash(decisionDraft);
 
-    const issued=await this.db.transaction(async tx=>{
-      if(params.serveBefore)requireDeliveryTime(params.serveBefore,'default_commit');
-      await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
-    // 1. Resolve an eligible House creative BEFORE writing serve/evidence (PLAN-0061 P0)
-    let activeHouseCreative = CRIMFIG_HOUSE_CREATIVE;
-    let chosenHouseCreativeId: string | null = null;
-    let chosenHouseCreativeVersion = 1;
+    const issued = await this.db.transaction(async tx => {
+      if (params.serveBefore) requireDeliveryTime(params.serveBefore, 'default_commit');
+      await tx.execute(sql`set local lock_timeout='5s'`); await tx.execute(sql`set local statement_timeout='8s'`);
+      // 1. Resolve an eligible House creative BEFORE writing serve/evidence (PLAN-0061 P0)
+      let activeHouseCreative = CRIMFIG_HOUSE_CREATIVE;
+      let chosenHouseCreativeId: string | null = null;
+      let chosenHouseCreativeVersion = 1;
 
-    {
-      const dbHouseCreatives = await tx
-        .select()
-        .from(adsHouseCreatives)
-        .where(
-          and(
-            eq(adsHouseCreatives.isActive, true),
-            eq(adsHouseCreatives.isArchived, false)
+      {
+        const dbHouseCreatives = await tx
+          .select()
+          .from(adsHouseCreatives)
+          .where(
+            and(
+              eq(adsHouseCreatives.isActive, true),
+              eq(adsHouseCreatives.isArchived, false)
+            )
           )
-        )
-        .orderBy(desc(adsHouseCreatives.priority))
-        .for('share');
+          .orderBy(desc(adsHouseCreatives.priority))
+          .for('share');
 
-      if (dbHouseCreatives && dbHouseCreatives.length > 0) {
-        // PLAN-0067: Size-aware House creative matching considering slot allowed preset policy
-        const candidateCreatives = dbHouseCreatives.filter(c => 
-          (params.format === 'general' || this.allowedAdTypes(params.format).includes(c.adType as any)) &&
-          (params.format === 'general' || c.format === params.format || c.format === 'any') &&
-          (c.adType === 'text' || (c.adType === 'image' && !!c.imageUrl) || (c.adType === 'video' && !!c.videoUrl))
-        );
+        if (dbHouseCreatives && dbHouseCreatives.length > 0) {
+          // PLAN-0067: Size-aware House creative matching considering slot allowed preset policy
+          const candidateCreatives = dbHouseCreatives.filter(c =>
+            (params.format === 'general' || this.allowedAdTypes(params.format).includes(c.adType as any)) &&
+            (params.format === 'general' || c.format === params.format || c.format === 'any') &&
+            (c.adType === 'text' || (c.adType === 'image' && !!c.imageUrl) || (c.adType === 'video' && !!c.videoUrl))
+          );
 
-        // If slot has specific allowed presets, prefer creative matching one of them
-        let preferred = candidateCreatives[0];
-        if (params.slotId) {
-          const [slotRecord] = await tx
-            .select({
-              presetPolicy: adstationSlots.presetPolicy,
-              allowedPresetIds: adstationSlots.allowedPresetIds,
-              width: adstationSlots.width,
-              height: adstationSlots.height,
-              allowedAdTypes: adstationSlots.allowedAdTypes,
-            })
-            .from(adstationSlots)
-            .where(eq(adstationSlots.id, params.slotId))
-            .limit(1);
+          // If slot has specific allowed presets, prefer creative matching one of them
+          let preferred = candidateCreatives[0];
+          if (params.slotId) {
+            const [slotRecord] = await tx
+              .select({
+                presetPolicy: adstationSlots.presetPolicy,
+                allowedPresetIds: adstationSlots.allowedPresetIds,
+                width: adstationSlots.width,
+                height: adstationSlots.height,
+                allowedAdTypes: adstationSlots.allowedAdTypes,
+              })
+              .from(adstationSlots)
+              .where(eq(adstationSlots.id, params.slotId))
+              .limit(1);
 
-          if (params.format === 'general') {
-            const allowed = resolveGeneralSlotCreativeTypes(slotRecord?.allowedAdTypes);
-            preferred = candidateCreatives.find(candidate => {
-              if (!allowed.types.includes(candidate.adType as 'text' | 'image' | 'video')) return false;
-              if (candidate.adType !== 'image') return true;
-              const preset = APPROVED_IMAGE_AD_PRESETS.find(item => item.id === candidate.targetPreset);
-              const width = candidate.renditionWidth ?? candidate.width;
-              const height = candidate.renditionHeight ?? candidate.height;
-              if (!preset || width !== preset.width || height !== preset.height) return false;
-              if (params.containerWidth != null && preset.width > params.containerWidth) return false;
-              if (slotRecord?.width != null && preset.width > slotRecord.width) return false;
-              if (slotRecord?.height != null && preset.height > slotRecord.height) return false;
-              if (slotRecord?.allowedPresetIds == null) return true;
+            if (params.format === 'general') {
+              const allowed = resolveGeneralSlotCreativeTypes(slotRecord?.allowedAdTypes);
+              preferred = candidateCreatives.find(candidate => {
+                if (!allowed.types.includes(candidate.adType as 'text' | 'image' | 'video')) return false;
+                if (candidate.adType !== 'image') return true;
+                const preset = APPROVED_IMAGE_AD_PRESETS.find(item => item.id === candidate.targetPreset);
+                const width = candidate.renditionWidth ?? candidate.width;
+                const height = candidate.renditionHeight ?? candidate.height;
+                if (!preset || width !== preset.width || height !== preset.height) return false;
+                if (params.containerWidth != null && preset.width > params.containerWidth) return false;
+                if (slotRecord?.width != null && preset.width > slotRecord.width) return false;
+                if (slotRecord?.height != null && preset.height > slotRecord.height) return false;
+                if (slotRecord?.allowedPresetIds == null) return true;
+                try {
+                  const ids: unknown = JSON.parse(slotRecord.allowedPresetIds);
+                  if (!Array.isArray(ids)) return false;
+                  if (ids.length === 0) return true;
+                  return ids.includes(preset.id);
+                } catch {
+                  return false;
+                }
+              })!;
+            } else if (slotRecord?.allowedPresetIds) {
               try {
-                const ids: unknown = JSON.parse(slotRecord.allowedPresetIds);
-                return Array.isArray(ids) && ids.includes(preset.id);
+                const allowed: string[] = JSON.parse(slotRecord.allowedPresetIds);
+                const matchingPreset = candidateCreatives.find(c => c.targetPreset && allowed.includes(c.targetPreset));
+                if (matchingPreset) {
+                  preferred = matchingPreset;
+                }
               } catch {
-                return false;
+                // fallback to default candidate
               }
-            })!;
-          } else if (slotRecord?.allowedPresetIds) {
-            try {
-              const allowed: string[] = JSON.parse(slotRecord.allowedPresetIds);
-              const matchingPreset = candidateCreatives.find(c => c.targetPreset && allowed.includes(c.targetPreset));
-              if (matchingPreset) {
-                preferred = matchingPreset;
-              }
-            } catch {
-              // fallback to default candidate
             }
           }
-        }
 
-        if (!preferred) return null;
-        if (preferred) {
-          chosenHouseCreativeId = preferred.id;
-          chosenHouseCreativeVersion = preferred.version || 1;
-          activeHouseCreative = {
-            campaignId: HOUSE_CAMPAIGN_UUID,
-            creativeId: preferred.id,
-            adType: (preferred.adType as 'image' | 'text' | 'video') || 'image',
-            format: (params.format === 'general' ? preferred.targetPreset : preferred.format) || 'banner',
-            headline: preferred.headline,
-            bodyText: preferred.bodyText,
-            ctaText: preferred.ctaText || 'Start Advertising',
-            imageUrl: preferred.imageUrl || null,
-            videoUrl: preferred.videoUrl || null,
-            posterUrl: preferred.posterUrl || null,
-            width: preferred.renditionWidth || preferred.width || 300,
-            height: preferred.renditionHeight || preferred.height || 250,
-            durationSeconds: null,
-            destinationUrl: resolveSafeHouseDestinationUrl(preferred.destinationUrl),
-          };
+          if (!preferred) return null;
+          if (preferred) {
+            chosenHouseCreativeId = preferred.id;
+            chosenHouseCreativeVersion = preferred.version || 1;
+            activeHouseCreative = {
+              campaignId: HOUSE_CAMPAIGN_UUID,
+              creativeId: preferred.id,
+              adType: (preferred.adType as 'image' | 'text' | 'video') || 'image',
+              format: (params.format === 'general' ? preferred.targetPreset : preferred.format) || 'banner',
+              headline: preferred.headline,
+              bodyText: preferred.bodyText,
+              ctaText: preferred.ctaText || 'Start Advertising',
+              imageUrl: preferred.imageUrl || null,
+              videoUrl: preferred.videoUrl || null,
+              posterUrl: preferred.posterUrl || null,
+              width: preferred.renditionWidth || preferred.width || 300,
+              height: preferred.renditionHeight || preferred.height || 250,
+              durationSeconds: null,
+              destinationUrl: resolveSafeHouseDestinationUrl(preferred.destinationUrl),
+            };
+          }
         }
+        else return null;
       }
-      else return null;
-    }
 
 
-      let houseRewardContext:any=null;
-      if(params.slotId){
-        const [supply]=await tx.select({slot:adstationSlots,site:adsPromoterWebsites,promoter:adsPromoters}).from(adstationSlots)
-          .innerJoin(adsPromoterWebsites,eq(adsPromoterWebsites.id,adstationSlots.websiteId)).innerJoin(adsPromoters,eq(adsPromoters.id,adstationSlots.promoterId)).where(eq(adstationSlots.id,params.slotId)).for('share').limit(1);
-        if(!supply||supply.promoter.id!==params.promoterId||supply.site.id!==params.websiteId||supply.site.promoterId!==params.promoterId||!supply.slot.isActive||!['testing','installation_pending','active'].includes(supply.slot.lifecycleStatus)||!supply.site.isActive||supply.site.isSuspended||supply.site.verificationStatus!=='verified'||!supply.site.verificationExpiresAt||supply.site.verificationExpiresAt<=new Date()||!['testing','pending_approval','approved'].includes(supply.site.policyStatus)||!supply.promoter.isActive||supply.promoter.isSuspended)throw new ForbiddenException('Ad delivery is unavailable');
-        const [owner]=await tx.select({status:schema.users.status}).from(schema.users).where(eq(schema.users.id,supply.promoter.userId)).for('share').limit(1);
-        if(owner?.status!=='ACTIVE')throw new ForbiddenException('Ad delivery is unavailable');
-        const controls=await tx.execute(sql`SELECT 1 FROM ads_traffic_controls WHERE is_active AND (expires_at IS NULL OR expires_at>now()) AND ((target_scope='slot' AND target_id=${params.slotId}) OR(target_scope='website' AND target_id=${params.websiteId}) OR(target_scope='promoter' AND target_id=${params.promoterId})) LIMIT 1`);
-        if(controls.rows.length){params.inventoryClass='shadow';params.deliveryMode='shadow';params.trafficRiskStatus='suspicious';}
-        let rewardPolicy:any=null;
-        let houseSwitchEnabled=true;
-        try{
-          const sw=await tx.execute(sql`SELECT enabled FROM program_feature_switches WHERE key='house_cfig_earning' LIMIT 1`);
-          if((sw.rows??sw)[0]?.enabled!==undefined) houseSwitchEnabled=Boolean((sw.rows??sw)[0].enabled);
-        }catch{}
-        if(houseProgramRequested(process.env, houseSwitchEnabled)){
-          const result=await tx.execute(sql`SELECT id,terms FROM cfig_policies WHERE approved_at IS NOT NULL AND (terms->>'effectiveFrom')::timestamptz<=clock_timestamp() ORDER BY (terms->>'effectiveFrom')::timestamptz DESC,id DESC LIMIT 1`);
-          rewardPolicy=result.rows[0]??null;
+      let houseRewardContext: any = null;
+      if (params.slotId) {
+        const [supply] = await tx.select({ slot: adstationSlots, site: adsPromoterWebsites, promoter: adsPromoters }).from(adstationSlots)
+          .innerJoin(adsPromoterWebsites, eq(adsPromoterWebsites.id, adstationSlots.websiteId)).innerJoin(adsPromoters, eq(adsPromoters.id, adstationSlots.promoterId)).where(eq(adstationSlots.id, params.slotId)).for('share').limit(1);
+        if (!supply || supply.promoter.id !== params.promoterId || supply.site.id !== params.websiteId || supply.site.promoterId !== params.promoterId || !supply.slot.isActive || !['testing', 'installation_pending', 'active'].includes(supply.slot.lifecycleStatus) || !supply.site.isActive || supply.site.isSuspended || supply.site.verificationStatus !== 'verified' || !supply.site.verificationExpiresAt || supply.site.verificationExpiresAt <= new Date() || !['testing', 'pending_approval', 'approved'].includes(supply.site.policyStatus) || !supply.promoter.isActive || supply.promoter.isSuspended) throw new ForbiddenException('Ad delivery is unavailable');
+        const [owner] = await tx.select({ status: schema.users.status }).from(schema.users).where(eq(schema.users.id, supply.promoter.userId)).for('share').limit(1);
+        if (owner?.status !== 'ACTIVE') throw new ForbiddenException('Ad delivery is unavailable');
+        const controls = await tx.execute(sql`SELECT 1 FROM ads_traffic_controls WHERE is_active AND (expires_at IS NULL OR expires_at>now()) AND ((target_scope='slot' AND target_id=${params.slotId}) OR(target_scope='website' AND target_id=${params.websiteId}) OR(target_scope='promoter' AND target_id=${params.promoterId})) LIMIT 1`);
+        if (controls.rows.length) { params.inventoryClass = 'shadow'; params.deliveryMode = 'shadow'; params.trafficRiskStatus = 'suspicious'; }
+        let rewardPolicy: any = null;
+        let houseSwitchEnabled = true;
+        try {
+          const sw = await tx.execute(sql`SELECT enabled FROM program_feature_switches WHERE key='house_cfig_earning' LIMIT 1`);
+          if ((sw.rows ?? sw)[0]?.enabled !== undefined) houseSwitchEnabled = Boolean((sw.rows ?? sw)[0].enabled);
+        } catch { }
+        if (houseProgramRequested(process.env, houseSwitchEnabled)) {
+          const result = await tx.execute(sql`SELECT id,terms FROM cfig_policies WHERE approved_at IS NOT NULL AND (terms->>'effectiveFrom')::timestamptz<=clock_timestamp() ORDER BY (terms->>'effectiveFrom')::timestamptz DESC,id DESC LIMIT 1`);
+          rewardPolicy = result.rows[0] ?? null;
         }
-        houseRewardContext={websitePolicy:supply.site.policyStatus,websitePolicyRevision:supply.site.policyRevision,
-          ownershipStatus:supply.site.verificationStatus,ownershipExpiresAt:supply.site.verificationExpiresAt.toISOString(),
-          promoterUserId:supply.promoter.userId,slotPolicyRevision:supply.slot.policyRevision,
-          programAuthorized:!!rewardPolicy,policyId:rewardPolicy?.id??null,policyDigest:rewardPolicy?adDigest(rewardPolicy.terms):null};
+        houseRewardContext = {
+          websitePolicy: supply.site.policyStatus, websitePolicyRevision: supply.site.policyRevision,
+          ownershipStatus: supply.site.verificationStatus, ownershipExpiresAt: supply.site.verificationExpiresAt.toISOString(),
+          promoterUserId: supply.promoter.userId, slotPolicyRevision: supply.slot.policyRevision,
+          programAuthorized: !!rewardPolicy, policyId: rewardPolicy?.id ?? null, policyDigest: rewardPolicy ? adDigest(rewardPolicy.terms) : null
+        };
 
       }
-      const [decision]=await tx.insert(adsAuctionDecisions).values({
-          requestId: params.requestId,
-          promoterId: params.promoterId,
-          websiteId: params.websiteId,
-          slotId: params.slotId,
-          slotTagId: params.slotTagId,
-          inventoryClass: params.inventoryClass,
-          deliveryMode: params.deliveryMode,
-          trafficRiskStatus: params.trafficRiskStatus,
-          financialEligibility: 'invalid',
-          policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
-          bidderGroupingMode: 'advertiser',
-          tieSeed,
-          candidateCount: params.candidateCount ?? 0,
-          eligibleGroupCount: 0,
-          evaluatedCandidates: params.evaluatedCandidates ?? [],
-          excludedCandidates: exclusions,
-          winnerCampaignId: null,
-          winnerCreativeId: null,
-          runnerUpCampaignId: null,
-          pricingModel: 'cpm',
-          clearingPriceMicros: 0,
-          billingPriceNanos: 0n,
-          recordHash,
-        })
-.returning({id:adsAuctionDecisions.id});
-      if(!decision?.id)throw new Error('House decision could not be recorded');
-      const decisionId=decision.id;
-      const houseIssuedAt=new Date();
-      const [serve]=await tx.insert(adsServes).values({
-          servedAt:houseIssuedAt,
-          placementId: params.placementId,
-          campaignId: null,
-          creativeId: null,
+      const [decision] = await tx.insert(adsAuctionDecisions).values({
+        requestId: params.requestId,
+        promoterId: params.promoterId,
+        websiteId: params.websiteId,
+        slotId: params.slotId,
+        slotTagId: params.slotTagId,
+        inventoryClass: params.inventoryClass,
+        deliveryMode: params.deliveryMode,
+        trafficRiskStatus: params.trafficRiskStatus,
+        financialEligibility: 'invalid',
+        policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
+        bidderGroupingMode: 'advertiser',
+        tieSeed,
+        candidateCount: params.candidateCount ?? 0,
+        eligibleGroupCount: 0,
+        evaluatedCandidates: params.evaluatedCandidates ?? [],
+        excludedCandidates: exclusions,
+        winnerCampaignId: null,
+        winnerCreativeId: null,
+        runnerUpCampaignId: null,
+        pricingModel: 'cpm',
+        clearingPriceMicros: 0,
+        billingPriceNanos: 0n,
+        recordHash,
+      })
+        .returning({ id: adsAuctionDecisions.id });
+      if (!decision?.id) throw new Error('House decision could not be recorded');
+      const decisionId = decision.id;
+      const houseIssuedAt = new Date();
+      const [serve] = await tx.insert(adsServes).values({
+        servedAt: houseIssuedAt,
+        placementId: params.placementId,
+        campaignId: null,
+        creativeId: null,
+        houseCreativeId: chosenHouseCreativeId,
+        houseCreativeVersion: chosenHouseCreativeVersion,
+        houseDestinationUrl: activeHouseCreative.destinationUrl,
+        promoterId: params.promoterId,
+        slotHandle: params.slotTagId,
+        requestId: params.requestId,
+        websiteId: params.websiteId,
+        slotId: params.slotId,
+        inventoryClass: params.inventoryClass,
+        deliveryMode: params.deliveryMode,
+        trafficRiskStatus: params.trafficRiskStatus,
+        financialEligibility: 'invalid',
+        auctionDecisionId: decisionId,
+        policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
+        clearingPriceMicros: 0,
+        pricingVersion: 2,
+        billingPriceNanos: 0n,
+        pricingModel: 'cpm',
+        ipHash,
+        userAgentHash: params.userAgent
+          ? this.tokenService.hashIp(params.userAgent)
+          : null,
+        geoCountry: params.clientGeo?.country || null,
+        geoRegion: params.clientGeo?.region || null,
+        deviceType: params.clientGeo?.device || null,
+        contentSnapshot: {
+          houseRewardContext,
+          destinationUrl: activeHouseCreative.destinationUrl,
+          adType: activeHouseCreative.adType,
+          headline: activeHouseCreative.headline,
+          imageUrl: activeHouseCreative.imageUrl,
           houseCreativeId: chosenHouseCreativeId,
-          houseCreativeVersion: chosenHouseCreativeVersion,
-          houseDestinationUrl: activeHouseCreative.destinationUrl,
-          promoterId: params.promoterId,
-          slotHandle: params.slotTagId,
-          requestId: params.requestId,
-          websiteId: params.websiteId,
-          slotId: params.slotId,
-          inventoryClass: params.inventoryClass,
-          deliveryMode: params.deliveryMode,
-          trafficRiskStatus: params.trafficRiskStatus,
-          financialEligibility: 'invalid',
-          auctionDecisionId: decisionId,
-          policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
-          clearingPriceMicros: 0,
-          pricingVersion: 2,
-          billingPriceNanos: 0n,
-          pricingModel: 'cpm',
-          ipHash,
-          userAgentHash: params.userAgent
-            ? this.tokenService.hashIp(params.userAgent)
-            : null,
-          geoCountry: params.clientGeo?.country || null,
-          geoRegion: params.clientGeo?.region || null,
-          deviceType: params.clientGeo?.device || null,
-          contentSnapshot: {
-            houseRewardContext,
-            destinationUrl: activeHouseCreative.destinationUrl,
-            adType: activeHouseCreative.adType,
-            headline: activeHouseCreative.headline,
-            imageUrl: activeHouseCreative.imageUrl,
-            houseCreativeId: chosenHouseCreativeId,
-          },
-        })
-.returning({id:adsServes.id});
-      if(!serve?.id)throw new Error('House serve could not be recorded');
-      await tx.update(adsAuctionDecisions).set({serveId:serve.id}).where(eq(adsAuctionDecisions.id,decisionId));
-      if(!this.evidence)throw new Error('Durable decision recording is unavailable');
-      await this.evidence.append(params.requestId,{
-        version:1,
-        stage:'issued',
-        houseRewardContext,serverServedAt:houseIssuedAt.toISOString(),
-        serveId:serve.id,
-        inventoryClass:params.inventoryClass,
-        deliveryMode:params.deliveryMode,
-        slotId:params.slotId,
-        websiteId:params.websiteId,
+        },
+      })
+        .returning({ id: adsServes.id });
+      if (!serve?.id) throw new Error('House serve could not be recorded');
+      await tx.update(adsAuctionDecisions).set({ serveId: serve.id }).where(eq(adsAuctionDecisions.id, decisionId));
+      if (!this.evidence) throw new Error('Durable decision recording is unavailable');
+      await this.evidence.append(params.requestId, {
+        version: 1,
+        stage: 'issued',
+        houseRewardContext, serverServedAt: houseIssuedAt.toISOString(),
+        serveId: serve.id,
+        inventoryClass: params.inventoryClass,
+        deliveryMode: params.deliveryMode,
+        slotId: params.slotId,
+        websiteId: params.websiteId,
         decisionId,
         houseCreativeId: chosenHouseCreativeId,
-        parentOpportunityId:params.parentOpportunityId??null,
-        runtimeVersion:DELIVERY_RUNTIME.version,
-        decision:stableAdValue(decisionDraft)
-      },tx);
-      if(params.serveBefore)requireDeliveryTime(params.serveBefore,'default_commit');
-      return {serveId:serve.id,decisionId,activeHouseCreative};
+        parentOpportunityId: params.parentOpportunityId ?? null,
+        runtimeVersion: DELIVERY_RUNTIME.version,
+        decision: stableAdValue(decisionDraft)
+      }, tx);
+      if (params.serveBefore) requireDeliveryTime(params.serveBefore, 'default_commit');
+      return { serveId: serve.id, decisionId, activeHouseCreative };
     });
 
     if (!issued) return null;
-    const {serveId,decisionId,activeHouseCreative}=issued;
+    const { serveId, decisionId, activeHouseCreative } = issued;
     const tokenPlacementId = params.placementId || HOUSE_PLACEMENT_UUID;
     const impToken = this.tokenService.generateToken({
       servedId: serveId,
@@ -1616,162 +1620,564 @@ export class DeliveryService {
       city?: string;
       device?: string;
     },
-    requestHeaders?: { origin?: string; referer?: string;measurementConsent?:boolean; consentState?: 'granted' | 'denied' | 'unknown'; transportRequestId?: string; privacyControl?: boolean; continuityProof?: string; containerWidth?: number },
+    requestHeaders?: { origin?: string; referer?: string; measurementConsent?: boolean; consentState?: 'granted' | 'denied' | 'unknown'; transportRequestId?: string; privacyControl?: boolean; continuityProof?: string; containerWidth?: number },
   ) {
     const hintedWidth = requestHeaders?.containerWidth;
     const containerWidth = typeof hintedWidth === 'number' && Number.isSafeInteger(hintedWidth)
       && hintedWidth > 0 && hintedWidth <= 3840 ? hintedWidth : undefined;
     this.tokenService.assertConfigured();
     const requestId = crypto.randomUUID();
-    const serverDeadline=Date.now()+DELIVERY_RUNTIME.serverMs;
-    let canonicalSlot:any=null,canonicalWebsite:any=null,canonicalPromoter:any=null;
+    const serverDeadline = Date.now() + DELIVERY_RUNTIME.serverMs;
+    let canonicalSlot: any = null, canonicalWebsite: any = null, canonicalPromoter: any = null;
     try {
-    const isSlotCatalog = token.startsWith('cf_slot_');
+      const isSlotCatalog = token.startsWith('cf_slot_');
 
-    // Reject unowned shared catalog slot IDs (`cf_slot_0001`..`cf_slot_0010`) on public delivery (`G01`)
-    if (isSlotCatalog) {
-      throw new ForbiddenException(
-        'Shared slot catalog handles cannot serve ads directly. Register and verify your website in AdStation to create a canonical slot tag.',
-      );
-    }
-
-    // 1. Check if token is a canonical AdStation slot (`adstation_slots.slotTagId`)
-
-
-    if (token.startsWith('cf-slot-')) {
-      const [slotRow] = await this.db
-        .select({
-          slot: adstationSlots,
-          website: adsPromoterWebsites,
-          promoter: adsPromoters,
-        })
-        .from(adstationSlots)
-        .innerJoin(
-          adsPromoterWebsites,
-          eq(adstationSlots.websiteId, adsPromoterWebsites.id),
-        )
-        .innerJoin(
-          adsPromoters,
-          eq(adstationSlots.promoterId, adsPromoters.id),
-        )
-        .where(eq(adstationSlots.slotTagId, token))
-        .limit(1);
-
-      if (!slotRow) {
-        throw new NotFoundException('Ad slot not found');
-      }
-
-      canonicalSlot = slotRow.slot;
-      canonicalWebsite = slotRow.website;
-      canonicalPromoter = slotRow.promoter;
-
-      // Supply admission gates (`G01`):
-      if (
-        !canonicalPromoter.isActive ||
-        canonicalPromoter.isSuspended ||
-        !canonicalWebsite.isActive ||
-        canonicalWebsite.isSuspended ||
-        canonicalWebsite.verificationStatus !== 'verified' || !canonicalWebsite.verificationExpiresAt || canonicalWebsite.verificationExpiresAt<=new Date() ||
-        canonicalWebsite.policyStatus === 'unverified' ||
-        canonicalWebsite.policyStatus === 'rejected' ||
-        canonicalWebsite.policyStatus === 'suspended'
-      ) {
+      // Reject unowned shared catalog slot IDs (`cf_slot_0001`..`cf_slot_0010`) on public delivery (`G01`)
+      if (isSlotCatalog) {
         throw new ForbiddenException(
-          'This website is not verified or eligible for ad delivery.',
+          'Shared slot catalog handles cannot serve ads directly. Register and verify your website in AdStation to create a canonical slot tag.',
         );
       }
 
-      if (
-        !canonicalSlot.isActive ||
-        ['paused', 'suspended', 'disabled', 'draft'].includes(
-          canonicalSlot.lifecycleStatus,
-        )
-      ) {
-        throw new ForbiddenException(
-          `Ad slot "${canonicalSlot.slotTagId}" is currently ${canonicalSlot.lifecycleStatus}.`,
-        );
-      }
+      // 1. Check if token is a canonical AdStation slot (`adstation_slots.slotTagId`)
 
-      if (canonicalSlot.slotType === 'direct') {
-        const websiteSlots = await this.db
-          .select()
+
+      if (token.startsWith('cf-slot-')) {
+        const [slotRow] = await this.db
+          .select({
+            slot: adstationSlots,
+            website: adsPromoterWebsites,
+            promoter: adsPromoters,
+          })
           .from(adstationSlots)
-          .where(eq(adstationSlots.websiteId, canonicalWebsite.id));
-        const readiness = evaluateDirectSlotReadiness(
-          canonicalSlot,
-          canonicalWebsite,
-          websiteSlots,
-        );
-        if (canonicalSlot.lifecycleStatus !== 'active' || !readiness.liveEligible) {
+          .innerJoin(
+            adsPromoterWebsites,
+            eq(adstationSlots.websiteId, adsPromoterWebsites.id),
+          )
+          .innerJoin(
+            adsPromoters,
+            eq(adstationSlots.promoterId, adsPromoters.id),
+          )
+          .where(eq(adstationSlots.slotTagId, token))
+          .limit(1);
+
+        if (!slotRow) {
+          throw new NotFoundException('Ad slot not found');
+        }
+
+        canonicalSlot = slotRow.slot;
+        canonicalWebsite = slotRow.website;
+        canonicalPromoter = slotRow.promoter;
+
+        // Supply admission gates (`G01`):
+        if (
+          !canonicalPromoter.isActive ||
+          canonicalPromoter.isSuspended ||
+          !canonicalWebsite.isActive ||
+          canonicalWebsite.isSuspended ||
+          canonicalWebsite.verificationStatus !== 'verified' || !canonicalWebsite.verificationExpiresAt || canonicalWebsite.verificationExpiresAt <= new Date() ||
+          canonicalWebsite.policyStatus === 'unverified' ||
+          canonicalWebsite.policyStatus === 'rejected' ||
+          canonicalWebsite.policyStatus === 'suspended'
+        ) {
           throw new ForbiddenException(
-            `Direct Ad Slot "${canonicalSlot.slotTagId}" is not eligible for live delivery: ${readiness.blockerReasons.join(' ')}`,
+            'This website is not verified or eligible for ad delivery.',
           );
+        }
+
+        if (
+          !canonicalSlot.isActive ||
+          ['paused', 'suspended', 'disabled', 'draft'].includes(
+            canonicalSlot.lifecycleStatus,
+          )
+        ) {
+          throw new ForbiddenException(
+            `Ad slot "${canonicalSlot.slotTagId}" is currently ${canonicalSlot.lifecycleStatus}.`,
+          );
+        }
+
+        if (canonicalSlot.slotType === 'direct') {
+          const websiteSlots = await this.db
+            .select()
+            .from(adstationSlots)
+            .where(eq(adstationSlots.websiteId, canonicalWebsite.id));
+          const readiness = evaluateDirectSlotReadiness(
+            canonicalSlot,
+            canonicalWebsite,
+            websiteSlots,
+          );
+          if (canonicalSlot.lifecycleStatus !== 'active' || !readiness.liveEligible) {
+            throw new ForbiddenException(
+              `Direct Ad Slot "${canonicalSlot.slotTagId}" is not eligible for live delivery: ${readiness.blockerReasons.join(' ')}`,
+            );
+          }
+        }
+
+        // Enforce domain match against Origin / Referer / domain query parameter
+        const headerHost =
+          extractHostnameFromHeader(requestHeaders?.origin) ||
+          extractHostnameFromHeader(requestHeaders?.referer) ||
+          extractHostnameFromHeader(referrerDomain);
+
+        if (
+          !headerHost ||
+          !domainMatchesRegisteredSite(canonicalWebsite.domain, headerHost)
+        ) {
+          throw new ForbiddenException(
+            `Domain mismatch: slot "${canonicalSlot.slotTagId}" is bound exclusively to https://${canonicalWebsite.domain}.`,
+          );
+        }
+
+        // The Network auction cannot fill AdStation Direct inventory. Until assigned
+        // deal serving is available on this endpoint, return an empty slot.
+        if (canonicalSlot.slotType === 'direct') return null;
+
+        // Update website heartbeat timestamp
+        await this.db
+          .update(adsPromoterWebsites)
+          .set({ embedPingLastAt: new Date() })
+          .where(eq(adsPromoterWebsites.id, canonicalWebsite.id));
+
+        const controls = await this.db.execute(sql`SELECT action FROM ads_traffic_controls WHERE is_active AND (expires_at IS NULL OR expires_at>now()) AND
+        ((target_scope='slot' AND target_id=${canonicalSlot.id}) OR(target_scope='website' AND target_id=${canonicalWebsite.id}) OR(target_scope='promoter' AND target_id=${canonicalPromoter.id}))`);
+        const restricted = controls.rows.length > 0;
+        // Evaluate supply-time traffic risk for shadow-serving protection
+        const riskAssessment = this.fraudRules.assessSupplyRequestRisk({
+          slotTagId: canonicalSlot.slotTagId,
+          clientIp,
+          userAgent,
+          originOrRefererHost: headerHost,
+          registeredDomain: canonicalWebsite.domain,
+          trustScore: Math.min(
+            canonicalPromoter.trustScore ?? 70,
+            canonicalWebsite.trustScore ?? 70,
+          ),
+        });
+
+        // Evaluate pre-auction gates explicitly (PLAN-0087)
+        const paidReadiness = paidDeliveryReadiness();
+        let earlyFallbackReason: string | null = null;
+        const earlyFallbackStage = 'supply_admission';
+
+        if (canonicalSlot.lifecycleStatus === 'testing') {
+          earlyFallbackReason = 'SLOT_TESTING_MODE';
+        } else if (canonicalSlot.lifecycleStatus === 'installation_pending') {
+          earlyFallbackReason = 'SLOT_INSTALLATION_PENDING';
+        } else if (canonicalWebsite.policyStatus === 'testing' || canonicalWebsite.policyStatus === 'pending_approval') {
+          earlyFallbackReason = 'WEBSITE_POLICY_NOT_APPROVED';
+        } else if (!paidReadiness.ready) {
+          earlyFallbackReason = 'PLATFORM_PAID_DELIVERY_DISABLED:' + String(paidReadiness.reason);
+        } else if (restricted) {
+          earlyFallbackReason = 'TRAFFIC_CONTROL_RESTRICTION';
+        } else if (riskAssessment.trafficRiskStatus !== 'normal') {
+          earlyFallbackReason = 'TRAFFIC_RISK_' + String(riskAssessment.trafficRiskStatus).toUpperCase();
+        }
+
+        if (earlyFallbackReason) {
+          const isShadowRisk = restricted || riskAssessment.trafficRiskStatus !== 'normal';
+          return this.serveHouseOrShadowAd({
+            containerWidth,
+            consentState: requestHeaders?.consentState,
+            serveBefore: serverDeadline,
+            requestId,
+            slotTagId: canonicalSlot.slotTagId,
+            slotId: canonicalSlot.id,
+            websiteId: canonicalWebsite.id,
+            promoterId: canonicalPromoter.id,
+            placementId: null,
+            format: canonicalSlot.format || 'banner',
+            inventoryClass: isShadowRisk ? 'shadow' : 'house',
+            deliveryMode: isShadowRisk ? 'shadow' : 'normal',
+            trafficRiskStatus: riskAssessment.trafficRiskStatus,
+            fallbackReasonCode: earlyFallbackReason,
+            terminationStage: earlyFallbackStage,
+            candidateEvaluationStatus: 'not_evaluated',
+            excludedCandidates: [{
+              reasonCode: earlyFallbackReason,
+              stage: earlyFallbackStage,
+              admission: {
+                slotLifecycle: canonicalSlot.lifecycleStatus,
+                websitePolicy: canonicalWebsite.policyStatus,
+                paidReady: paidReadiness.ready,
+                paidReadinessReason: paidReadiness.reason ?? null,
+                trafficRestricted: restricted,
+                trafficRisk: riskAssessment.trafficRiskStatus,
+                consentState: requestHeaders?.consentState ?? 'unknown',
+                measurementConsent: requestHeaders?.measurementConsent ?? null,
+              },
+            }],
+            clientIp,
+            userAgent,
+            referrerDomain: headerHost,
+            clientGeo: {
+              country: clientGeo?.country,
+              region: clientGeo?.region,
+              device: clientGeo?.device || this.deviceFromUserAgent(userAgent),
+            },
+          });
         }
       }
 
-      // Enforce domain match against Origin / Referer / domain query parameter
-      const headerHost =
-        extractHostnameFromHeader(requestHeaders?.origin) ||
-        extractHostnameFromHeader(requestHeaders?.referer) ||
-        extractHostnameFromHeader(referrerDomain);
+      // Legacy routes must obey the same release gate; a token cannot bypass the
+      // missing distributed reservation authority by selecting a different path.
+      if (!paidDeliveryReadiness().ready) throw new ForbiddenException('Paid ad delivery is not available. Verified canonical slots can serve CrimFig default ads.');
+
+      // 2. Legacy / Share-Link Placement lookup (`ads_placements.placementToken`)
+      let placement: any = null;
+      if (!canonicalSlot) {
+        const [foundPlacement] = await this.db
+          .select({
+            id: adsPlacements.id,
+            promoterId: adsPlacements.promoterId,
+            imageMaxBytes: adsPlacements.imageMaxBytes,
+            campaignId: adsPlacements.campaignId,
+            creativeId: adsPlacements.creativeId,
+            websiteId: adsPlacements.websiteId,
+            status: adsPlacements.status,
+            campaignStatus: adsCampaigns.status,
+            campaignModeration: adsCampaigns.moderationStatus,
+            contentRevision: adsCampaigns.contentRevision,
+            currentSubmissionId: adsCampaigns.currentSubmissionId,
+            approvedSubmissionId: adsCampaigns.approvedSubmissionId,
+            approvedRevision: adsCampaigns.approvedRevision,
+            submissionIntentId: adsCampaigns.submissionIntentId,
+            creativeReview: adsCreatives.reviewStatus,
+            creativeStatus: adsCreatives.status,
+            campaignSchedule: adsCampaigns.schedule,
+            stackSchedule: adsCreativeStacks.schedule,
+            campaignGeoMode: adsCampaigns.geoMode,
+            stackGeoMode: adsCreativeStacks.geoMode,
+            adStackId: adsCreatives.adStackId,
+            targetHours: adsCampaigns.targetHours,
+            stackTargetHours: adsCreativeStacks.targetHours,
+            targetCountries: adsCampaigns.targetCountries,
+            targetStates: adsCampaigns.targetStates,
+            targetDevices: adsCampaigns.targetDevices,
+            stackTargetDevices: adsCreativeStacks.targetDevices,
+            remainingBudget: adsCampaigns.remainingBudgetUsdCents,
+            headline: adsCreatives.headline,
+            bodyText: adsCreatives.bodyText,
+            ctaText: adsCreatives.ctaText,
+            imageUrl: adsCreatives.imageUrl,
+            preparation: adsMediaAssets.preparation,
+            imageBytes: adsMediaAssets.bytes,
+            sizePolicy: adsCreatives.sizePolicy, creativePresetIds: adsCreatives.allowedPresetIds,
+            videoUrl: adsCreatives.videoUrl,
+            posterUrl: adsCreatives.posterUrl,
+            adType: adsCreatives.adType,
+            adFormat: adsCreatives.adFormat,
+            width: adsCreatives.width,
+            height: adsCreatives.height,
+            durationSeconds: adsMediaAssets.durationSeconds,
+            destinationUrl: adsCreatives.destinationUrl,
+          })
+          .from(adsPlacements)
+          .innerJoin(adsCampaigns, eq(adsPlacements.campaignId, adsCampaigns.id))
+          .innerJoin(adsCreatives, eq(adsPlacements.creativeId, adsCreatives.id))
+          .leftJoin(
+            adsCreativeStacks,
+            eq(adsCreatives.adStackId, adsCreativeStacks.id),
+          )
+          .leftJoin(
+            adsMediaAssets,
+            eq(adsCreatives.mediaAssetId, adsMediaAssets.id),
+          )
+          .where(eq(adsPlacements.placementToken, token))
+          .limit(1);
+
+        placement = foundPlacement;
+
+        if (!placement) {
+          throw new NotFoundException(
+            'Ad placement unavailable or budget exhausted',
+          );
+        }
+
+        if (
+          placement.status !== 'active' ||
+          placement.campaignStatus !== 'active' ||
+          placement.remainingBudget <= 0
+        ) {
+          throw new NotFoundException(
+            'Ad placement unavailable or budget exhausted',
+          );
+        }
+
+        // If placement is bound to a website, verify website status and domain match (`G01`)
+        if (placement.websiteId) {
+          const [site] = await this.db
+            .select()
+            .from(adsPromoterWebsites)
+            .where(eq(adsPromoterWebsites.id, placement.websiteId))
+            .limit(1);
+
+          if (
+            !site ||
+            !site.isActive ||
+            site.isSuspended ||
+            site.verificationStatus !== 'verified'
+          ) {
+            throw new ForbiddenException(
+              'Promoter website is not verified or active for ad delivery',
+            );
+          }
+
+          const headerHost =
+            extractHostnameFromHeader(requestHeaders?.origin) ||
+            extractHostnameFromHeader(requestHeaders?.referer) ||
+            extractHostnameFromHeader(referrerDomain);
+
+          if (
+            headerHost &&
+            !domainMatchesRegisteredSite(site.domain, headerHost)
+          ) {
+            throw new ForbiddenException(
+              `Domain mismatch for placement on ${site.domain}`,
+            );
+          }
+
+          await this.db
+            .update(adsPromoterWebsites)
+            .set({ embedPingLastAt: new Date() })
+            .where(eq(adsPromoterWebsites.id, placement.websiteId));
+        }
+      }
+
+      // Complete bounded candidate snapshot: exceeding capacity yields no-fill, never an auction over an arbitrary prefix.
+      const candidateDeadline = Math.min(serverDeadline, Date.now() + DELIVERY_RUNTIME.candidateMs);
+      const activeCandidates = await withinDeliveryBudget(this.db
+        .select({
+          campaignId: adsCampaigns.id,
+          creativeId: adsCreatives.id,
+          ownerId: adsCampaigns.advertiserId,
+          category: adsCampaigns.category,
+          startsAt: adsCampaigns.startsAt,
+          endsAt: adsCampaigns.endsAt,
+          frequencyCapPerDay: adsCampaigns.frequencyCapPerDay,
+          headline: adsCreatives.headline,
+          bodyText: adsCreatives.bodyText,
+          ctaText: adsCreatives.ctaText,
+          imageUrl: adsCreatives.imageUrl,
+          preparation: adsMediaAssets.preparation,
+          imageBytes: adsMediaAssets.bytes,
+          sizePolicy: adsCreatives.sizePolicy, creativePresetIds: adsCreatives.allowedPresetIds,
+          videoUrl: adsCreatives.videoUrl,
+          posterUrl: adsCreatives.posterUrl,
+          adType: adsCreatives.adType,
+          width: adsCreatives.width,
+          height: adsCreatives.height,
+          durationSeconds: adsMediaAssets.durationSeconds,
+          destinationUrl: adsCreatives.destinationUrl,
+          pricingModel: adsCampaigns.pricingModel,
+          pricingVersion: adsCampaigns.pricingVersion,
+          contentRevision: adsCampaigns.contentRevision,
+          currentSubmissionId: adsCampaigns.currentSubmissionId,
+          costPerImpressionUsdCents: adsCampaigns.costPerImpressionUsdCents,
+          costPerClickUsdCents: adsCampaigns.costPerClickUsdCents,
+          remainingBudgetUsdCents: adsCampaigns.remainingBudgetUsdCents,
+          hourlyPacingUsdCents: adsCampaigns.hourlyPacingUsdCents,
+          targetCountries: adsCampaigns.targetCountries,
+          targetStates: adsCampaigns.targetStates,
+          targetDevices: adsCampaigns.targetDevices,
+          targetHours: adsCampaigns.targetHours,
+          campaignSchedule: adsCampaigns.schedule,
+          campaignGeoMode: adsCampaigns.geoMode,
+          adStackId: adsCreatives.adStackId,
+          creativeStatus: adsCreatives.status,
+          creativeModerationStatus: adsCreatives.reviewStatus,
+          stackArchived: adsCreativeStacks.archived,
+          stackGeoMode: adsCreativeStacks.geoMode,
+          stackTargetDevices: adsCreativeStacks.targetDevices,
+          stackTargetHours: adsCreativeStacks.targetHours,
+          stackSchedule: adsCreativeStacks.schedule,
+          format: adsCreatives.adFormat,
+        })
+        .from(adsCampaigns)
+        .innerJoin(adsCreatives, eq(adsCampaigns.id, adsCreatives.campaignId))
+        .innerJoin(
+          adsCreativeStacks,
+          eq(adsCreatives.adStackId, adsCreativeStacks.id),
+        )
+        .leftJoin(
+          adsMediaAssets,
+          eq(adsCreatives.mediaAssetId, adsMediaAssets.id),
+        )
+        .where(
+          and(
+            eq(adsCampaigns.status, 'active'),
+            eq(adsCampaigns.isBonusDelivery, false),
+            eq(adsCampaigns.pricingVersion, 2),
+            eq(adsCampaigns.moderationStatus, 'approved'),
+            sql`${adsCampaigns.currentSubmissionId} = ${adsCampaigns.approvedSubmissionId}`,
+            sql`${adsCampaigns.contentRevision} = ${adsCampaigns.approvedRevision}`,
+            sql`${adsCampaigns.submissionIntentId} IS NULL`,
+            eq(adsCreatives.status, 'active'),
+            eq(adsCreatives.reviewStatus, 'approved'),
+            sql`${adsCampaigns.remainingBudgetUsdCents} > 0`,
+          ),
+        ).limit(2001), candidateDeadline, 'candidate_fetch');
+      if (activeCandidates.length > 2000) throw new Error('CANDIDATE_CAPACITY_EXCEEDED');
+
+      const formattedCandidates = activeCandidates.map((c) => ({
+        ...c,
+        pricingModel: (c.pricingModel || 'cpm') as 'cpm' | 'cpc',
+      }));
+
+      const requestedHandle = canonicalSlot
+        ? canonicalSlot.slotTagId
+        : this.requestedPlacementHandle(token, false);
+      const slotTypePolicy = canonicalSlot
+        ? (canonicalSlot.format === 'general' ? resolveGeneralSlotCreativeTypes : resolveSlotCreativeTypes)(canonicalSlot.allowedAdTypes)
+        : null;
+      const allowedTypes = new Set(slotTypePolicy?.types ?? this.allowedAdTypes(requestedHandle));
 
       if (
-        !headerHost ||
-        !domainMatchesRegisteredSite(canonicalWebsite.domain, headerHost)
+        placement &&
+        !allowedTypes.has(
+          (placement.adType || 'text') as 'text' | 'image' | 'video',
+        )
       ) {
-        throw new ForbiddenException(
-          `Domain mismatch: slot "${canonicalSlot.slotTagId}" is bound exclusively to https://${canonicalWebsite.domain}.`,
+        throw new NotFoundException(
+          'This placement does not support the creative type.',
         );
       }
 
-      // The Network auction cannot fill AdStation Direct inventory. Until assigned
-      // deal serving is available on this endpoint, return an empty slot.
-      if (canonicalSlot.slotType === 'direct') return null;
+      const resolvedDevice = (clientGeo?.device ||
+        this.deviceFromUserAgent(userAgent)) as
+        | 'desktop'
+        | 'android'
+        | 'ios'
+        | 'tablet'
+        | undefined;
 
-      // Update website heartbeat timestamp
-      await this.db
-        .update(adsPromoterWebsites)
-        .set({ embedPingLastAt: new Date() })
-        .where(eq(adsPromoterWebsites.id, canonicalWebsite.id));
+      const preAuctionExclusions: DeliveryEvaluation['preAuctionExclusions'] = [];
+      const eligibleCandidates = await withinDeliveryBudget(this.filterEligibleCandidates(
+        formattedCandidates,
+        {
+          ...clientGeo,
+          device: resolvedDevice,
+        },
+        preAuctionExclusions,
+      ), candidateDeadline, 'candidate_targeting');
 
-      const controls=await this.db.execute(sql`SELECT action FROM ads_traffic_controls WHERE is_active AND (expires_at IS NULL OR expires_at>now()) AND
-        ((target_scope='slot' AND target_id=${canonicalSlot.id}) OR(target_scope='website' AND target_id=${canonicalWebsite.id}) OR(target_scope='promoter' AND target_id=${canonicalPromoter.id}))`);
-      const restricted=controls.rows.length>0;
-      // Evaluate supply-time traffic risk for shadow-serving protection
-      const riskAssessment = this.fraudRules.assessSupplyRequestRisk({
-        slotTagId: canonicalSlot.slotTagId,
-        clientIp,
-        userAgent,
-        originOrRefererHost: headerHost,
-        registeredDomain: canonicalWebsite.domain,
-        trustScore: Math.min(
-          canonicalPromoter.trustScore ?? 70,
-          canonicalWebsite.trustScore ?? 70,
-        ),
+      const requestedLayout = canonicalSlot
+        ? canonicalSlot.format || 'banner'
+        : requestedHandle.startsWith('banner_')
+          ? 'banner'
+          : 'card';
+      const imageCap = Math.min(
+        placement?.imageMaxBytes ?? 250000,
+        requestedLayout === 'banner' ? 100000 : 300000,
+      );
+
+      const compatibleCandidates = eligibleCandidates.filter((candidate: any) => {
+        const reject = (reasonCode: string) => {
+          preAuctionExclusions.push({ campaignId: candidate.campaignId, creativeId: candidate.creativeId, reasonCode, stage: 'creative_compatibility' });
+          return false;
+        };
+        if (!allowedTypes.has(candidate.adType || 'text')) return reject('CREATIVE_TYPE_NOT_ALLOWED');
+        if (requestedLayout !== 'general' && candidate.format !== requestedLayout && (canonicalSlot || candidate.adType !== 'video'))
+          return reject('CREATIVE_FORMAT_MISMATCH');
+        if (candidate.adType === 'image') {
+          const measuredSlot = canonicalSlot?.format === 'general' && containerWidth !== undefined
+            ? { ...canonicalSlot, width: Math.min(canonicalSlot.width ?? containerWidth, containerWidth) } : canonicalSlot;
+          const sizingSlot = intersectCreativeSlotSizes(measuredSlot ?? { allowedPresetIds: JSON.stringify(APPROVED_IMAGE_AD_PRESETS.filter(preset => requestedLayout === 'banner' ? preset.ratioDecimal >= 3 : preset.ratioDecimal < 3).map(preset => preset.id)) }, candidate.sizePolicy, candidate.creativePresetIds);
+          if (!sizingSlot) return reject('CREATIVE_SIZE_POLICY_MISMATCH');
+          const general = requestedLayout === 'general' && canonicalSlot
+            ? selectGeneralSlotImage(candidate.preparation?.renditions ?? [{
+              url: candidate.imageUrl, bytes: candidate.imageBytes, width: candidate.width, height: candidate.height,
+            }], sizingSlot)
+            : null;
+          const restricted = candidate.sizePolicy === 'single' || candidate.sizePolicy === 'selected';
+          const rendition = requestedLayout === 'general' ? general
+            : restricted ? selectGeneralSlotImage((candidate.preparation?.renditions ?? [{ url: candidate.imageUrl, bytes: candidate.imageBytes, width: candidate.width, height: candidate.height }]).filter((image: any) => image.bytes <= imageCap), sizingSlot)
+              : selectImageRendition(candidate, requestedLayout, imageCap);
+          if (general) candidate.renderPresetId = general.presetId;
+          if (!rendition) return reject('CREATIVE_RENDITION_INCOMPATIBLE');
+          candidate.imageUrl = rendition.url;
+          candidate.width = rendition.width;
+          candidate.height = rendition.height;
+        }
+        return true;
       });
 
-      // Evaluate pre-auction gates explicitly (PLAN-0087)
-      const paidReadiness = paidDeliveryReadiness();
-      let earlyFallbackReason: string | null = null;
-      const earlyFallbackStage = 'supply_admission';
+      const allowedCategories = canonicalWebsite?.allowedCategories
+        ? this.parseStringArray(canonicalWebsite.allowedCategories)
+        : canonicalPromoter?.allowedCategories
+          ? this.parseStringArray(canonicalPromoter.allowedCategories)
+          : undefined;
 
-      if (canonicalSlot.lifecycleStatus === 'testing') {
-        earlyFallbackReason = 'SLOT_TESTING_MODE';
-      } else if (canonicalSlot.lifecycleStatus === 'installation_pending') {
-        earlyFallbackReason = 'SLOT_INSTALLATION_PENDING';
-      } else if (canonicalWebsite.policyStatus === 'testing' || canonicalWebsite.policyStatus === 'pending_approval') {
-        earlyFallbackReason = 'WEBSITE_POLICY_NOT_APPROVED';
-      } else if (!paidReadiness.ready) {
-        earlyFallbackReason = 'PLATFORM_PAID_DELIVERY_DISABLED:' + String(paidReadiness.reason);
-      } else if (restricted) {
-        earlyFallbackReason = 'TRAFFIC_CONTROL_RESTRICTION';
-      } else if (riskAssessment.trafficRiskStatus !== 'normal') {
-        earlyFallbackReason = 'TRAFFIC_RISK_' + String(riskAssessment.trafficRiskStatus).toUpperCase();
-      }
+      const deliveryEvaluation: DeliveryEvaluation = {
+        device: resolvedDevice ?? null,
+        deviceSource: clientGeo?.device ? 'request_context' : resolvedDevice ? 'user_agent' : 'unknown',
+        auctionPolicyVersion: approvedAdPolicy()?.version ?? null,
+        counts: {
+          discovered: formattedCandidates.length, targetingEligible: eligibleCandidates.length,
+          creativeCompatible: compatibleCandidates.length, auctionEntered: compatibleCandidates.length, eligibleGroups: 0
+        },
+        preAuctionExclusions: preAuctionExclusions.slice(0, 100),
+        omittedPreAuctionExclusions: Math.max(0, preAuctionExclusions.length - 100),
+      };
+      const auctionExclusions: ExcludedCandidateAudit[] = [];
+      const auctionDeadline = Math.min(serverDeadline, Date.now() + DELIVERY_RUNTIME.auctionMs);
+      requireDeliveryTime(auctionDeadline, 'auction');
+      const auctionResult = this.auctionEngine.resolveAuction(
+        compatibleCandidates,
+        {
+          slotHandle: requestedHandle,
+          requestId,
+          policyVersion: approvedAdPolicy()?.version,
+          bidderGroupingMode: approvedAdPolicy()?.bidderGrouping,
+          promoterAllowedCategories:
+            allowedCategories && allowedCategories.length > 0
+              ? allowedCategories
+              : undefined,
+          clientIp,
+          clientDevice: resolvedDevice,
+          clientGeoCountry: clientGeo?.country,
+          clientGeoRegion: clientGeo?.region,
+          clientGeoCity: clientGeo?.city,
+          deliveryEvaluation,
+        },
+        null,
+        auctionExclusions,
+      );
 
-      if (earlyFallbackReason) {
-        const isShadowRisk = restricted || riskAssessment.trafficRiskStatus !== 'normal';
-        return this.serveHouseOrShadowAd({containerWidth,
+      requireDeliveryTime(auctionDeadline, 'auction');
+      // If canonical slot has no eligible paid campaign winner, fall back cleanly to zero-charge CrimFig House Ad (`G04`)
+      if (!auctionResult && canonicalSlot) {
+        let fallbackReasonCode = 'AUCTION_NO_WINNER';
+        let terminationStage = 'auction';
+
+        if (formattedCandidates.length === 0) {
+          fallbackReasonCode = 'NO_PAID_CANDIDATES';
+          terminationStage = 'candidate_discovery';
+        } else if (eligibleCandidates.length === 0) {
+          fallbackReasonCode = 'TARGETING_CRITERIA_MISMATCH';
+          terminationStage = 'targeting_schedule';
+        } else if (compatibleCandidates.length === 0) {
+          fallbackReasonCode = 'CREATIVE_RENDITION_INCOMPATIBLE';
+          terminationStage = 'creative_compatibility';
+        }
+
+        // PLAN-0154 Option B: Fill eligible unsold inventory with approved bonus-credit campaigns
+        // ONLY when bonus_ad_delivery switch is ON, Promotional Ad Reserve has cash backing,
+        // and promoter/website owner is NOT the campaign advertiser (anti-self-dealing).
+        const bonusServed = await this.tryServeBonusPromoOnUnsoldSlot({
+          requestId,
+          slot: canonicalSlot,
+          website: canonicalWebsite,
+          promoter: canonicalPromoter,
+          allowedTypes,
+          resolvedDevice,
+          clientGeo,
+          clientIp: clientIp ?? '0.0.0.0',
+          userAgent,
+        });
+        if (bonusServed) return bonusServed;
+
+        return this.serveHouseOrShadowAd({
+          containerWidth,
           consentState: requestHeaders?.consentState,
           serveBefore: serverDeadline,
           requestId,
@@ -1781,633 +2187,243 @@ export class DeliveryService {
           promoterId: canonicalPromoter.id,
           placementId: null,
           format: canonicalSlot.format || 'banner',
-          inventoryClass: isShadowRisk ? 'shadow' : 'house',
-          deliveryMode: isShadowRisk ? 'shadow' : 'normal',
-          trafficRiskStatus: riskAssessment.trafficRiskStatus,
-          fallbackReasonCode: earlyFallbackReason,
-          terminationStage: earlyFallbackStage,
-          candidateEvaluationStatus: 'not_evaluated',
-          excludedCandidates: [{
-            reasonCode: earlyFallbackReason,
-            stage: earlyFallbackStage,
-            admission: {
-              slotLifecycle: canonicalSlot.lifecycleStatus,
-              websitePolicy: canonicalWebsite.policyStatus,
-              paidReady: paidReadiness.ready,
-              paidReadinessReason: paidReadiness.reason ?? null,
-              trafficRestricted: restricted,
-              trafficRisk: riskAssessment.trafficRiskStatus,
-              consentState: requestHeaders?.consentState ?? 'unknown',
-              measurementConsent: requestHeaders?.measurementConsent ?? null,
-            },
-          }],
+          inventoryClass: 'house',
+          deliveryMode: 'normal',
+          trafficRiskStatus: 'normal',
+          fallbackReasonCode,
+          terminationStage,
+          candidateEvaluationStatus: 'evaluated',
+          candidateCount: formattedCandidates.length,
+          excludedCandidates: [{ reasonCode: fallbackReasonCode, stage: terminationStage, count: formattedCandidates.length, deliveryEvaluation },
+          ...preAuctionExclusions, ...auctionExclusions.map(item => ({ ...item, stage: 'auction' }))],
           clientIp,
           userAgent,
-          referrerDomain: headerHost,
+          referrerDomain,
           clientGeo: {
             country: clientGeo?.country,
             region: clientGeo?.region,
-            device: clientGeo?.device || this.deviceFromUserAgent(userAgent),
+            device: resolvedDevice,
           },
         });
       }
-    }
 
-    // Legacy routes must obey the same release gate; a token cannot bypass the
-    // missing distributed reservation authority by selecting a different path.
-    if (!paidDeliveryReadiness().ready) throw new ForbiddenException('Paid ad delivery is not available. Verified canonical slots can serve CrimFig default ads.');
-
-    // 2. Legacy / Share-Link Placement lookup (`ads_placements.placementToken`)
-    let placement: any = null;
-    if (!canonicalSlot) {
-      const [foundPlacement] = await this.db
-        .select({
-          id: adsPlacements.id,
-          promoterId: adsPlacements.promoterId,
-          imageMaxBytes: adsPlacements.imageMaxBytes,
-          campaignId: adsPlacements.campaignId,
-          creativeId: adsPlacements.creativeId,
-          websiteId: adsPlacements.websiteId,
-          status: adsPlacements.status,
-          campaignStatus: adsCampaigns.status,
-          campaignModeration: adsCampaigns.moderationStatus,
-          contentRevision: adsCampaigns.contentRevision,
-          currentSubmissionId: adsCampaigns.currentSubmissionId,
-          approvedSubmissionId: adsCampaigns.approvedSubmissionId,
-          approvedRevision: adsCampaigns.approvedRevision,
-          submissionIntentId: adsCampaigns.submissionIntentId,
-          creativeReview: adsCreatives.reviewStatus,
-          creativeStatus: adsCreatives.status,
-          campaignSchedule: adsCampaigns.schedule,
-          stackSchedule: adsCreativeStacks.schedule,
-          campaignGeoMode: adsCampaigns.geoMode,
-          stackGeoMode: adsCreativeStacks.geoMode,
-          adStackId: adsCreatives.adStackId,
-          targetHours: adsCampaigns.targetHours,
-          stackTargetHours: adsCreativeStacks.targetHours,
-          targetCountries: adsCampaigns.targetCountries,
-          targetStates: adsCampaigns.targetStates,
-          targetDevices: adsCampaigns.targetDevices,
-          stackTargetDevices: adsCreativeStacks.targetDevices,
-          remainingBudget: adsCampaigns.remainingBudgetUsdCents,
-          headline: adsCreatives.headline,
-          bodyText: adsCreatives.bodyText,
-          ctaText: adsCreatives.ctaText,
-          imageUrl: adsCreatives.imageUrl,
-          preparation: adsMediaAssets.preparation,
-          imageBytes: adsMediaAssets.bytes,
-          sizePolicy:adsCreatives.sizePolicy,creativePresetIds:adsCreatives.allowedPresetIds,
-          videoUrl: adsCreatives.videoUrl,
-          posterUrl: adsCreatives.posterUrl,
-          adType: adsCreatives.adType,
-          adFormat: adsCreatives.adFormat,
-          width: adsCreatives.width,
-          height: adsCreatives.height,
-          durationSeconds: adsMediaAssets.durationSeconds,
-          destinationUrl: adsCreatives.destinationUrl,
-        })
-        .from(adsPlacements)
-        .innerJoin(adsCampaigns, eq(adsPlacements.campaignId, adsCampaigns.id))
-        .innerJoin(adsCreatives, eq(adsPlacements.creativeId, adsCreatives.id))
-        .leftJoin(
-          adsCreativeStacks,
-          eq(adsCreatives.adStackId, adsCreativeStacks.id),
-        )
-        .leftJoin(
-          adsMediaAssets,
-          eq(adsCreatives.mediaAssetId, adsMediaAssets.id),
-        )
-        .where(eq(adsPlacements.placementToken, token))
-        .limit(1);
-
-      placement = foundPlacement;
-
-      if (!placement) {
-        throw new NotFoundException(
-          'Ad placement unavailable or budget exhausted',
-        );
+      if (!auctionResult && !placement) {
+        throw new NotFoundException('No eligible ad creative available');
       }
 
-      if (
-        placement.status !== 'active' ||
-        placement.campaignStatus !== 'active' ||
-        placement.remainingBudget <= 0
-      ) {
-        throw new NotFoundException(
-          'Ad placement unavailable or budget exhausted',
-        );
-      }
-
-      // If placement is bound to a website, verify website status and domain match (`G01`)
-      if (placement.websiteId) {
-        const [site] = await this.db
-          .select()
-          .from(adsPromoterWebsites)
-          .where(eq(adsPromoterWebsites.id, placement.websiteId))
-          .limit(1);
-
+      if (!auctionResult && placement) {
         if (
-          !site ||
-          !site.isActive ||
-          site.isSuspended ||
-          site.verificationStatus !== 'verified'
-        ) {
-          throw new ForbiddenException(
-            'Promoter website is not verified or active for ad delivery',
+          !currentApproval({
+            ...placement,
+            moderationStatus: placement.campaignModeration,
+          }) ||
+          placement.creativeReview !== 'approved' ||
+          placement.creativeStatus !== 'active'
+        )
+          throw new NotFoundException(
+            'This creative is not approved for delivery.',
           );
-        }
-
-        const headerHost =
-          extractHostnameFromHeader(requestHeaders?.origin) ||
-          extractHostnameFromHeader(requestHeaders?.referer) ||
-          extractHostnameFromHeader(referrerDomain);
-
-        if (
-          headerHost &&
-          !domainMatchesRegisteredSite(site.domain, headerHost)
-        ) {
-          throw new ForbiddenException(
-            `Domain mismatch for placement on ${site.domain}`,
-          );
-        }
-
-        await this.db
-          .update(adsPromoterWebsites)
-          .set({ embedPingLastAt: new Date() })
-          .where(eq(adsPromoterWebsites.id, placement.websiteId));
-      }
-    }
-
-    // Complete bounded candidate snapshot: exceeding capacity yields no-fill, never an auction over an arbitrary prefix.
-    const candidateDeadline=Math.min(serverDeadline,Date.now()+DELIVERY_RUNTIME.candidateMs);
-    const activeCandidates = await withinDeliveryBudget(this.db
-      .select({
-        campaignId: adsCampaigns.id,
-        creativeId: adsCreatives.id,
-        ownerId: adsCampaigns.advertiserId,
-        category: adsCampaigns.category,
-        startsAt: adsCampaigns.startsAt,
-        endsAt: adsCampaigns.endsAt,
-        frequencyCapPerDay: adsCampaigns.frequencyCapPerDay,
-        headline: adsCreatives.headline,
-        bodyText: adsCreatives.bodyText,
-        ctaText: adsCreatives.ctaText,
-        imageUrl: adsCreatives.imageUrl,
-        preparation: adsMediaAssets.preparation,
-        imageBytes: adsMediaAssets.bytes,
-        sizePolicy:adsCreatives.sizePolicy,creativePresetIds:adsCreatives.allowedPresetIds,
-        videoUrl: adsCreatives.videoUrl,
-        posterUrl: adsCreatives.posterUrl,
-        adType: adsCreatives.adType,
-        width: adsCreatives.width,
-        height: adsCreatives.height,
-        durationSeconds: adsMediaAssets.durationSeconds,
-        destinationUrl: adsCreatives.destinationUrl,
-        pricingModel: adsCampaigns.pricingModel,
-        pricingVersion: adsCampaigns.pricingVersion,
-        contentRevision: adsCampaigns.contentRevision,
-        currentSubmissionId: adsCampaigns.currentSubmissionId,
-        costPerImpressionUsdCents: adsCampaigns.costPerImpressionUsdCents,
-        costPerClickUsdCents: adsCampaigns.costPerClickUsdCents,
-        remainingBudgetUsdCents: adsCampaigns.remainingBudgetUsdCents,
-        hourlyPacingUsdCents: adsCampaigns.hourlyPacingUsdCents,
-        targetCountries: adsCampaigns.targetCountries,
-        targetStates: adsCampaigns.targetStates,
-        targetDevices: adsCampaigns.targetDevices,
-        targetHours: adsCampaigns.targetHours,
-        campaignSchedule: adsCampaigns.schedule,
-        campaignGeoMode: adsCampaigns.geoMode,
-        adStackId: adsCreatives.adStackId,
-        creativeStatus: adsCreatives.status,
-        creativeModerationStatus: adsCreatives.reviewStatus,
-        stackArchived: adsCreativeStacks.archived,
-        stackGeoMode: adsCreativeStacks.geoMode,
-        stackTargetDevices: adsCreativeStacks.targetDevices,
-        stackTargetHours: adsCreativeStacks.targetHours,
-        stackSchedule: adsCreativeStacks.schedule,
-        format: adsCreatives.adFormat,
-      })
-      .from(adsCampaigns)
-      .innerJoin(adsCreatives, eq(adsCampaigns.id, adsCreatives.campaignId))
-      .innerJoin(
-        adsCreativeStacks,
-        eq(adsCreatives.adStackId, adsCreativeStacks.id),
-      )
-      .leftJoin(
-        adsMediaAssets,
-        eq(adsCreatives.mediaAssetId, adsMediaAssets.id),
-      )
-      .where(
-        and(
-          eq(adsCampaigns.status, 'active'),
-          eq(adsCampaigns.isBonusDelivery, false),
-          eq(adsCampaigns.pricingVersion, 2),
-          eq(adsCampaigns.moderationStatus, 'approved'),
-          sql`${adsCampaigns.currentSubmissionId} = ${adsCampaigns.approvedSubmissionId}`,
-          sql`${adsCampaigns.contentRevision} = ${adsCampaigns.approvedRevision}`,
-          sql`${adsCampaigns.submissionIntentId} IS NULL`,
-          eq(adsCreatives.status, 'active'),
-          eq(adsCreatives.reviewStatus, 'approved'),
-          sql`${adsCampaigns.remainingBudgetUsdCents} > 0`,
-        ),
-      ).limit(2001),candidateDeadline,'candidate_fetch');
-    if(activeCandidates.length>2000)throw new Error('CANDIDATE_CAPACITY_EXCEEDED');
-
-    const formattedCandidates = activeCandidates.map((c) => ({
-      ...c,
-      pricingModel: (c.pricingModel || 'cpm') as 'cpm' | 'cpc',
-    }));
-
-    const requestedHandle = canonicalSlot
-      ? canonicalSlot.slotTagId
-      : this.requestedPlacementHandle(token, false);
-    const slotTypePolicy = canonicalSlot
-      ? (canonicalSlot.format === 'general' ? resolveGeneralSlotCreativeTypes : resolveSlotCreativeTypes)(canonicalSlot.allowedAdTypes)
-      : null;
-    const allowedTypes = new Set(slotTypePolicy?.types ?? this.allowedAdTypes(requestedHandle));
-
-    if (
-      placement &&
-      !allowedTypes.has(
-        (placement.adType || 'text') as 'text' | 'image' | 'video',
-      )
-    ) {
-      throw new NotFoundException(
-        'This placement does not support the creative type.',
-      );
-    }
-
-    const resolvedDevice = (clientGeo?.device ||
-      this.deviceFromUserAgent(userAgent)) as
-      | 'desktop'
-      | 'android'
-      | 'ios'
-      | 'tablet'
-      | undefined;
-
-    const preAuctionExclusions: DeliveryEvaluation['preAuctionExclusions'] = [];
-    const eligibleCandidates = await withinDeliveryBudget(this.filterEligibleCandidates(
-      formattedCandidates,
-      {
-        ...clientGeo,
-        device: resolvedDevice,
-      },
-      preAuctionExclusions,
-    ),candidateDeadline,'candidate_targeting');
-
-    const requestedLayout = canonicalSlot
-      ? canonicalSlot.format || 'banner'
-      : requestedHandle.startsWith('banner_')
-        ? 'banner'
-        : 'card';
-    const imageCap = Math.min(
-      placement?.imageMaxBytes ?? 250000,
-      requestedLayout === 'banner' ? 100000 : 300000,
-    );
-
-    const compatibleCandidates = eligibleCandidates.filter((candidate: any) => {
-      const reject = (reasonCode: string) => {
-        preAuctionExclusions.push({ campaignId: candidate.campaignId, creativeId: candidate.creativeId, reasonCode, stage: 'creative_compatibility' });
-        return false;
-      };
-      if (!allowedTypes.has(candidate.adType || 'text')) return reject('CREATIVE_TYPE_NOT_ALLOWED');
-      if (requestedLayout !== 'general' && candidate.format !== requestedLayout && (canonicalSlot || candidate.adType !== 'video'))
-        return reject('CREATIVE_FORMAT_MISMATCH');
-      if (candidate.adType === 'image') {
-        const measuredSlot = canonicalSlot?.format === 'general' && containerWidth !== undefined
-          ? { ...canonicalSlot, width: Math.min(canonicalSlot.width ?? containerWidth, containerWidth) } : canonicalSlot;
-        const sizingSlot=intersectCreativeSlotSizes(measuredSlot??{allowedPresetIds:JSON.stringify(APPROVED_IMAGE_AD_PRESETS.filter(preset=>requestedLayout==='banner'?preset.ratioDecimal>=3:preset.ratioDecimal<3).map(preset=>preset.id))},candidate.sizePolicy,candidate.creativePresetIds);
-        if(!sizingSlot)return reject('CREATIVE_SIZE_POLICY_MISMATCH');
-        const general = requestedLayout === 'general' && canonicalSlot
-          ? selectGeneralSlotImage(candidate.preparation?.renditions ?? [{
-              url: candidate.imageUrl, bytes: candidate.imageBytes, width: candidate.width, height: candidate.height,
-            }], sizingSlot)
-          : null;
-        const restricted=candidate.sizePolicy==='single'||candidate.sizePolicy==='selected';
-        const rendition = requestedLayout === 'general' ? general
-          : restricted?selectGeneralSlotImage((candidate.preparation?.renditions??[{url:candidate.imageUrl,bytes:candidate.imageBytes,width:candidate.width,height:candidate.height}]).filter((image:any)=>image.bytes<=imageCap),sizingSlot)
-          : selectImageRendition(candidate, requestedLayout, imageCap);
-        if (general) candidate.renderPresetId = general.presetId;
-        if (!rendition) return reject('CREATIVE_RENDITION_INCOMPATIBLE');
-        candidate.imageUrl = rendition.url;
-        candidate.width = rendition.width;
-        candidate.height = rendition.height;
-      }
-      return true;
-    });
-
-    const allowedCategories = canonicalWebsite?.allowedCategories
-      ? this.parseStringArray(canonicalWebsite.allowedCategories)
-      : canonicalPromoter?.allowedCategories
-        ? this.parseStringArray(canonicalPromoter.allowedCategories)
-        : undefined;
-
-    const deliveryEvaluation: DeliveryEvaluation = {
-      device: resolvedDevice ?? null,
-      deviceSource: clientGeo?.device ? 'request_context' : resolvedDevice ? 'user_agent' : 'unknown',
-      auctionPolicyVersion: approvedAdPolicy()?.version ?? null,
-      counts: { discovered: formattedCandidates.length, targetingEligible: eligibleCandidates.length,
-        creativeCompatible: compatibleCandidates.length, auctionEntered: compatibleCandidates.length, eligibleGroups: 0 },
-      preAuctionExclusions: preAuctionExclusions.slice(0, 100),
-      omittedPreAuctionExclusions: Math.max(0, preAuctionExclusions.length - 100),
-    };
-    const auctionExclusions: ExcludedCandidateAudit[] = [];
-    const auctionDeadline=Math.min(serverDeadline,Date.now()+DELIVERY_RUNTIME.auctionMs);
-    requireDeliveryTime(auctionDeadline,'auction');
-    const auctionResult = this.auctionEngine.resolveAuction(
-      compatibleCandidates,
-      {
-        slotHandle: requestedHandle,
-        requestId,
-        policyVersion:approvedAdPolicy()?.version,
-        bidderGroupingMode:approvedAdPolicy()?.bidderGrouping,
-        promoterAllowedCategories:
-          allowedCategories && allowedCategories.length > 0
-            ? allowedCategories
-            : undefined,
-        clientIp,
-        clientDevice: resolvedDevice,
-        clientGeoCountry: clientGeo?.country,
-        clientGeoRegion: clientGeo?.region,
-        clientGeoCity: clientGeo?.city,
-        deliveryEvaluation,
-      },
-      null,
-      auctionExclusions,
-    );
-
-    requireDeliveryTime(auctionDeadline,'auction');
-    // If canonical slot has no eligible paid campaign winner, fall back cleanly to zero-charge CrimFig House Ad (`G04`)
-    if (!auctionResult && canonicalSlot) {
-      let fallbackReasonCode = 'AUCTION_NO_WINNER';
-      let terminationStage = 'auction';
-
-      if (formattedCandidates.length === 0) {
-        fallbackReasonCode = 'NO_PAID_CANDIDATES';
-        terminationStage = 'candidate_discovery';
-      } else if (eligibleCandidates.length === 0) {
-        fallbackReasonCode = 'TARGETING_CRITERIA_MISMATCH';
-        terminationStage = 'targeting_schedule';
-      } else if (compatibleCandidates.length === 0) {
-        fallbackReasonCode = 'CREATIVE_RENDITION_INCOMPATIBLE';
-        terminationStage = 'creative_compatibility';
-      }
-
-      // PLAN-0154 Option B: Fill eligible unsold inventory with approved bonus-credit campaigns
-      // ONLY when bonus_ad_delivery switch is ON, Promotional Ad Reserve has cash backing,
-      // and promoter/website owner is NOT the campaign advertiser (anti-self-dealing).
-      const bonusServed = await this.tryServeBonusPromoOnUnsoldSlot({
-        requestId,
-        slot: canonicalSlot,
-        website: canonicalWebsite,
-        promoter: canonicalPromoter,
-        allowedTypes,
-        resolvedDevice,
-        clientGeo,
-        clientIp: clientIp ?? '0.0.0.0',
-        userAgent,
-      });
-      if (bonusServed) return bonusServed;
-
-      return this.serveHouseOrShadowAd({containerWidth,
-        consentState: requestHeaders?.consentState,
-        serveBefore: serverDeadline,
-        requestId,
-        slotTagId: canonicalSlot.slotTagId,
-        slotId: canonicalSlot.id,
-        websiteId: canonicalWebsite.id,
-        promoterId: canonicalPromoter.id,
-        placementId: null,
-        format: canonicalSlot.format || 'banner',
-        inventoryClass: 'house',
-        deliveryMode: 'normal',
-        trafficRiskStatus: 'normal',
-        fallbackReasonCode,
-        terminationStage,
-        candidateEvaluationStatus: 'evaluated',
-        candidateCount: formattedCandidates.length,
-        excludedCandidates: [{ reasonCode: fallbackReasonCode, stage: terminationStage, count: formattedCandidates.length, deliveryEvaluation },
-          ...preAuctionExclusions, ...auctionExclusions.map(item => ({ ...item, stage: 'auction' }))],
-        clientIp,
-        userAgent,
-        referrerDomain,
-        clientGeo: {
-          country: clientGeo?.country,
-          region: clientGeo?.region,
+        const direct = await this.filterEligibleCandidates([placement], {
+          ...clientGeo,
           device: resolvedDevice,
-        },
-      });
-    }
+        });
+        if (!direct.length || !scheduleMatches(direct[0].schedule, new Date()))
+          throw new NotFoundException(
+            'This placement is outside its effective schedule or targeting.',
+          );
+      }
 
-    if (!auctionResult && !placement) {
-      throw new NotFoundException('No eligible ad creative available');
-    }
-
-    if (!auctionResult && placement) {
+      const winningCreative = auctionResult ? auctionResult.winner : placement!;
       if (
-        !currentApproval({
-          ...placement,
-          moderationStatus: placement.campaignModeration,
-        }) ||
-        placement.creativeReview !== 'approved' ||
-        placement.creativeStatus !== 'active'
-      )
-        throw new NotFoundException(
-          'This creative is not approved for delivery.',
-        );
-      const direct = await this.filterEligibleCandidates([placement], {
-        ...clientGeo,
-        device: resolvedDevice,
-      });
-      if (!direct.length || !scheduleMatches(direct[0].schedule, new Date()))
-        throw new NotFoundException(
-          'This placement is outside its effective schedule or targeting.',
-        );
-    }
+        (winningCreative as any).adType === 'image' &&
+        winningCreative === placement
+      ) {
+        const restricted = (winningCreative as any).sizePolicy === 'single' || (winningCreative as any).sizePolicy === 'selected';
+        const restriction = intersectCreativeSlotSizes({ allowedPresetIds: null }, (winningCreative as any).sizePolicy, (winningCreative as any).creativePresetIds);
+        const rendition = restricted
+          ? restriction && selectGeneralSlotImage(((winningCreative as any).preparation?.renditions ?? [{ url: winningCreative.imageUrl, width: (winningCreative as any).width, height: (winningCreative as any).height, bytes: (winningCreative as any).imageBytes }]).filter((image: any) => image.bytes <= Math.min((placement as any).imageMaxBytes ?? 250000, 300000)), restriction)
+          : selectImageRendition(
+            winningCreative,
+            (winningCreative as any).adFormat || 'card',
+            Math.min((placement as any).imageMaxBytes ?? 250000, 300000),
+          );
+        if (!rendition)
+          throw new NotFoundException(
+            'No compatible image rendition for this placement.',
+          );
+        winningCreative.imageUrl = rendition.url;
+        (winningCreative as any).width = rendition.width;
+        (winningCreative as any).height = rendition.height;
+      }
 
-    const winningCreative = auctionResult ? auctionResult.winner : placement!;
-    if (
-      (winningCreative as any).adType === 'image' &&
-      winningCreative === placement
-    ) {
-      const restricted=(winningCreative as any).sizePolicy==='single'||(winningCreative as any).sizePolicy==='selected';
-      const restriction=intersectCreativeSlotSizes({allowedPresetIds:null},(winningCreative as any).sizePolicy,(winningCreative as any).creativePresetIds);
-      const rendition = restricted
-        ? restriction&&selectGeneralSlotImage(((winningCreative as any).preparation?.renditions??[{url:winningCreative.imageUrl,width:(winningCreative as any).width,height:(winningCreative as any).height,bytes:(winningCreative as any).imageBytes}]).filter((image:any)=>image.bytes<=Math.min((placement as any).imageMaxBytes??250000,300000)),restriction)
-        : selectImageRendition(
-        winningCreative,
-        (winningCreative as any).adFormat || 'card',
-        Math.min((placement as any).imageMaxBytes ?? 250000, 300000),
-      );
-      if (!rendition)
-        throw new NotFoundException(
-          'No compatible image rendition for this placement.',
-        );
-      winningCreative.imageUrl = rendition.url;
-      (winningCreative as any).width = rendition.width;
-      (winningCreative as any).height = rendition.height;
-    }
+      // Never trust client mode/fill parameters to zero out paid campaign prices (`G03`)
+      const clearingPriceMicros = auctionResult
+        ? auctionResult.clearingPriceMicros
+        : 0;
+      const billingPriceNanos = BigInt(auctionResult?.billingPriceNanos || 0);
+      const finalCampaignId = auctionResult
+        ? auctionResult.winner.campaignId
+        : placement!.campaignId;
+      const finalCreativeId = auctionResult
+        ? auctionResult.winner.creativeId
+        : placement!.creativeId;
+      const promoterId = canonicalPromoter
+        ? canonicalPromoter.id
+        : placement!.promoterId;
+      const placementId = placement ? placement.id : HOUSE_PLACEMENT_UUID;
+      const ipHash = this.tokenService.hashIp(clientIp);
 
-    // Never trust client mode/fill parameters to zero out paid campaign prices (`G03`)
-    const clearingPriceMicros = auctionResult
-      ? auctionResult.clearingPriceMicros
-      : 0;
-    const billingPriceNanos = BigInt(auctionResult?.billingPriceNanos || 0);
-    const finalCampaignId = auctionResult
-      ? auctionResult.winner.campaignId
-      : placement!.campaignId;
-    const finalCreativeId = auctionResult
-      ? auctionResult.winner.creativeId
-      : placement!.creativeId;
-    const promoterId = canonicalPromoter
-      ? canonicalPromoter.id
-      : placement!.promoterId;
-    const placementId = placement ? placement.id : HOUSE_PLACEMENT_UUID;
-    const ipHash = this.tokenService.hashIp(clientIp);
-
-    if(!canonicalSlot || !canonicalWebsite || !this.opportunities || !auctionResult)throw new ForbiddenException('Paid delivery requires canonical funded inventory');
-    let serve:{id:string};
-    let billingStage: 'billing_reserve' | 'billing_issue' = 'billing_reserve';
-    const handoffStartedAt = Date.now();
-    let reserveAttempted = false;
-    let reserveConfirmedAt: number | undefined;
-    try {
-      const cpcVisitorKey = auctionResult.winner.pricingModel === 'cpc' && requestHeaders?.origin
-        && requestHeaders.origin.startsWith('https://')
-        && domainMatchesRegisteredSite(canonicalWebsite.domain, extractHostnameFromHeader(requestHeaders.origin) || '')
-        ? cpcVisitorContinuity(requestHeaders, requestHeaders.origin, finalCampaignId, {
+      if (!canonicalSlot || !canonicalWebsite || !this.opportunities || !auctionResult) throw new ForbiddenException('Paid delivery requires canonical funded inventory');
+      let serve: { id: string };
+      let billingStage: 'billing_reserve' | 'billing_issue' = 'billing_reserve';
+      const handoffStartedAt = Date.now();
+      let reserveAttempted = false;
+      let reserveConfirmedAt: number | undefined;
+      try {
+        const cpcVisitorKey = auctionResult.winner.pricingModel === 'cpc' && requestHeaders?.origin
+          && requestHeaders.origin.startsWith('https://')
+          && domainMatchesRegisteredSite(canonicalWebsite.domain, extractHostnameFromHeader(requestHeaders.origin) || '')
+          ? cpcVisitorContinuity(requestHeaders, requestHeaders.origin, finalCampaignId, {
             origin: process.env.ADS_CPC_CONTINUITY_PUBLISHER_ORIGIN,
             issuerSecret: process.env.ADS_CPC_CONTINUITY_ISSUER_SECRET,
             continuitySecret: process.env.ADS_CPC_CONTINUITY_HASH_SECRET,
           })
-        : undefined;
-      const viewer=this.fraudRules.computeKeyedIpHash(clientIp).keyedIpHash;
-      requireDeliveryTime(serverDeadline,'reserve');
-      reserveAttempted = true;
-      const receipt=await this.opportunities.reserve({serveBefore:new Date(serverDeadline).toISOString(),opportunityId:requestId,campaignId:finalCampaignId,creativeId:finalCreativeId,
-        submissionId:(winningCreative as any).currentSubmissionId,contentRevision:(winningCreative as any).contentRevision,
-        promoterId,websiteId:canonicalWebsite.id,slotId:canonicalSlot.id,policyVersion:approvedAdPolicy()!.version,
-        priceNanos:billingPriceNanos.toString(),clearingPriceMicros,visitorKey:viewer,cpcVisitorKey,ipHash,selectedImageUrl:winningCreative.imageUrl??undefined,
-        decision:stableAdValue({...auctionResult.decisionSnapshot,consentState:requestHeaders?.consentState??"unknown"})});
-      billingStage = 'billing_issue';
-      reserveConfirmedAt = Date.now();
-      const issued=await this.opportunities.issue(receipt);serve={id:issued.serveId};
-    } catch(error) {
-      // Unknown remote outcomes retain their existing opportunity for reconciliation. Never locally release an issued token.
-      const upstreamStatus = error instanceof OpportunityHttpError ? error.upstreamStatus : error instanceof ConflictException ? 409 : null;
-      const rejectionReasons: Record<number, string> = {
-        400: 'BILLING_REQUEST_INVALID',
-        401: 'BILLING_AUTHORIZATION_REJECTED',
-        403: 'BILLING_AUTHORIZATION_REJECTED',
-        409: 'BILLING_OPPORTUNITY_CONFLICT',
-      };
-      const rejection = upstreamStatus === null ? undefined : rejectionReasons[upstreamStatus];
-      const reasonCode = error instanceof DeliveryDeadlineError ? 'DELIVERY_DEADLINE_EXCEEDED' :
-        (error instanceof OpportunityConflictError ? error.reasonCode : undefined) ?? rejection ?? 'BILLING_OUTCOME_UNCONFIRMED';
-      const capacityDetails = error instanceof OpportunityConflictError ? error.capacityDetails : undefined;
-      const attemptOutcome = rejection ? 'rejected' : 'unconfirmed';
-      return this.serveHouseOrShadowAd({containerWidth,consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
-        promoterId,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',
-        candidateCount: auctionResult.decisionSnapshot.candidateCount,
-        excludedCandidates: [{ reasonCode, stage: billingStage, campaignId: finalCampaignId, creativeId: finalCreativeId,
-          ...(capacityDetails ? { capacityDetails } : {}),
-          deliveryEvaluation: auctionResult.decisionSnapshot.evaluatedCandidates?.[0]?.deliveryEvaluation ?? deliveryEvaluation,
-          parentOpportunityId: requestId,
-          transportRequestId: requestHeaders?.transportRequestId ?? null,
-          creativeCompatibility: {
-            stackId: winningCreative.adStackId ?? null,
-            format: winningCreative.format ?? null,
-            type: winningCreative.adType ?? null,
-            status: winningCreative.creativeStatus ?? null,
-            approval: winningCreative.creativeModerationStatus ?? null,
-            stackArchived: winningCreative.stackArchived ?? null,
-            slotId: canonicalSlot.id,
-            slotFormat: canonicalSlot.format,
-            allowedTypeSource: slotTypePolicy?.source ?? null,
-            allowedTypes: slotTypePolicy?.types ?? [],
-            submissionId: winningCreative.currentSubmissionId ?? null,
-            contentRevision: winningCreative.contentRevision ?? null,
-          },
-          billingHandoff: {
-            reserve: reserveConfirmedAt !== undefined ? 'confirmed' : reserveAttempted ? attemptOutcome : 'not_attempted',
-            issue: reserveConfirmedAt !== undefined ? attemptOutcome : 'not_attempted',
-            elapsedMs: Date.now() - handoffStartedAt,
-          },
-          upstreamStatus }],
-        clientIp,userAgent,referrerDomain:canonicalWebsite.domain,clientGeo});
-    }
+          : undefined;
+        const viewer = this.fraudRules.computeKeyedIpHash(clientIp).keyedIpHash;
+        requireDeliveryTime(serverDeadline, 'reserve');
+        reserveAttempted = true;
+        const receipt = await this.opportunities.reserve({
+          serveBefore: new Date(serverDeadline).toISOString(), opportunityId: requestId, campaignId: finalCampaignId, creativeId: finalCreativeId,
+          submissionId: (winningCreative as any).currentSubmissionId, contentRevision: (winningCreative as any).contentRevision,
+          promoterId, websiteId: canonicalWebsite.id, slotId: canonicalSlot.id, policyVersion: approvedAdPolicy()!.version,
+          priceNanos: billingPriceNanos.toString(), clearingPriceMicros, visitorKey: viewer, cpcVisitorKey, ipHash, selectedImageUrl: winningCreative.imageUrl ?? undefined,
+          decision: stableAdValue({ ...auctionResult.decisionSnapshot, consentState: requestHeaders?.consentState ?? "unknown" })
+        });
+        billingStage = 'billing_issue';
+        reserveConfirmedAt = Date.now();
+        const issued = await this.opportunities.issue(receipt); serve = { id: issued.serveId };
+      } catch (error) {
+        // Unknown remote outcomes retain their existing opportunity for reconciliation. Never locally release an issued token.
+        const upstreamStatus = error instanceof OpportunityHttpError ? error.upstreamStatus : error instanceof ConflictException ? 409 : null;
+        const rejectionReasons: Record<number, string> = {
+          400: 'BILLING_REQUEST_INVALID',
+          401: 'BILLING_AUTHORIZATION_REJECTED',
+          403: 'BILLING_AUTHORIZATION_REJECTED',
+          409: 'BILLING_OPPORTUNITY_CONFLICT',
+        };
+        const rejection = upstreamStatus === null ? undefined : rejectionReasons[upstreamStatus];
+        const reasonCode = error instanceof DeliveryDeadlineError ? 'DELIVERY_DEADLINE_EXCEEDED' :
+          (error instanceof OpportunityConflictError ? error.reasonCode : undefined) ?? rejection ?? 'BILLING_OUTCOME_UNCONFIRMED';
+        const capacityDetails = error instanceof OpportunityConflictError ? error.capacityDetails : undefined;
+        const attemptOutcome = rejection ? 'rejected' : 'unconfirmed';
+        return this.serveHouseOrShadowAd({
+          containerWidth, consentState: requestHeaders?.consentState, serveBefore: serverDeadline, parentOpportunityId: requestId, requestId: crypto.randomUUID(), slotTagId: canonicalSlot.slotTagId, slotId: canonicalSlot.id, websiteId: canonicalWebsite.id,
+          promoterId, placementId: null, format: canonicalSlot.format || 'banner', inventoryClass: 'house', deliveryMode: 'normal', trafficRiskStatus: 'normal',
+          candidateCount: auctionResult.decisionSnapshot.candidateCount,
+          excludedCandidates: [{
+            reasonCode, stage: billingStage, campaignId: finalCampaignId, creativeId: finalCreativeId,
+            ...(capacityDetails ? { capacityDetails } : {}),
+            deliveryEvaluation: auctionResult.decisionSnapshot.evaluatedCandidates?.[0]?.deliveryEvaluation ?? deliveryEvaluation,
+            parentOpportunityId: requestId,
+            transportRequestId: requestHeaders?.transportRequestId ?? null,
+            creativeCompatibility: {
+              stackId: winningCreative.adStackId ?? null,
+              format: winningCreative.format ?? null,
+              type: winningCreative.adType ?? null,
+              status: winningCreative.creativeStatus ?? null,
+              approval: winningCreative.creativeModerationStatus ?? null,
+              stackArchived: winningCreative.stackArchived ?? null,
+              slotId: canonicalSlot.id,
+              slotFormat: canonicalSlot.format,
+              allowedTypeSource: slotTypePolicy?.source ?? null,
+              allowedTypes: slotTypePolicy?.types ?? [],
+              submissionId: winningCreative.currentSubmissionId ?? null,
+              contentRevision: winningCreative.contentRevision ?? null,
+            },
+            billingHandoff: {
+              reserve: reserveConfirmedAt !== undefined ? 'confirmed' : reserveAttempted ? attemptOutcome : 'not_attempted',
+              issue: reserveConfirmedAt !== undefined ? attemptOutcome : 'not_attempted',
+              elapsedMs: Date.now() - handoffStartedAt,
+            },
+            upstreamStatus
+          }],
+          clientIp, userAgent, referrerDomain: canonicalWebsite.domain, clientGeo
+        });
+      }
 
-    // Generate cryptographic signed impression token binding this serve
-    const impToken = this.tokenService.generateToken({
-      servedId: serve.id,
-      placementId,
-      campaignId: finalCampaignId,
-      creativeId: finalCreativeId,
-      promoterId,
-      ipHash,
-    });
-
-    const { keyedIpHash, keyId } = this.fraudRules.computeKeyedIpHash(clientIp);
-
-    // Record provisional impression telemetry (payable settlement requires validated viewable_impression or click)
-    if (placement) {
-      await this.db.insert(adsInteractions).values({
-        placementId: placement.id,
+      // Generate cryptographic signed impression token binding this serve
+      const impToken = this.tokenService.generateToken({
+        servedId: serve.id,
+        placementId,
+        campaignId: finalCampaignId,
+        creativeId: finalCreativeId,
         promoterId,
-        serveId: serve.id,
-        websiteId: canonicalWebsite?.id || placement.websiteId || null,
-        slotId: canonicalSlot?.id || null,
-        type: 'impression',
-        source:
-          canonicalSlot || placement.websiteId ? 'embed' : 'share_link',
-        // PLAN-0066: trusted (proxy-verified) IP is stored and used for decisions.
-        actorIp: clientIp || null,
-        userAgent,
-        referrer: referrerDomain,
-        isValid: true,
-        assessmentStatus: 'provisional',
-        ivtCategory: 'unclassified',
-        financialEligibility: 'pending',
-        keyedIpHash,
-        keyId,
+        ipHash,
       });
-    }
 
-    const baseUrl = this.publicBaseUrl();
-    const clickUrl = `${baseUrl}/api/v1/delivery/go/${impToken}?pid=${promoterId}`;
+      const { keyedIpHash, keyId } = this.fraudRules.computeKeyedIpHash(clientIp);
 
-    const adType = ((winningCreative as any).adType ||
-      ((winningCreative as any).videoUrl
-        ? 'video'
-        : (winningCreative as any).imageUrl
-          ? 'image'
-          : 'text')) as 'text' | 'image' | 'video';
+      // Record provisional impression telemetry (payable settlement requires validated viewable_impression or click)
+      if (placement) {
+        await this.db.insert(adsInteractions).values({
+          placementId: placement.id,
+          promoterId,
+          serveId: serve.id,
+          websiteId: canonicalWebsite?.id || placement.websiteId || null,
+          slotId: canonicalSlot?.id || null,
+          type: 'impression',
+          source:
+            canonicalSlot || placement.websiteId ? 'embed' : 'share_link',
+          // PLAN-0066: trusted (proxy-verified) IP is stored and used for decisions.
+          actorIp: clientIp || null,
+          userAgent,
+          referrer: referrerDomain,
+          isValid: true,
+          assessmentStatus: 'provisional',
+          ivtCategory: 'unclassified',
+          financialEligibility: 'pending',
+          keyedIpHash,
+          keyId,
+        });
+      }
 
-    return {
-      adType,
-      format:
-        (winningCreative as any).renderPresetId ||
-        (winningCreative as any).adFormat ||
-        (winningCreative as any).format ||
-        'card',
-      headline: winningCreative.headline,
-      bodyText: winningCreative.bodyText,
-      ctaText: winningCreative.ctaText,
-      imageUrl: this.absoluteMediaUrl(winningCreative.imageUrl),
-      videoUrl: this.absoluteMediaUrl((winningCreative as any).videoUrl),
-      posterUrl: this.absoluteMediaUrl((winningCreative as any).posterUrl),
-      width: (winningCreative as any).width || null,
-      height: (winningCreative as any).height || null,
-      durationSeconds: (winningCreative as any).durationSeconds || null,
-      isHouseAd: false,
-      impToken,
-      clickUrl,
-    };
-    } catch(error) {
-      if(this.evidence)await this.evidence.append(requestId,{version:1,stage:'no_fill',reasonCode:'REQUEST_NOT_SERVED',errorCategory:error instanceof Error?error.name:'UNKNOWN',runtimeVersion:DELIVERY_RUNTIME.version,elapsedMs:DELIVERY_RUNTIME.serverMs-(serverDeadline-Date.now()),slotHandleHash:adDigest(token),consentState:requestHeaders?.consentState??'unknown',serverReceivedAt:new Date()});
-      if(error instanceof DeliveryDeadlineError&&['candidate_fetch','candidate_targeting','auction'].includes(error.stage)&&canonicalSlot&&Date.now()<serverDeadline){
-        return this.serveHouseOrShadowAd({containerWidth,consentState:requestHeaders?.consentState,serveBefore:serverDeadline,parentOpportunityId:requestId,requestId:crypto.randomUUID(),slotTagId:canonicalSlot.slotTagId,slotId:canonicalSlot.id,websiteId:canonicalWebsite.id,
-          promoterId:canonicalPromoter.id,placementId:null,format:canonicalSlot.format||'banner',inventoryClass:'house',deliveryMode:'normal',trafficRiskStatus:'normal',fallbackReasonCode:'DELIVERY_DEADLINE_EXCEEDED',terminationStage:error.stage,candidateEvaluationStatus:'failed',clientIp,userAgent,referrerDomain,clientGeo});
+      const baseUrl = this.publicBaseUrl();
+      const clickUrl = `${baseUrl}/api/v1/delivery/go/${impToken}?pid=${promoterId}`;
+
+      const adType = ((winningCreative as any).adType ||
+        ((winningCreative as any).videoUrl
+          ? 'video'
+          : (winningCreative as any).imageUrl
+            ? 'image'
+            : 'text')) as 'text' | 'image' | 'video';
+
+      return {
+        adType,
+        format:
+          (winningCreative as any).renderPresetId ||
+          (winningCreative as any).adFormat ||
+          (winningCreative as any).format ||
+          'card',
+        headline: winningCreative.headline,
+        bodyText: winningCreative.bodyText,
+        ctaText: winningCreative.ctaText,
+        imageUrl: this.absoluteMediaUrl(winningCreative.imageUrl),
+        videoUrl: this.absoluteMediaUrl((winningCreative as any).videoUrl),
+        posterUrl: this.absoluteMediaUrl((winningCreative as any).posterUrl),
+        width: (winningCreative as any).width || null,
+        height: (winningCreative as any).height || null,
+        durationSeconds: (winningCreative as any).durationSeconds || null,
+        isHouseAd: false,
+        impToken,
+        clickUrl,
+      };
+    } catch (error) {
+      if (this.evidence) await this.evidence.append(requestId, { version: 1, stage: 'no_fill', reasonCode: 'REQUEST_NOT_SERVED', errorCategory: error instanceof Error ? error.name : 'UNKNOWN', runtimeVersion: DELIVERY_RUNTIME.version, elapsedMs: DELIVERY_RUNTIME.serverMs - (serverDeadline - Date.now()), slotHandleHash: adDigest(token), consentState: requestHeaders?.consentState ?? 'unknown', serverReceivedAt: new Date() });
+      if (error instanceof DeliveryDeadlineError && ['candidate_fetch', 'candidate_targeting', 'auction'].includes(error.stage) && canonicalSlot && Date.now() < serverDeadline) {
+        return this.serveHouseOrShadowAd({
+          containerWidth, consentState: requestHeaders?.consentState, serveBefore: serverDeadline, parentOpportunityId: requestId, requestId: crypto.randomUUID(), slotTagId: canonicalSlot.slotTagId, slotId: canonicalSlot.id, websiteId: canonicalWebsite.id,
+          promoterId: canonicalPromoter.id, placementId: null, format: canonicalSlot.format || 'banner', inventoryClass: 'house', deliveryMode: 'normal', trafficRiskStatus: 'normal', fallbackReasonCode: 'DELIVERY_DEADLINE_EXCEEDED', terminationStage: error.stage, candidateEvaluationStatus: 'failed', clientIp, userAgent, referrerDomain, clientGeo
+        });
       }
       throw error;
     }
@@ -2439,24 +2455,24 @@ export class DeliveryService {
 
     const housePayload = tokenPayload?.campaignId === HOUSE_CAMPAIGN_UUID
       ? tokenPayload
-      : this.tokenService.verifyToken(token,clientIp,{allowIpMismatch:true,allowExpired:true});
+      : this.tokenService.verifyToken(token, clientIp, { allowIpMismatch: true, allowExpired: true });
 
     if (housePayload?.campaignId === HOUSE_CAMPAIGN_UUID) {
       try {
-        const bound = await this.boundServe(housePayload,true);
+        const bound = await this.boundServe(housePayload, true);
         if (bound) {
           if (Date.now() - housePayload.timestamp <= 15 * 60 * 1000) {
             try {
-              await this.logInteraction({impToken:token,type:'click',source:'embed',clientIp,userAgent,referrer});
+              await this.logInteraction({ impToken: token, type: 'click', source: 'embed', clientIp, userAgent, referrer });
             } catch { this.logger.warn('House click telemetry could not be recorded'); }
           }
-          const [serve] = await this.db.select({destination:adsServes.houseDestinationUrl}).from(adsServes)
-            .where(eq(adsServes.id,housePayload.servedId)).limit(1);
+          const [serve] = await this.db.select({ destination: adsServes.houseDestinationUrl }).from(adsServes)
+            .where(eq(adsServes.id, housePayload.servedId)).limit(1);
           const destination = parseHouseDestination(serve?.destination);
           if (destination) return destination;
         }
-        const [creative] = await this.db.select({destination:adsHouseCreatives.destinationUrl}).from(adsHouseCreatives)
-          .where(eq(adsHouseCreatives.id,housePayload.creativeId)).limit(1);
+        const [creative] = await this.db.select({ destination: adsHouseCreatives.destinationUrl }).from(adsHouseCreatives)
+          .where(eq(adsHouseCreatives.id, housePayload.creativeId)).limit(1);
         return resolveSafeHouseDestinationUrl(creative?.destination);
       } catch {
         this.logger.warn('House click destination recovery used the default');
@@ -2480,9 +2496,9 @@ export class DeliveryService {
       creativeId = tokenPayload.creativeId;
       promoterId = tokenPayload.promoterId;
 
-      const [issued]=await this.db.select().from(adsServes).where(eq(adsServes.id,serveId!)).limit(1);
-      const render=issued?.contentSnapshot as any;
-      if(render?.destinationUrl)destinationUrl=render.destinationUrl;
+      const [issued] = await this.db.select().from(adsServes).where(eq(adsServes.id, serveId!)).limit(1);
+      const render = issued?.contentSnapshot as any;
+      if (render?.destinationUrl) destinationUrl = render.destinationUrl;
     } else {
       // 2. Fallback to legacy placementToken lookup
       const [placement] = await this.db
@@ -2534,7 +2550,7 @@ export class DeliveryService {
 
     if (
       !campaign ||
-      (tokenPayload?campaign.status==='suspended':campaign.status!=='active'||!currentApproval(campaign)||campaign.remainingBudget<=0)
+      (tokenPayload ? campaign.status === 'suspended' : campaign.status !== 'active' || !currentApproval(campaign) || campaign.remainingBudget <= 0)
     ) {
       throw new NotFoundException('Campaign inactive or budget exhausted');
     }
@@ -2542,7 +2558,7 @@ export class DeliveryService {
     // logInteraction owns the stateful fraud assessment. Running validateClick here
     // first consumes the dedupe key and rejects the very same click as DUP_CLICK.
     // Record click interaction telemetry with validation & GIVT/SIVT status for batch settlement
-    if(!tokenPayload)throw new NotFoundException('Signed click attribution is required');
+    if (!tokenPayload) throw new NotFoundException('Signed click attribution is required');
     const attemptId = crypto.randomUUID();
     const clickId = 'clk_' + Date.now().toString(36) + '_' + attemptId.replace(/-/g, '');
     const receivedAt = new Date();
@@ -2652,8 +2668,8 @@ export class DeliveryService {
     if (!receipt?.recovery || receipt.interactionId || receipt.recordingReason !== 'RECORDING_UNCONFIRMED') return false;
     const recovery = receipt.recovery as RedirectEvidence;
     if (receipt.expiresAt <= new Date() || recovery.receivedAt !== receipt.clickedAt.toISOString() ||
-        recovery.binding.servedId !== receipt.serveId || recovery.binding.campaignId !== receipt.campaignId ||
-        recovery.binding.promoterId !== receipt.promoterId) return false;
+      recovery.binding.servedId !== receipt.serveId || recovery.binding.campaignId !== receipt.campaignId ||
+      recovery.binding.promoterId !== receipt.promoterId) return false;
     const event = await this.logInteraction({ type: 'click', source: 'share_link', eventId: attemptId }, recovery);
     await this.db.update(schema.adsClicks).set({
       interactionId: event?.id ?? null, recovery: null,
@@ -2754,17 +2770,17 @@ export class DeliveryService {
     placementToken?: string;
     impToken?: string;
     type:
-      | 'hover'
-      | 'touch'
-      | 'render'
-      | 'impression'
-      | 'viewable_impression'
-      | 'click'
-      | 'reels_view'
-      | 'video_q25'
-      | 'video_q50'
-      | 'video_q75'
-      | 'video_complete';
+    | 'hover'
+    | 'touch'
+    | 'render'
+    | 'impression'
+    | 'viewable_impression'
+    | 'click'
+    | 'reels_view'
+    | 'video_q25'
+    | 'video_q50'
+    | 'video_q75'
+    | 'video_complete';
     source?: string;
     clientIp?: string;
     claimedIp?: string | null;
@@ -2773,7 +2789,7 @@ export class DeliveryService {
     referrer?: string;
     visibleRatio?: number;
     durationSeconds?: number;
-    eventId?:string;occurredAt?:string;
+    eventId?: string; occurredAt?: string;
   }, recovery?: RedirectEvidence) {
     let placementId: string | undefined;
     let promoterId: string | undefined;
@@ -2787,9 +2803,9 @@ export class DeliveryService {
 
     // 1. If signed impToken is provided, decode cryptographic payload
     if (params.impToken || recovery) {
-      let payload = recovery?.binding ?? this.tokenService.verifyToken(params.impToken!,params.clientIp);
+      let payload = recovery?.binding ?? this.tokenService.verifyToken(params.impToken!, params.clientIp);
       if (!payload && params.type === 'click') {
-        const houseCandidate = this.tokenService.verifyToken(params.impToken!,params.clientIp,{allowIpMismatch:true});
+        const houseCandidate = this.tokenService.verifyToken(params.impToken!, params.clientIp, { allowIpMismatch: true });
         if (houseCandidate?.campaignId === HOUSE_CAMPAIGN_UUID) payload = houseCandidate;
       }
       if (!payload) return;
@@ -2797,7 +2813,7 @@ export class DeliveryService {
       isHouseOrShadowServe =
         payload.campaignId === HOUSE_CAMPAIGN_UUID;
 
-      if (!(await this.boundServe(payload,isHouseOrShadowServe))) return;
+      if (!(await this.boundServe(payload, isHouseOrShadowServe))) return;
 
       signedPayload = payload;
       placementId = payload.placementId;
@@ -2872,9 +2888,9 @@ export class DeliveryService {
     ) {
       let minDuration = 1;
       if (params.type === 'viewable_impression' && signedPayload && !isHouseOrShadowServe) {
-        const [issued]=await this.db.select({snapshot:adsServes.contentSnapshot}).from(adsServes).where(eq(adsServes.id,signedPayload.servedId)).limit(1);
-        const snapshot=issued?.snapshot as any;
-        const creative=snapshot?{adType:snapshot.adType,format:snapshot.adFormat}:null;
+        const [issued] = await this.db.select({ snapshot: adsServes.contentSnapshot }).from(adsServes).where(eq(adsServes.id, signedPayload.servedId)).limit(1);
+        const snapshot = issued?.snapshot as any;
+        const creative = snapshot ? { adType: snapshot.adType, format: snapshot.adFormat } : null;
         if (!creative) {
           isValid = false;
           invalidReason = 'VIEWABILITY_THRESHOLD';
@@ -2931,12 +2947,12 @@ export class DeliveryService {
     );
     const durationMs =
       typeof params.durationSeconds === 'number' &&
-      Number.isFinite(params.durationSeconds)
+        Number.isFinite(params.durationSeconds)
         ? Math.round(params.durationSeconds * 1000)
         : null;
     const visibleRatioStr =
       typeof params.visibleRatio === 'number' &&
-      Number.isFinite(params.visibleRatio)
+        Number.isFinite(params.visibleRatio)
         ? params.visibleRatio.toFixed(4)
         : null;
 
@@ -2945,37 +2961,37 @@ export class DeliveryService {
       return;
     }
 
-    if(!this.evidence)throw new Error('Durable evidence collection is unavailable');
-    const rawId=crypto.randomUUID(),clientEventId=params.eventId??crypto.randomUUID();
-    let safeReferrer:string|null=null;try{if(params.referrer){const url=new URL(params.referrer);safeReferrer=url.origin;}}catch{safeReferrer=null;}
-    const recorded=await this.db.transaction(async tx=>{
-      await tx.execute(sql`set local lock_timeout='5s'`);await tx.execute(sql`set local statement_timeout='8s'`);
+    if (!this.evidence) throw new Error('Durable evidence collection is unavailable');
+    const rawId = crypto.randomUUID(), clientEventId = params.eventId ?? crypto.randomUUID();
+    let safeReferrer: string | null = null; try { if (params.referrer) { const url = new URL(params.referrer); safeReferrer = url.origin; } } catch { safeReferrer = null; }
+    const recorded = await this.db.transaction(async tx => {
+      await tx.execute(sql`set local lock_timeout='5s'`); await tx.execute(sql`set local statement_timeout='8s'`);
       await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-event:${clientEventId}`},0))`);
-      if(signedPayload&&!isHouseOrShadowServe){
+      if (signedPayload && !isHouseOrShadowServe) {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ads-escrow:${signedPayload.campaignId}`},0))`);
       }
-      const [existing]=await tx.select().from(adsInteractions).where(eq(adsInteractions.eventId,clientEventId)).limit(1);
-      if(existing){assertEventReplay(existing,{...params.claims,serveId,type:params.type,source:params.source||'embed'});return existing;}
+      const [existing] = await tx.select().from(adsInteractions).where(eq(adsInteractions.eventId, clientEventId)).limit(1);
+      if (existing) { assertEventReplay(existing, { ...params.claims, serveId, type: params.type, source: params.source || 'embed' }); return existing; }
       // Serialize every event for a serve before resolving its browser identity.
       // This also protects first claims arriving concurrently on different stages.
-      if(serveId){
+      if (serveId) {
         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-serve-binding:${serveId}`},0))`);
-        const observations=await tx.select({
-          pageViewId:sql<string>`max(${adsInteractions.pageViewId}::text)`,
-          slotInstanceId:sql<string>`max(${adsInteractions.slotInstanceId}::text)`,
-          opportunityId:sql<string>`max(${adsInteractions.opportunityId}::text)`,
-          sdkInitId:sql<string>`max(${adsInteractions.sdkInitId}::text)`
-        }).from(adsInteractions).where(eq(adsInteractions.serveId,serveId));
-        for(const prior of observations)assertInstanceBinding(prior,params.claims??{});
+        const observations = await tx.select({
+          pageViewId: sql<string>`max(${adsInteractions.pageViewId}::text)`,
+          slotInstanceId: sql<string>`max(${adsInteractions.slotInstanceId}::text)`,
+          opportunityId: sql<string>`max(${adsInteractions.opportunityId}::text)`,
+          sdkInitId: sql<string>`max(${adsInteractions.sdkInitId}::text)`
+        }).from(adsInteractions).where(eq(adsInteractions.serveId, serveId));
+        for (const prior of observations) assertInstanceBinding(prior, params.claims ?? {});
       }
-       // PLAN-0066 F2: durable once-per-serve stages (survives restarts/replicas; legacy beacons without eventId cannot duplicate).
-       if(serveId&&['render','impression','viewable_impression'].includes(params.type)){
-         await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-serve-stage:${serveId}:${params.type}`},0))`);
-         const [stage]=await tx.select().from(adsInteractions).where(and(eq(adsInteractions.serveId,serveId),eq(adsInteractions.type,params.type as any))).limit(1);
-         if(stage)return stage;
-       }
+      // PLAN-0066 F2: durable once-per-serve stages (survives restarts/replicas; legacy beacons without eventId cannot duplicate).
+      if (serveId && ['render', 'impression', 'viewable_impression'].includes(params.type)) {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`ad-serve-stage:${serveId}:${params.type}`},0))`);
+        const [stage] = await tx.select().from(adsInteractions).where(and(eq(adsInteractions.serveId, serveId), eq(adsInteractions.type, params.type as any))).limit(1);
+        if (stage) return stage;
+      }
       if (serveId && signedPayload && !isHouseOrShadowServe && params.type === 'click' && isValid) {
-        const [prior] = await tx.select({id: adsInteractions.id}).from(adsInteractions)
+        const [prior] = await tx.select({ id: adsInteractions.id }).from(adsInteractions)
           .where(and(eq(adsInteractions.serveId, serveId), eq(adsInteractions.type, 'click'),
             eq(adsInteractions.verificationVersion, 2), eq(adsInteractions.isValid, true))).limit(1);
         if (prior) {
@@ -2987,26 +3003,26 @@ export class DeliveryService {
         }
       }
       const claims = params.claims ?? {};
-      const [event]=await tx.insert(adsInteractions).values({
-        id:rawId,eventId:clientEventId,createdAt:recovery ? new Date(recovery.receivedAt) : new Date(),
-        placementId:placementId===HOUSE_PLACEMENT_UUID?null:placementId,
+      const [event] = await tx.insert(adsInteractions).values({
+        id: rawId, eventId: clientEventId, createdAt: recovery ? new Date(recovery.receivedAt) : new Date(),
+        placementId: placementId === HOUSE_PLACEMENT_UUID ? null : placementId,
         promoterId: promoterId || placementId,
         serveId,
         websiteId,
         slotId,
         type: params.type,
         source: params.source || 'embed',
-        actorIp: params.clientIp ? params.clientIp.slice(0,45) : null,claimedIp: params.claimedIp ? params.claimedIp.slice(0,45) : null,
+        actorIp: params.clientIp ? params.clientIp.slice(0, 45) : null, claimedIp: params.claimedIp ? params.claimedIp.slice(0, 45) : null,
         pageViewId: claims.pageViewId ?? null, slotInstanceId: claims.slotInstanceId ?? null, opportunityId: claims.opportunityId ?? null,
         sdkInitId: claims.sdkInitId ?? null, instanceIndex: claims.instanceIndex ?? null, instancesDetected: claims.instancesDetected ?? null,
-        userAgent: params.userAgent?.slice(0,512),
+        userAgent: params.userAgent?.slice(0, 512),
         referrer: safeReferrer,
         visibleRatio: visibleRatioStr,
         durationMs,
         measurable: true,
         assessmentStatus,
         ivtCategory,
-        financialEligibility:isHouseOrShadowServe||!signedPayload?'invalid':financialEligibility==='invalid'?'invalid':'pending',
+        financialEligibility: isHouseOrShadowServe || !signedPayload ? 'invalid' : financialEligibility === 'invalid' ? 'invalid' : 'pending',
         keyedIpHash,
         keyId,
         verificationVersion:
@@ -3016,11 +3032,13 @@ export class DeliveryService {
           ? invalidReason || 'HOUSE_OR_SHADOW_NON_BILLABLE'
           : invalidReason,
       }).returning();
-      await this.evidence!.append(event.id,{version:1,serveId,eventId:clientEventId,type:event.type,serverReceivedAt:event.createdAt,
-        clientOccurredAt:params.occurredAt??null,clientTimeTrust:'untrusted',visibleRatio:event.visibleRatio,durationMs:event.durationMs,
-        measurable:event.measurable,verificationVersion:event.verificationVersion,assessmentStatus:event.assessmentStatus,financialEligibility:event.financialEligibility,
-        keyedIpHash:event.keyedIpHash,keyId:event.keyId,websiteId,slotId,referrer:safeReferrer,
-        instanceClaims:{pageViewId:event.pageViewId,slotInstanceId:event.slotInstanceId,opportunityId:event.opportunityId,sdkInitId:event.sdkInitId,instanceIndex:event.instanceIndex,instancesDetected:event.instancesDetected}},tx);
+      await this.evidence!.append(event.id, {
+        version: 1, serveId, eventId: clientEventId, type: event.type, serverReceivedAt: event.createdAt,
+        clientOccurredAt: params.occurredAt ?? null, clientTimeTrust: 'untrusted', visibleRatio: event.visibleRatio, durationMs: event.durationMs,
+        measurable: event.measurable, verificationVersion: event.verificationVersion, assessmentStatus: event.assessmentStatus, financialEligibility: event.financialEligibility,
+        keyedIpHash: event.keyedIpHash, keyId: event.keyId, websiteId, slotId, referrer: safeReferrer,
+        instanceClaims: { pageViewId: event.pageViewId, slotInstanceId: event.slotInstanceId, opportunityId: event.opportunityId, sdkInitId: event.sdkInitId, instanceIndex: event.instanceIndex, instancesDetected: event.instancesDetected }
+      }, tx);
 
       // PLAN-0154: Record 55% promotional reserve earnings ($0.50 base CPM viewable impression) with 72h hold.
       if (isBonusPromoServe && params.type === 'viewable_impression' && isValid && bonusServeRecord?.campaignId && bonusServeRecord?.websiteId) {
@@ -3062,9 +3080,9 @@ export class DeliveryService {
       }
       return event;
     });
-    if(recorded.serveId&&recorded.verificationVersion===2&&recorded.financialEligibility==='pending'&&!isBonusPromoServe&&['click','viewable_impression'].includes(recorded.type)){
-      const [serve]=await this.db.select().from(adsServes).where(eq(adsServes.id,recorded.serveId)).limit(1);
-      if(serve?.opportunityReservationId&&this.opportunities){try{await this.opportunities.claim(serve.opportunityReservationId,recorded.id);}catch{/* Durable event remains available to the reconciler; no payment is inferred. */}}
+    if (recorded.serveId && recorded.verificationVersion === 2 && recorded.financialEligibility === 'pending' && !isBonusPromoServe && ['click', 'viewable_impression'].includes(recorded.type)) {
+      const [serve] = await this.db.select().from(adsServes).where(eq(adsServes.id, recorded.serveId)).limit(1);
+      if (serve?.opportunityReservationId && this.opportunities) { try { await this.opportunities.claim(serve.opportunityReservationId, recorded.id); } catch {/* Durable event remains available to the reconciler; no payment is inferred. */ } }
     }
     return recorded;
 
