@@ -182,6 +182,23 @@ describe('PLAN-0163 House Preset Resolution & Dynamic Slot Matching', () => {
       width: 410,
       height: 310,
     });
+
+    // Preserving an existing imageAssetId created by another admin passes when asset & URL are unchanged
+    const sharedAssetId = randomUUID();
+    (existingRow as any).imageAssetId = sharedAssetId;
+    await controller.updateHouseCreative(
+      existingRow.id,
+      {
+        imageAssetId: sharedAssetId,
+        imageUrl: existingRow.imageUrl,
+        isActive: true,
+      } as any,
+      { user: { sub: randomUUID() } },
+    );
+    expect(updatedValues).toMatchObject({
+      imageAssetId: sharedAssetId,
+      isActive: true,
+    });
   });
 
   function buildDeliveryFixture(slotRow: Record<string, any>) {

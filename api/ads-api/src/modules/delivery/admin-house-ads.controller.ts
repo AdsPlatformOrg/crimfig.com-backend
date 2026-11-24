@@ -197,8 +197,8 @@ export class AdminHouseAdsController {
     private readonly db: NodePgDatabase<typeof schema>,
   ) {}
 
-  private async validateAssets(dto:CreateHouseCreativeDto|UpdateHouseCreativeDto,actor:string){
-    for(const [field,type]of [['imageAssetId','image'],['videoAssetId','video']] as const){const id=dto[field];if(!id)continue;const [asset]=await this.db.select().from(schema.adsMediaAssets).where(and(eq(schema.adsMediaAssets.id,id),eq(schema.adsMediaAssets.ownerId,actor),eq(schema.adsMediaAssets.status,'ready'))).limit(1);if(!asset||!asset.mimeType.startsWith(type+'/'))throw new BadRequestException('Uploaded media must be a ready asset owned by the acting administrator');const fieldUrl=type==='image'?'imageUrl':'videoUrl';const provided=dto[fieldUrl];if(!provided)throw new BadRequestException('Uploaded media URL is required');let path:string;try{path=new URL(provided).pathname;}catch{throw new BadRequestException('Invalid media URL');}if(path!==asset.cdnUrl)throw new BadRequestException('Uploaded media URL does not match asset');}
+  private async validateAssets(dto:CreateHouseCreativeDto|UpdateHouseCreativeDto,actor:string,existing?:{imageAssetId:string|null;videoAssetId:string|null;imageUrl:string|null;videoUrl:string|null}){
+    for(const [field,type]of [['imageAssetId','image'],['videoAssetId','video']] as const){const id=dto[field];if(!id)continue;const fieldUrl=type==='image'?'imageUrl':'videoUrl';if(existing&&existing[field]===id&&(!dto[fieldUrl]||dto[fieldUrl]===existing[fieldUrl]))continue;const [asset]=await this.db.select().from(schema.adsMediaAssets).where(and(eq(schema.adsMediaAssets.id,id),eq(schema.adsMediaAssets.ownerId,actor),eq(schema.adsMediaAssets.status,'ready'))).limit(1);if(!asset||!asset.mimeType.startsWith(type+'/'))throw new BadRequestException('Uploaded media must be a ready asset owned by the acting administrator');const provided=dto[fieldUrl];if(!provided)throw new BadRequestException('Uploaded media URL is required');let path:string;try{path=new URL(provided).pathname;}catch{throw new BadRequestException('Invalid media URL');}if(path!==asset.cdnUrl)throw new BadRequestException('Uploaded media URL does not match asset');}
   }
 
   @Get()
@@ -338,7 +338,6 @@ export class AdminHouseAdsController {
     @Req() req:any,
   ) {
     if (dto.destinationUrl !== undefined) requireHouseDestination(dto.destinationUrl);
-    await this.validateAssets(dto,req.user.sub);
     const [existing] = await this.db
       .select()
       .from(adsHouseCreatives)
@@ -348,6 +347,7 @@ export class AdminHouseAdsController {
     if (!existing) {
       throw new NotFoundException('House creative not found');
     }
+    await this.validateAssets(dto, req.user.sub, existing);
 
     const mergedAdType = dto.adType || existing.adType;
     const mergedImageUrl = dto.imageUrl !== undefined ? dto.imageUrl : existing.imageUrl;
