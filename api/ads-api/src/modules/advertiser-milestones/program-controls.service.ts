@@ -13,7 +13,8 @@ import * as schema from '@crimfig/database/schema';
 export type ReserveBucket =
   | 'platform_operating_reserve'
   | 'promotional_ad_reserve'
-  | 'rewards_fund_available';
+  | 'rewards_fund_available'
+  | 'cfig_conversion_reserve';
 
 export const DEFAULT_SWITCH_STATES: Record<string, boolean> = {
   advertiser_bonus_credit: true,
@@ -61,8 +62,15 @@ export class ProgramControlsService {
     return DEFAULT_SWITCH_STATES[key] ?? false;
   }
 
-  async getAdminOverview() {
-    const [switchesRes, auditRes, promoRes, fundRes, opRes, transfersRes, alertsRes] =
+  async getAdminOverview(canManualSeedCommitment = false) {
+    const cfigReservePromise = this.db
+      .execute(
+        sql`SELECT id, currency, available_cents, reserved_cents, spent_cents, updated_at
+            FROM cfig_conversion_reserve WHERE currency = 'USD' LIMIT 1`,
+      )
+      .catch(() => ({ rows: [] }));
+
+    const [switchesRes, auditRes, promoRes, fundRes, opRes, cfigRes, transfersRes, alertsRes] =
       await Promise.all([
         this.db.execute(
           sql`SELECT key, enabled, is_locked_off, label, description, updated_by, updated_at
@@ -87,6 +95,7 @@ export class ProgramControlsService {
           sql`SELECT id, currency, available_cents, updated_at
               FROM platform_operating_reserve WHERE currency = 'USD' LIMIT 1`,
         ),
+        cfigReservePromise,
         this.db.execute(
           sql`SELECT id, request_id, from_reserve, to_reserve, amount_cents, reason, actor_id, created_at
               FROM platform_reserve_transfers ORDER BY created_at DESC LIMIT 30`,
@@ -100,10 +109,14 @@ export class ProgramControlsService {
     const promoRow = rows(promoRes)[0] ?? null;
     const fundRow = rows(fundRes)[0] ?? null;
     const opRow = rows(opRes)[0] ?? null;
+    const cfigRow = rows(cfigRes)[0] ?? null;
     const fundAvailable = Number(fundRow?.available_usd_cents ?? 0);
     const fundFloor = Number(fundRow?.reserve_floor_usd_cents ?? 0);
 
     return {
+      actorCapabilities: {
+        canManualSeedCommitment,
+      },
       switches: rows(switchesRes).map((r: any) => ({
         key: r.key,
         enabled: r.is_locked_off ? false : Boolean(r.enabled),
@@ -160,6 +173,16 @@ export class ProgramControlsService {
               availableCents: Number(opRow.available_cents ?? 0),
               transferableCents: Math.max(0, Number(opRow.available_cents ?? 0)),
               updatedAt: opRow.updated_at,
+            }
+          : null,
+        cfigConversionReserve: cfigRow
+          ? {
+              currency: cfigRow.currency,
+              availableCents: Number(cfigRow.available_cents ?? 0),
+              reservedCents: Number(cfigRow.reserved_cents ?? 0),
+              spentCents: Number(cfigRow.spent_cents ?? 0),
+              transferableCents: Math.max(0, Number(cfigRow.available_cents ?? 0)),
+              updatedAt: cfigRow.updated_at,
             }
           : null,
       },
@@ -291,6 +314,7 @@ export class ProgramControlsService {
       'platform_operating_reserve',
       'promotional_ad_reserve',
       'rewards_fund_available',
+      'cfig_conversion_reserve',
     ];
     if (!valid.includes(input?.fromReserve) || !valid.includes(input?.toReserve)) {
       throw new BadRequestException('Invalid source or destination reserve');
@@ -348,6 +372,12 @@ export class ProgramControlsService {
               FROM rewards_fund WHERE currency = 'USD' FOR UPDATE`,
         ),
       )[0];
+      const cfigRow = rows(
+        await tx.execute(
+          sql`SELECT id, available_cents, reserved_cents, spent_cents
+              FROM cfig_conversion_reserve WHERE currency = 'USD' FOR UPDATE`,
+        ),
+      )[0];
 
       // Debit source with explicit solvency / floor invariants
       if (input.fromReserve === 'platform_operating_reserve') {
@@ -356,6 +386,13 @@ export class ProgramControlsService {
         }
         await tx.execute(
           sql`UPDATE platform_operating_reserve SET available_cents = available_cents - ${amount}, updated_at = now() WHERE id = ${opRow.id}::uuid`,
+        );
+      } else if (input.fromReserve === 'cfig_conversion_reserve') {
+        if (!cfigRow || Number(cfigRow.available_cents) < amount) {
+          throw new ConflictException('Insufficient $cfig Conversion Reserve balance');
+        }
+        await tx.execute(
+          sql`UPDATE cfig_conversion_reserve SET available_cents = available_cents - ${amount}, updated_at = now() WHERE id = ${cfigRow.id}::uuid`,
         );
       } else if (input.fromReserve === 'promotional_ad_reserve') {
         const unreserved =
@@ -398,49 +435,19 @@ export class ProgramControlsService {
       }
 
       // Credit destination
-      if (input.toReserve === 'platform_operating_reserve') {
-        if (!opRow) {
-          await tx.execute(
-            sql`INSERT INTO platform_operating_reserve (currency, available_cents) VALUES ('USD', ${amount})`,
-          );
-        } else {
-          await tx.execute(
-            sql`UPDATE platform_operating_reserve SET available_cents = available_cents + ${amount}, updated_at = now() WHERE id = ${opRow.id}::uuid`,
-          );
-        }
-      } else if (input.toReserve === 'promotional_ad_reserve') {
-        if (!promoRow) {
-          await tx.execute(
-            sql`INSERT INTO advertiser_promo_budget (total_allocated_cents, remaining_promo_budget_cents) VALUES (${amount}, ${amount})`,
-          );
-        } else {
-          await tx.execute(
-            sql`UPDATE advertiser_promo_budget
-                SET total_allocated_cents = total_allocated_cents + ${amount},
-                    remaining_promo_budget_cents = remaining_promo_budget_cents + ${amount},
-                    updated_at = now()
-                WHERE id = ${promoRow.id}::uuid`,
-          );
-        }
-      } else if (input.toReserve === 'rewards_fund_available') {
-        if (!fundRow) {
-          throw new ConflictException('USD Rewards Fund is not initialized');
-        }
-        const nextCash = Number(fundRow.cash_balance_usd_cents) + amount;
-        const nextAvailable = Number(fundRow.available_usd_cents) + amount;
-        await tx.execute(
-          sql`UPDATE rewards_fund
-              SET cash_balance_usd_cents = ${nextCash},
-                  available_usd_cents = ${nextAvailable},
-                  version = version + 1,
-                  updated_at = now()
-              WHERE id = ${fundRow.id}::uuid`,
-        );
-        await tx.execute(
-          sql`INSERT INTO rewards_fund_ledger (fund_id, type, amount_cents, from_bucket, to_bucket, cash_balance_after_cents, available_after_cents, allocated_after_cents, funded_pending_after_cents, source_ref, description, actor_id)
-              VALUES (${fundRow.id}::uuid, 'adjust_in', ${amount}, ${input.fromReserve}, 'available', ${nextCash}, ${nextAvailable}, ${Number(fundRow.allocated_usd_cents)}, ${Number(fundRow.funded_pending_usd_cents)}, ${`reserve-transfer:${input.requestId}`}, ${input.reason.trim()}, ${actorId}::uuid)`,
-        );
-      }
+      await this.creditPoolInTransaction(tx, {
+        targetPool: input.toReserve,
+        amount,
+        sourceBucket: input.fromReserve,
+        sourceRef: `reserve-transfer:${input.requestId}`,
+        ledgerDescription: input.reason.trim(),
+        actorId,
+        opRow,
+        promoRow,
+        fundRow,
+        cfigRow,
+        initializeMissingRewardsFund: false,
+      });
 
       const [transfer] = rows(
         await tx.execute(
@@ -450,6 +457,211 @@ export class ProgramControlsService {
         ),
       );
       return transfer;
+    });
+  }
+
+  private async creditPoolInTransaction(
+    tx: any,
+    params: {
+      targetPool: ReserveBucket;
+      amount: number;
+      sourceBucket: string;
+      sourceRef: string;
+      ledgerDescription: string;
+      actorId: string;
+      opRow?: any;
+      promoRow?: any;
+      fundRow?: any;
+      cfigRow?: any;
+      initializeMissingRewardsFund: boolean;
+    },
+  ) {
+    const { targetPool, amount, sourceBucket, sourceRef, ledgerDescription, actorId } = params;
+    if (targetPool === 'platform_operating_reserve') {
+      if (!params.opRow) {
+        await tx.execute(
+          sql`INSERT INTO platform_operating_reserve (currency, available_cents) VALUES ('USD', ${amount})`,
+        );
+      } else {
+        await tx.execute(
+          sql`UPDATE platform_operating_reserve SET available_cents = available_cents + ${amount}, updated_at = now() WHERE id = ${params.opRow.id}::uuid`,
+        );
+      }
+      return;
+    }
+
+    if (targetPool === 'cfig_conversion_reserve') {
+      if (!params.cfigRow) {
+        await tx.execute(
+          sql`INSERT INTO cfig_conversion_reserve (currency, available_cents) VALUES ('USD', ${amount})`,
+        );
+      } else {
+        await tx.execute(
+          sql`UPDATE cfig_conversion_reserve SET available_cents = available_cents + ${amount}, updated_at = now() WHERE id = ${params.cfigRow.id}::uuid`,
+        );
+      }
+      return;
+    }
+
+    if (targetPool === 'promotional_ad_reserve') {
+      if (!params.promoRow) {
+        await tx.execute(
+          sql`INSERT INTO advertiser_promo_budget (total_allocated_cents, remaining_promo_budget_cents) VALUES (${amount}, ${amount})`,
+        );
+      } else {
+        await tx.execute(
+          sql`UPDATE advertiser_promo_budget
+              SET total_allocated_cents = total_allocated_cents + ${amount},
+                  remaining_promo_budget_cents = remaining_promo_budget_cents + ${amount},
+                  updated_at = now()
+              WHERE id = ${params.promoRow.id}::uuid`,
+        );
+      }
+      return;
+    }
+
+    if (targetPool === 'rewards_fund_available') {
+      let fundRow = params.fundRow;
+      if (!fundRow) {
+        if (!params.initializeMissingRewardsFund) {
+          throw new ConflictException('USD Rewards Fund is not initialized');
+        }
+        await tx.execute(
+          sql`INSERT INTO rewards_fund (currency, cash_balance_usd_cents, allocated_usd_cents, available_usd_cents, funded_pending_usd_cents, spent_usd_cents, reserve_floor_usd_cents, fractional_residual_microusd)
+              VALUES ('USD', 0, 0, 0, 0, 0, 10000, 0)
+              ON CONFLICT (currency) DO NOTHING`,
+        );
+        fundRow = rows(
+          await tx.execute(
+            sql`SELECT id, cash_balance_usd_cents, available_usd_cents, allocated_usd_cents, funded_pending_usd_cents, reserve_floor_usd_cents
+                FROM rewards_fund WHERE currency = 'USD' FOR UPDATE`,
+          ),
+        )[0];
+        if (!fundRow) {
+          throw new ConflictException('Unable to initialize USD Rewards Fund');
+        }
+      }
+      const nextCash = Number(fundRow.cash_balance_usd_cents) + amount;
+      const nextAvailable = Number(fundRow.available_usd_cents) + amount;
+      await tx.execute(
+        sql`UPDATE rewards_fund
+            SET cash_balance_usd_cents = ${nextCash},
+                available_usd_cents = ${nextAvailable},
+                version = version + 1,
+                updated_at = now()
+            WHERE id = ${fundRow.id}::uuid`,
+      );
+      await tx.execute(
+        sql`INSERT INTO rewards_fund_ledger (fund_id, type, amount_cents, from_bucket, to_bucket, cash_balance_after_cents, available_after_cents, allocated_after_cents, funded_pending_after_cents, source_ref, description, actor_id)
+            VALUES (${fundRow.id}::uuid, 'adjust_in', ${amount}, ${sourceBucket}, 'available', ${nextCash}, ${nextAvailable}, ${Number(fundRow.allocated_usd_cents)}, ${Number(fundRow.funded_pending_usd_cents)}, ${sourceRef}, ${ledgerDescription}, ${actorId}::uuid)`,
+      );
+    }
+  }
+
+  /** Record an explicit single super_admin owner seed commitment directly into a pool without gateway checkout. */
+  async recordManualCommitment(
+    actorId: string,
+    input: {
+      targetPool: ReserveBucket;
+      amountCents: number;
+      commitmentRef: string;
+      reason: string;
+      requestId: string;
+    },
+  ) {
+    this.assertUuid(actorId, 'actorId');
+    this.assertUuid(input?.requestId, 'requestId');
+    this.assertReason(input?.reason);
+    const valid: ReserveBucket[] = [
+      'platform_operating_reserve',
+      'promotional_ad_reserve',
+      'rewards_fund_available',
+      'cfig_conversion_reserve',
+    ];
+    if (!valid.includes(input?.targetPool)) {
+      throw new BadRequestException('Invalid target reward or operating reserve pool');
+    }
+    if (
+      typeof input?.commitmentRef !== 'string' ||
+      input.commitmentRef.trim().length < 3 ||
+      input.commitmentRef.length > 128
+    ) {
+      throw new BadRequestException('commitmentRef must be 3-128 characters');
+    }
+    if (!Number.isSafeInteger(input?.amountCents) || input.amountCents <= 0) {
+      throw new BadRequestException('amountCents must be a positive integer');
+    }
+
+    const formattedReason = `${input.commitmentRef.trim()}: ${input.reason.trim()}`;
+
+    return this.db.transaction(async (tx: any) => {
+      await tx.execute(sql`set local lock_timeout = '5s'`);
+      await tx.execute(sql`set local statement_timeout = '8s'`);
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended('platform-reserves-transfer', 0))`,
+      );
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended('rewards-fund:USD', 0))`,
+      );
+
+      const prior = rows(
+        await tx.execute(
+          sql`SELECT id, request_id, from_reserve, to_reserve, amount_cents, reason, actor_id, created_at
+              FROM platform_reserve_transfers WHERE request_id = ${input.requestId}::uuid LIMIT 1`,
+        ),
+      )[0];
+      if (prior) {
+        if (
+          prior.from_reserve !== 'owner_seed_commitment' ||
+          prior.to_reserve !== input.targetPool ||
+          Number(prior.amount_cents) !== input.amountCents ||
+          prior.reason !== formattedReason
+        ) {
+          throw new ConflictException('Manual pool commitment request identity changed');
+        }
+        return prior;
+      }
+
+      const [opRes, promoRes, fundRes, cfigRes] = await Promise.all([
+        tx.execute(
+          sql`SELECT id, available_cents FROM platform_operating_reserve WHERE currency = 'USD' FOR UPDATE`,
+        ),
+        tx.execute(
+          sql`SELECT id, total_allocated_cents, remaining_promo_budget_cents, reserved_liability_cents
+              FROM advertiser_promo_budget ORDER BY updated_at DESC LIMIT 1 FOR UPDATE`,
+        ),
+        tx.execute(
+          sql`SELECT id, cash_balance_usd_cents, available_usd_cents, allocated_usd_cents, funded_pending_usd_cents, reserve_floor_usd_cents
+              FROM rewards_fund WHERE currency = 'USD' FOR UPDATE`,
+        ),
+        tx.execute(
+          sql`SELECT id, available_cents, reserved_cents, spent_cents
+              FROM cfig_conversion_reserve WHERE currency = 'USD' FOR UPDATE`,
+        ),
+      ]);
+
+      await this.creditPoolInTransaction(tx, {
+        targetPool: input.targetPool,
+        amount: input.amountCents,
+        sourceBucket: 'owner_seed_commitment',
+        sourceRef: `owner-commitment:${input.requestId}`,
+        ledgerDescription: `[Owner Seed Commitment] ${formattedReason}`,
+        actorId,
+        opRow: rows(opRes)[0],
+        promoRow: rows(promoRes)[0],
+        fundRow: rows(fundRes)[0],
+        cfigRow: rows(cfigRes)[0],
+        initializeMissingRewardsFund: true,
+      });
+
+      const [record] = rows(
+        await tx.execute(
+          sql`INSERT INTO platform_reserve_transfers (request_id, from_reserve, to_reserve, amount_cents, reason, actor_id)
+              VALUES (${input.requestId}::uuid, 'owner_seed_commitment', ${input.targetPool}, ${input.amountCents}, ${formattedReason}, ${actorId}::uuid)
+              RETURNING id, request_id, from_reserve, to_reserve, amount_cents, reason, actor_id, created_at`,
+        ),
+      );
+      return record;
     });
   }
 

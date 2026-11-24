@@ -177,6 +177,7 @@ const responses: Record<string, Record<string, Schema>> = {
     toggleSwitch: json(),
     transferReserves: json(),
     recordOperatingProceeds: json(),
+    recordManualCommitment: json(),
     acknowledgeAlert: json(),
   },
 };
