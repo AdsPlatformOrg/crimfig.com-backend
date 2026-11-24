@@ -3,6 +3,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { DeliveryService } from './delivery.service';
 import { resolveClientIp, resolveClaimedIp } from './client-ip';
 import { Public } from '@crimfig/shared';
+import { APPROVED_IMAGE_PRESET_IDS } from '../uploads/image-ad-presets';
 import type { Response, Request } from 'express';
 import { IsIn, IsInt, IsNumber, IsOptional, IsString, Max, MaxLength, Min, IsUUID, IsISO8601 } from 'class-validator';
 
@@ -76,7 +77,7 @@ export class ViewabilityTelemetryDto {
   visibleRatio: number;
   @IsNumber() @Min(0) @Max(900)
   durationSeconds: number;
-  @IsOptional() @IsIn(['banner', 'card', 'video', 'interstitial'])
+  @IsOptional() @IsIn(['banner', 'card', 'video', 'interstitial', 'general', ...APPROVED_IMAGE_PRESET_IDS])
   format?: string;
   // PLAN-0066 F4: optional browser-claimed correlation. Never authority; legacy tags omit these.
   @IsOptional() @IsUUID() pageViewId?: string;
