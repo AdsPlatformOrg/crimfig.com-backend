@@ -254,6 +254,18 @@ export class CronJobRegistry {
     return parseBoolEnv(env.ADS_CRON_AUTO_FINANCIAL_CORRECTIONS_ENABLED, false);
   }
 
+  /**
+   * Ordinary forward rewards settlement (milestone recognition + matured 72h bonus-promo payout clearance)
+   * is explicitly separated from retrospective clawbacks/rebates (PLAN-0155 G11).
+   */
+  isForwardRewardsSettlementEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+    const raw = env.ADS_REWARDS_FORWARD_SETTLEMENT_ENABLED;
+    if (raw !== undefined && raw.trim() !== '') {
+      return parseBoolEnv(raw, true);
+    }
+    return true;
+  }
+
   resolveMode(jobKey: string, env: NodeJS.ProcessEnv = process.env): CronJobMode {
     const def = this.getOrThrow(jobKey);
     if (

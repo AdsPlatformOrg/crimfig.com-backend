@@ -393,6 +393,13 @@
       "when": 1795564800000,
       "tag": "0056_cfig_conversion_reserve",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1795651200000,
+      "tag": "0057_plan0155_rewards_accounting_invariants",
+      "breakpoints": true
     }
   ]
 }

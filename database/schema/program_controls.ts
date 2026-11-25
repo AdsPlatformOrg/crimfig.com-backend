@@ -12,9 +12,11 @@ import {
 } from 'drizzle-orm/pg-core';
 import { users } from './users';
 import { adsCampaigns } from './ads_campaigns';
+import { adsCreatives } from './ads_creatives';
 import { adsPromoters, adsPromoterWebsites } from './ads_promoters';
 import { adsServes } from './ads_serves_and_assets';
 import { adsInteractions } from './ads_interactions';
+import { billingTransactions } from './billing_transactions';
 
 /** Audited database-backed program switches controllable by Platform Admin without .env redeploys. */
 export const programFeatureSwitches = pgTable('program_feature_switches', {
@@ -64,6 +66,7 @@ export const platformReserveTransfers = pgTable(
     fromReserve: text('from_reserve').notNull(),
     toReserve: text('to_reserve').notNull(),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    sourceRef: text('source_ref'),
     reason: text('reason').notNull(),
     actorId: uuid('actor_id')
       .notNull()
@@ -96,6 +99,34 @@ export const advertiserBonusCredits = pgTable(
   (t) => [
     uniqueIndex('advertiser_bonus_credits_owner_tier_uq').on(t.advertiserId, t.milestoneId),
     index('advertiser_bonus_credits_owner_idx').on(t.advertiserId, t.claimedAt),
+  ],
+);
+
+/** Exact per-campaign per-grant allocation, consumption, and release tracking (PLAN-0155). */
+export const advertiserBonusCampaignAllocations = pgTable(
+  'advertiser_bonus_campaign_allocations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    campaignId: uuid('campaign_id')
+      .notNull()
+      .references(() => adsCampaigns.id, { onDelete: 'restrict' }),
+    creditId: uuid('credit_id')
+      .notNull()
+      .references(() => advertiserBonusCredits.id, { onDelete: 'restrict' }),
+    advertiserId: uuid('advertiser_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'restrict' }),
+    allocatedCents: integer('allocated_cents').notNull(),
+    reservedCents: integer('reserved_cents').notNull().default(0),
+    consumedCents: integer('consumed_cents').notNull().default(0),
+    releasedCents: integer('released_cents').notNull().default(0),
+    consumedMicrousd: bigint('consumed_microusd', { mode: 'number' }).notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex('advertiser_bonus_campaign_alloc_uq').on(t.campaignId, t.creditId),
+    index('advertiser_bonus_campaign_alloc_campaign_idx').on(t.campaignId),
   ],
 );
 
@@ -155,6 +186,7 @@ export const bonusPromoImpressions = pgTable(
     campaignId: uuid('campaign_id')
       .notNull()
       .references(() => adsCampaigns.id, { onDelete: 'restrict' }),
+    creativeId: uuid('creative_id').references(() => adsCreatives.id, { onDelete: 'set null' }),
     advertiserId: uuid('advertiser_id')
       .notNull()
       .references(() => users.id, { onDelete: 'restrict' }),
@@ -169,7 +201,24 @@ export const bonusPromoImpressions = pgTable(
     clearanceStatus: text('clearance_status').notNull().default('pending'),
     holdExpiresAt: timestamp('hold_expires_at', { withTimezone: true }).notNull(),
     clearedAt: timestamp('cleared_at', { withTimezone: true }),
+    payoutBatchId: uuid('payout_batch_id'),
+    billingTransactionId: uuid('billing_transaction_id').references(() => billingTransactions.id, {
+      onDelete: 'restrict',
+    }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('bonus_promo_impressions_clearance_idx').on(t.clearanceStatus, t.holdExpiresAt)],
+  (t) => [
+    index('bonus_promo_impressions_clearance_idx').on(t.clearanceStatus, t.holdExpiresAt),
+    index('bonus_promo_impressions_campaign_created_idx').on(t.campaignId, t.createdAt),
+    index('bonus_promo_impressions_promoter_created_idx').on(t.promoterId, t.createdAt),
+  ],
 );
+
+/** Durable sub-cent microUSD residual carry per promoter for bonus promotional ad earnings (PLAN-0155). */
+export const bonusPromoPromoterCarries = pgTable('bonus_promo_promoter_carries', {
+  promoterId: uuid('promoter_id')
+    .primaryKey()
+    .references(() => adsPromoters.id, { onDelete: 'restrict' }),
+  carryMicrousd: bigint('carry_microusd', { mode: 'number' }).notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});

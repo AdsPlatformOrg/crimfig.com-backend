@@ -1,6 +1,6 @@
 import type { MilestoneEvidence } from './milestone-evidence';
 
-export const recognitionPolicyVersion = 'advertiser-rewards-v2';
+export const recognitionPolicyVersion = 'advertiser-rewards-v3';
 
 export interface MilestoneDefinition {
   tier: string;
@@ -24,7 +24,7 @@ export const milestoneDefinitions: MilestoneDefinition[] = [
     requiresTenureMonths: 0,
     requiresCleanCompliance: false,
     isPrestige: false,
-    requirement: 'Reach $5.00 in lifetime cumulative cleared cash advertising spend across eligible completed campaigns.',
+    requirement: 'Reach $5.00 in post-launch cumulative cleared cash advertising spend across eligible approved campaigns.',
   },
   {
     tier: 'A2_CONSISTENT',
@@ -35,7 +35,7 @@ export const milestoneDefinitions: MilestoneDefinition[] = [
     requiresTenureMonths: 0,
     requiresCleanCompliance: false,
     isPrestige: false,
-    requirement: 'Reach $100.00 in lifetime cumulative cleared cash advertising spend across eligible completed campaigns.',
+    requirement: 'Reach $100.00 in post-launch cumulative cleared cash advertising spend across eligible approved campaigns.',
   },
   {
     tier: 'A3_GROWTH',
@@ -46,7 +46,7 @@ export const milestoneDefinitions: MilestoneDefinition[] = [
     requiresTenureMonths: 0,
     requiresCleanCompliance: false,
     isPrestige: false,
-    requirement: 'Reach $500.00 in lifetime cumulative cleared cash advertising spend across eligible completed campaigns.',
+    requirement: 'Reach $500.00 in post-launch cumulative cleared cash advertising spend across eligible approved campaigns.',
   },
   {
     tier: 'A4_TRUSTED',
@@ -57,7 +57,7 @@ export const milestoneDefinitions: MilestoneDefinition[] = [
     requiresTenureMonths: 12,
     requiresCleanCompliance: true,
     isPrestige: false,
-    requirement: 'Reach $2,500.00 in lifetime cumulative cleared cash spend with at least 12 months account tenure and a clean compliance record.',
+    requirement: 'Reach $2,500.00 in post-launch cumulative cleared cash spend with at least 12 calendar months account tenure and a clean compliance record.',
   },
   {
     tier: 'PRESTIGE_100',
@@ -68,7 +68,7 @@ export const milestoneDefinitions: MilestoneDefinition[] = [
     requiresTenureMonths: 0,
     requiresCleanCompliance: true,
     isPrestige: true,
-    requirement: 'Reach $10,000.00 in lifetime cumulative cleared cash spend with a clean compliance record. Permanent badge, once per lifetime.',
+    requirement: 'Reach $10,000.00 in post-launch cumulative cleared cash spend with a clean compliance record. Permanent badge, once per lifetime.',
   },
   {
     tier: 'PRESTIGE_1000',
@@ -79,7 +79,7 @@ export const milestoneDefinitions: MilestoneDefinition[] = [
     requiresTenureMonths: 0,
     requiresCleanCompliance: true,
     isPrestige: true,
-    requirement: 'Reach $100,000.00 in lifetime cumulative cleared cash spend with a clean compliance record. Permanent badge, once per lifetime.',
+    requirement: 'Reach $100,000.00 in post-launch cumulative cleared cash spend with a clean compliance record. Permanent badge, once per lifetime.',
   },
   {
     tier: 'PRESTIGE_10000',
@@ -90,7 +90,7 @@ export const milestoneDefinitions: MilestoneDefinition[] = [
     requiresTenureMonths: 0,
     requiresCleanCompliance: true,
     isPrestige: true,
-    requirement: 'Reach $1,000,000.00 in lifetime cumulative cleared cash spend with a clean compliance record. Permanent badge, once per lifetime.',
+    requirement: 'Reach $1,000,000.00 in post-launch cumulative cleared cash spend with a clean compliance record. Permanent badge, once per lifetime.',
   },
 ];
 
@@ -108,7 +108,7 @@ export function recognitionDecisions(evidence: MilestoneEvidence) {
   const eligible = [...unique.values()].filter(
     campaign =>
       evidence.fundingVerified &&
-      campaign.completed &&
+      (campaign.qualifying ?? campaign.completed) &&
       campaign.eligible &&
       Number.isSafeInteger(campaign.clearedSpendCents) &&
       campaign.clearedSpendCents! > 0,
@@ -118,15 +118,21 @@ export function recognitionDecisions(evidence: MilestoneEvidence) {
     0,
   );
   const tenureMonths = evidence.tenureMonths ?? 0;
-  const complianceClean = evidence.complianceClean ?? true;
+  // Unknown/missing compliance must never be called clean when a tier requires clean compliance
+  const complianceClean = evidence.complianceClean === true;
+  const underInvestigation = evidence.underInvestigation === true;
 
   return milestoneDefinitions.map(definition => {
     const spendMet = cumulativeSpendCents >= definition.cumulativeSpendTargetCents;
     const tenureMet = tenureMonths >= definition.requiresTenureMonths;
-    const complianceMet = !definition.requiresCleanCompliance || complianceClean;
+    // JED Section 2: Pending investigation holds ONLY new A4 & Prestige (requiresCleanCompliance) claims;
+    // A1-A3 proceed when ordinary spend & verified funding requirements pass.
+    const heldByInvestigation = definition.requiresCleanCompliance && underInvestigation;
+    const complianceMet = !definition.requiresCleanCompliance || (complianceClean && !heldByInvestigation);
     return {
       ...definition,
       qualified: Boolean(evidence.fundingVerified && spendMet && tenureMet && complianceMet),
+      heldByInvestigation: Boolean(evidence.fundingVerified && spendMet && tenureMet && complianceClean && heldByInvestigation),
       cumulativeSpendCents,
       tenureMet,
       complianceMet,

@@ -64,9 +64,9 @@ export class AdminRewardsControlsController {
   @Header('Cache-Control', 'no-store')
   @ApiOperation({ summary: 'Get program switches, all reserves, transfer history, and silent safety alerts' })
   async overview(@Req() req: any) {
-    const canManualSeedCommitment =
+    const isSuperAdmin =
       Array.isArray(req?.platformRoles) && req.platformRoles.includes('super_admin');
-    return { status: 'success', data: await this.controls.getAdminOverview(canManualSeedCommitment) };
+    return { status: 'success', data: await this.controls.getAdminOverview(isSuperAdmin) };
   }
 
   @Post('switches/:key')
@@ -83,9 +83,10 @@ export class AdminRewardsControlsController {
     };
   }
 
+  @AdsRoles('super_admin')
   @Post('reserves/transfer')
   @Header('Cache-Control', 'no-store')
-  @ApiOperation({ summary: 'Transfer cash between Platform Operating Reserve, Promotional Ad Reserve, and Rewards Fund' })
+  @ApiOperation({ summary: 'Single super_admin transfer between Platform Operating Reserve, Promotional Ad Reserve, Rewards Fund, and $cfig Conversion Reserve' })
   async transferReserves(@Req() req: any, @Body() body: ReserveTransferDto) {
     return {
       status: 'success',
@@ -93,9 +94,10 @@ export class AdminRewardsControlsController {
     };
   }
 
+  @AdsRoles('super_admin')
   @Post('reserves/operating-proceeds')
   @Header('Cache-Control', 'no-store')
-  @ApiOperation({ summary: 'Record realized platform proceeds into Platform Operating Reserve' })
+  @ApiOperation({ summary: 'Record verified realized platform proceeds into Platform Operating Reserve' })
   async recordOperatingProceeds(@Req() req: any, @Body() body: OperatingProceedsDto) {
     return {
       status: 'success',

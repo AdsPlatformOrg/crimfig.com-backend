@@ -38,7 +38,7 @@ run('PLAN0149 real PostgreSQL and HTTP recognition', () => {
     pool = new Pool({ connectionString: url.href, max: 6, statement_timeout: 10000 });
     db = drizzle(pool, { schema });
     await pool.query('CREATE TABLE users(id uuid PRIMARY KEY,email text,status text)');
-    const tables = [schema.billingWallets,schema.billingTransactions,schema.billingProviderEvents,schema.adsCampaigns,
+    const tables = [schema.billingWallets,schema.billingTransactions,schema.billingProviderEvents,schema.adsCampaigns,schema.adsCreatives,
       schema.adsCampaignEscrows,schema.adsPromoters,schema.adsPromoterWebsites,schema.adsServes,schema.adsInteractions,schema.adsSettlementClaims,
       schema.adsSettlementBatches,schema.adsPromoterSettlementItems,schema.adsModerationDecisions,schema.adsSettlementRebates,
       schema.adsOpportunityReservations,schema.advertiserAchievements,schema.advertiserPromoBudget,schema.rewardsFund,schema.rewardsFundLedger,schema.rewardsFundSettings];
@@ -58,6 +58,8 @@ run('PLAN0149 real PostgreSQL and HTTP recognition', () => {
     }
     await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0052_advertiser_recognition.sql'), 'utf8'));
     await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0053_plan0154_rewards_and_bonus_credit.sql'), 'utf8'));
+    await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0056_cfig_conversion_reserve.sql'), 'utf8'));
+    await pool.query(readFileSync(resolve(__dirname, '../../../database/migrations/0057_plan0155_rewards_accounting_invariants.sql'), 'utf8'));
     controls = new ProgramControlsService(db);
     service = new AdvertiserMilestonesService(db, controls);
     app = await NestFactory.create(LocalModule, { logger: false });
@@ -101,7 +103,7 @@ run('PLAN0149 real PostgreSQL and HTTP recognition', () => {
     const [promoter] = await db.insert(schema.adsPromoters).values({ userId: publisher, type: 'INDIVIDUAL' }).returning();
     const [serve] = await db.insert(schema.adsServes).values({ campaignId: id, promoterId: promoter.id, slotHandle: randomUUID(), inventoryClass: 'paid', deliveryMode: 'normal', financialEligibility: 'eligible' }).returning();
     const [event] = await db.insert(schema.adsInteractions).values({ promoterId: promoter.id, serveId: serve.id, type: 'viewable_impression', verificationVersion: 2, isValid: true, financialEligibility: 'eligible', assessmentStatus: 'validated' }).returning();
-    await db.insert(schema.adsSettlementBatches).values({ id: batch, batchNumber: 'fixture-' + batch, periodStart: new Date('2026-11-01'), periodEnd: new Date('2026-11-02'), status: 'completed', totalDebitedUsdCents: cents, idempotencyKey: spendKey });
+    await db.insert(schema.adsSettlementBatches).values({ id: batch, batchNumber: 'fixture-' + batch, periodStart: new Date('2026-11-22T23:00:00Z'), periodEnd: new Date('2026-11-23T01:00:00Z'), status: 'completed', totalDebitedUsdCents: cents, totalCreditedUsdCents: earned, idempotencyKey: spendKey });
     await db.insert(schema.adsSettlementClaims).values({ interactionId: event.id, serveId: serve.id, escrowId: escrow, allocatedUsdCents: cents, promoterId: promoter.id, batchId: batch, priceNanos: BigInt(cents) * 10000000n });
     await db.insert(schema.billingProviderEvents).values({ id: draft, provider: 'paystack', reference: 'internal.ad.clearance:' + item, eventType: 'internal.ad.clearance', processed: true,
       rawPayload: { version: 3, itemId: item, evidenceId: 'review-' + item, preparedBy, amountUsdCents: earned, billedUsdCents: cents } });
@@ -109,7 +111,7 @@ run('PLAN0149 real PostgreSQL and HTTP recognition', () => {
       metadata: JSON.stringify({ version: 3, kind: 'funded_ad_earning', itemId: item, batchId: batch, campaignId: id, escrowId: escrow, promoterId: promoter.id, settlementClaimId: event.id,
         clearance: { draftId: draft, evidenceId: 'review-' + item, preparedBy, reviewedBy } }) });
     await db.insert(schema.adsPromoterSettlementItems).values({ id: item, batchId: batch, promoterId: promoter.id, campaignId: id, earnedUsdCents: earned, billedUsdCents: cents, billingTransactionId: receipt,
-      idempotencyKey: 'ads-item:v3:' + event.id, status: 'credited', clearanceStatus: 'cleared', holdExpiresAt: new Date('2026-11-05'), clearedAt: new Date('2026-11-06') });
+      idempotencyKey: 'ads-item:v3:' + event.id, status: 'credited', clearanceStatus: 'cleared', holdExpiresAt: new Date('2026-11-23T00:00:00Z'), clearedAt: new Date('2026-11-23T01:00:00Z') });
     await db.insert(schema.billingTransactions).values({ userId: owner, type: 'ads_spend', provider: 'internal', status: 'completed', amountUsdCents: cents,
       idempotencyKey: spendKey, reference: 'ads-spend-v3-' + batch, metadata: JSON.stringify({ version: 3, kind: 'funded_ad_spend', campaignId: id, escrowId: escrow, batchId: batch }) });
     return { owner, id, item, eventId: event.id, serveId: serve.id, funding, receipt, batch };
@@ -123,7 +125,7 @@ run('PLAN0149 real PostgreSQL and HTTP recognition', () => {
       const fixture = await campaign(500);
       if (mutation === 'test_funding') await pool.query("UPDATE billing_transactions SET metadata=jsonb_set(metadata::jsonb,'{fundingCompletion,domain}','\"test\"')::text WHERE id=$1", [fixture.funding]);
       if (mutation === 'simulation') await pool.query("UPDATE ads_serves SET inventory_class='simulated_paid' WHERE id=$1", [fixture.serveId]);
-      if (mutation === 'unfinished') await pool.query("UPDATE ads_campaigns SET status='active' WHERE id=$1", [fixture.id]);
+      if (mutation === 'unfinished') await pool.query("UPDATE ads_campaigns SET status='draft' WHERE id=$1", [fixture.id]);
       if (mutation === 'pending_clearance') await pool.query("UPDATE ads_promoter_settlement_items SET clearance_status='pending' WHERE id=$1", [fixture.item]);
       if (mutation === 'bonus') await pool.query('UPDATE ads_campaigns SET is_bonus_delivery=true WHERE id=$1', [fixture.id]);
       await service.evaluateCategoryAMilestones(fixture.owner);
@@ -165,9 +167,10 @@ run('PLAN0149 real PostgreSQL and HTTP recognition', () => {
     const reportAfter = await report(fixture.owner);
     expect(reportAfter.bonusWallet.availableBonusCreditCents).toBe(500);
 
-    // Real Postgres reserve transfers & Rewards Fund solvency invariant
+    // Real Postgres reserve transfers & Rewards Fund solvency invariant (verified settled batch proceeds)
+    const proceedsFixture = await campaign(5000); // debited 5000, earned 2750 -> 2250 platform proceeds
     await pool.query("INSERT INTO rewards_fund (currency, cash_balance_usd_cents, available_usd_cents, allocated_usd_cents, funded_pending_usd_cents, reserve_floor_usd_cents) VALUES ('USD', 15000, 15000, 0, 0, 10000) ON CONFLICT (currency) DO NOTHING");
-    await controls.recordOperatingProceeds(admin, { amountCents: 2000, sourceRef: 'batch-pg-1', reason: 'Settled proceeds', requestId: randomUUID() });
+    await controls.recordOperatingProceeds(admin, { amountCents: 2000, sourceRef: proceedsFixture.batch, reason: 'Settled proceeds', requestId: randomUUID() });
     await controls.transferBetweenReserves(admin, { fromReserve: 'platform_operating_reserve', toReserve: 'promotional_ad_reserve', amountCents: 1200, reason: 'Fund promo reserve', requestId: randomUUID() });
     await controls.transferBetweenReserves(admin, { fromReserve: 'rewards_fund_available', toReserve: 'promotional_ad_reserve', amountCents: 5000, reason: 'Excess headroom transfer', requestId: randomUUID() });
     // Attempting to breach $100 floor must fail cleanly

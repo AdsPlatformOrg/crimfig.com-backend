@@ -9,6 +9,7 @@ import { sql } from 'drizzle-orm';
 import { DATABASE_TOKEN } from '../database/database.module';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import * as schema from '@crimfig/database/schema';
+import { BonusPromoPayoutService } from '../../../../billing-api/src/modules/ecosystem/bonus-promo-payout.service';
 
 export type ReserveBucket =
   | 'platform_operating_reserve'
@@ -17,10 +18,10 @@ export type ReserveBucket =
   | 'cfig_conversion_reserve';
 
 export const DEFAULT_SWITCH_STATES: Record<string, boolean> = {
-  advertiser_bonus_credit: true,
-  bonus_ad_delivery: true,
-  house_cfig_earning: true,
-  redeemable_points: true,
+  advertiser_bonus_credit: false,
+  bonus_ad_delivery: false,
+  house_cfig_earning: false,
+  redeemable_points: false,
   cfig_to_points_conversion: false,
 };
 
@@ -45,6 +46,10 @@ export class ProgramControlsService {
     }
   }
 
+  /**
+   * Require explicit persisted activation in program_feature_switches (PLAN-0155 G07).
+   * Missing rows, locked-off switches, or read errors fail closed (false).
+   */
   async isSwitchEnabled(key: string, conn: any = this.db): Promise<boolean> {
     try {
       const res = rows(
@@ -54,15 +59,15 @@ export class ProgramControlsService {
       );
       if (res.length > 0 && res[0].enabled !== undefined) {
         if (res[0].is_locked_off) return false;
-        return Boolean(res[0].enabled);
+        return res[0].enabled === true;
       }
+      return false;
     } catch {
-      // Fall back safely on unmigrated/lightweight unit fixtures
+      return false;
     }
-    return DEFAULT_SWITCH_STATES[key] ?? false;
   }
 
-  async getAdminOverview(canManualSeedCommitment = false) {
+  async getAdminOverview(isSuperAdmin = false) {
     const cfigReservePromise = this.db
       .execute(
         sql`SELECT id, currency, available_cents, reserved_cents, spent_cents, updated_at
@@ -97,7 +102,7 @@ export class ProgramControlsService {
         ),
         cfigReservePromise,
         this.db.execute(
-          sql`SELECT id, request_id, from_reserve, to_reserve, amount_cents, reason, actor_id, created_at
+          sql`SELECT id, request_id, from_reserve, to_reserve, amount_cents, source_ref, reason, actor_id, created_at
               FROM platform_reserve_transfers ORDER BY created_at DESC LIMIT 30`,
         ),
         this.db.execute(
@@ -115,7 +120,9 @@ export class ProgramControlsService {
 
     return {
       actorCapabilities: {
-        canManualSeedCommitment,
+        canManualSeedCommitment: isSuperAdmin,
+        canTransferReserves: isSuperAdmin,
+        canRecordOperatingProceeds: isSuperAdmin,
       },
       switches: rows(switchesRes).map((r: any) => ({
         key: r.key,
@@ -192,6 +199,7 @@ export class ProgramControlsService {
         fromReserve: r.from_reserve,
         toReserve: r.to_reserve,
         amountCents: Number(r.amount_cents),
+        sourceRef: r.source_ref ?? null,
         reason: r.reason,
         actorId: r.actor_id,
         createdAt: r.created_at,
@@ -241,7 +249,7 @@ export class ProgramControlsService {
         if (
           priorAudit.switch_key !== key ||
           Boolean(priorAudit.next_enabled) !== input.enabled ||
-          priorAudit.reason !== input.reason
+          priorAudit.reason !== input.reason.trim()
         ) {
           throw new ConflictException('Switch request identity mismatch');
         }
@@ -297,6 +305,10 @@ export class ProgramControlsService {
     });
   }
 
+  /**
+   * Single super_admin inter-reserve transfer across all 4 pools (JED 2026-11-25 Decision 1 & 2).
+   * Shares the 'bonus-promo-reserve' advisory lock and enforces live in-flight + carry liability backing.
+   */
   async transferBetweenReserves(
     actorId: string,
     input: {
@@ -330,15 +342,27 @@ export class ProgramControlsService {
       await tx.execute(sql`set local lock_timeout = '5s'`);
       await tx.execute(sql`set local statement_timeout = '8s'`);
       await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended('bonus-promo-reserve', 0))`,
+      );
+      await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended('platform-reserves-transfer', 0))`,
       );
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended('rewards-fund:USD', 0))`,
       );
 
+      const actorRows = rows(
+        await tx.execute(
+          sql`SELECT status FROM users WHERE id = ${actorId}::uuid LIMIT 1`,
+        ),
+      );
+      if (actorRows.length > 0 && actorRows[0].status && actorRows[0].status !== 'ACTIVE') {
+        throw new ConflictException('Administrator account must be ACTIVE to execute reserve transfers');
+      }
+
       const prior = rows(
         await tx.execute(
-          sql`SELECT id, request_id, from_reserve, to_reserve, amount_cents, reason, actor_id, created_at
+          sql`SELECT id, request_id, from_reserve, to_reserve, amount_cents, source_ref, reason, actor_id, created_at
               FROM platform_reserve_transfers WHERE request_id = ${input.requestId}::uuid LIMIT 1`,
         ),
       )[0];
@@ -379,7 +403,7 @@ export class ProgramControlsService {
         ),
       )[0];
 
-      // Debit source with explicit solvency / floor invariants
+      // Debit source with explicit solvency / floor / live-liability invariants
       if (input.fromReserve === 'platform_operating_reserve') {
         if (!opRow || Number(opRow.available_cents) < amount) {
           throw new ConflictException('Insufficient Platform Operating Reserve balance');
@@ -395,18 +419,34 @@ export class ProgramControlsService {
           sql`UPDATE cfig_conversion_reserve SET available_cents = available_cents - ${amount}, updated_at = now() WHERE id = ${cfigRow.id}::uuid`,
         );
       } else if (input.fromReserve === 'promotional_ad_reserve') {
-        const unreserved =
-          Number(promoRow?.remaining_promo_budget_cents ?? 0) -
-          Number(promoRow?.reserved_liability_cents ?? 0);
+        const liveLiabilityRows = rows(
+          await tx.execute(
+            sql`SELECT ceil((
+                  coalesce((SELECT sum(promoter_earnings_microusd) FROM bonus_promo_impressions WHERE clearance_status = 'pending'), 0)::numeric
+                  + coalesce((SELECT sum(carry_microusd) FROM bonus_promo_promoter_carries), 0)::numeric
+                  + coalesce((SELECT count(*) * 275 FROM ads_serves s
+                              WHERE s.inventory_class = 'bonus_promo'
+                                AND s.served_at >= now() - interval '15 minutes'
+                                AND NOT EXISTS (SELECT 1 FROM bonus_promo_impressions b WHERE b.serve_id = s.id)), 0)::numeric
+                ) / 10000)::bigint AS live_liability_cents`,
+          ),
+        );
+        const liveLiabilityCents = Number(liveLiabilityRows[0]?.live_liability_cents ?? 0);
+        const effectiveReservedCents = Math.max(
+          Number(promoRow?.reserved_liability_cents ?? 0),
+          liveLiabilityCents,
+        );
+        const unreserved = Number(promoRow?.remaining_promo_budget_cents ?? 0) - effectiveReservedCents;
         if (!promoRow || unreserved < amount) {
           throw new ConflictException(
-            'Insufficient unreserved Promotional Ad Reserve balance',
+            'Insufficient unreserved Promotional Ad Reserve balance (pending, carry, or in-flight obligations locked)',
           );
         }
         await tx.execute(
           sql`UPDATE advertiser_promo_budget
               SET total_allocated_cents = total_allocated_cents - ${amount},
                   remaining_promo_budget_cents = remaining_promo_budget_cents - ${amount},
+                  reserved_liability_cents = ${effectiveReservedCents},
                   updated_at = now()
               WHERE id = ${promoRow.id}::uuid`,
         );
@@ -451,9 +491,9 @@ export class ProgramControlsService {
 
       const [transfer] = rows(
         await tx.execute(
-          sql`INSERT INTO platform_reserve_transfers (request_id, from_reserve, to_reserve, amount_cents, reason, actor_id)
-              VALUES (${input.requestId}::uuid, ${input.fromReserve}, ${input.toReserve}, ${amount}, ${input.reason.trim()}, ${actorId}::uuid)
-              RETURNING id, request_id, from_reserve, to_reserve, amount_cents, reason, actor_id, created_at`,
+          sql`INSERT INTO platform_reserve_transfers (request_id, from_reserve, to_reserve, amount_cents, source_ref, reason, actor_id)
+              VALUES (${input.requestId}::uuid, ${input.fromReserve}, ${input.toReserve}, ${amount}, ${`reserve-transfer:${input.requestId}`}, ${input.reason.trim()}, ${actorId}::uuid)
+              RETURNING id, request_id, from_reserve, to_reserve, amount_cents, source_ref, reason, actor_id, created_at`,
         ),
       );
       return transfer;
@@ -546,9 +586,9 @@ export class ProgramControlsService {
       await tx.execute(
         sql`UPDATE rewards_fund
             SET cash_balance_usd_cents = ${nextCash},
-                available_usd_cents = ${nextAvailable},
-                version = version + 1,
-                updated_at = now()
+                 available_usd_cents = ${nextAvailable},
+                 version = version + 1,
+                 updated_at = now()
             WHERE id = ${fundRow.id}::uuid`,
       );
       await tx.execute(
@@ -558,7 +598,7 @@ export class ProgramControlsService {
     }
   }
 
-  /** Record an explicit single super_admin owner seed commitment directly into a pool without gateway checkout. */
+  /** Record an explicit single super_admin owner seed commitment directly into a pool without gateway checkout (PLAN-0168 preserved). */
   async recordManualCommitment(
     actorId: string,
     input: {
@@ -597,6 +637,9 @@ export class ProgramControlsService {
     return this.db.transaction(async (tx: any) => {
       await tx.execute(sql`set local lock_timeout = '5s'`);
       await tx.execute(sql`set local statement_timeout = '8s'`);
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended('bonus-promo-reserve', 0))`,
+      );
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended('platform-reserves-transfer', 0))`,
       );
@@ -665,6 +708,11 @@ export class ProgramControlsService {
     });
   }
 
+  /**
+   * Record realized platform proceeds into Platform Operating Reserve (PLAN-0155 G01).
+   * Verifies sourceRef against an actual completed ads_settlement_batches receipt and prevents
+   * crediting unverified proceeds or consuming the same settlement batch proceeds twice.
+   */
   async recordOperatingProceeds(
     actorId: string,
     input: { amountCents: number; sourceRef: string; reason: string; requestId: string },
@@ -679,15 +727,19 @@ export class ProgramControlsService {
       throw new BadRequestException('amountCents must be a positive integer');
     }
 
+    const trimmedRef = input.sourceRef.trim();
+    const formattedReason = `${trimmedRef}: ${input.reason.trim()}`;
+
     return this.db.transaction(async (tx: any) => {
       await tx.execute(sql`set local lock_timeout = '5s'`);
       await tx.execute(sql`set local statement_timeout = '8s'`);
       await tx.execute(
         sql`select pg_advisory_xact_lock(hashtextextended('platform-reserves-transfer', 0))`,
       );
+
       const prior = rows(
         await tx.execute(
-          sql`SELECT id, request_id, from_reserve, to_reserve, amount_cents, reason, actor_id, created_at
+          sql`SELECT id, request_id, from_reserve, to_reserve, amount_cents, source_ref, reason, actor_id, created_at
               FROM platform_reserve_transfers WHERE request_id = ${input.requestId}::uuid LIMIT 1`,
         ),
       )[0];
@@ -695,11 +747,68 @@ export class ProgramControlsService {
         if (
           prior.from_reserve !== 'realized_platform_proceeds' ||
           prior.to_reserve !== 'platform_operating_reserve' ||
-          Number(prior.amount_cents) !== input.amountCents
+          Number(prior.amount_cents) !== input.amountCents ||
+          (prior.reason && prior.reason !== formattedReason)
         ) {
           throw new ConflictException('Operating reserve deposit identity changed');
         }
         return prior;
+      }
+
+      // Verify sourceRef against actual completed settlement batch and compute platform retained revenue
+      const batchRow = rows(
+        await tx.execute(
+          sql`SELECT b.id,
+                     b.batch_number,
+                     b.total_debited_usd_cents,
+                     b.total_credited_usd_cents,
+                     coalesce((
+                       SELECT sum(rb.rebate_amount_usd_cents)
+                       FROM ads_settlement_rebates rb
+                       JOIN ads_promoter_settlement_items psi ON psi.campaign_id = rb.campaign_id
+                       WHERE psi.batch_id = b.id AND rb.status IN ('completed', 'pending_admin_signoff')
+                     ), 0) AS rebate_cents
+              FROM ads_settlement_batches b
+              WHERE b.status = 'completed'
+                AND (b.id::text = ${trimmedRef} OR b.batch_number = ${trimmedRef})
+              LIMIT 1
+              FOR UPDATE OF b`,
+        ),
+      )[0];
+
+      if (!batchRow || !batchRow.id) {
+        throw new ConflictException(
+          'Operating proceeds sourceRef could not be verified against a completed settlement batch',
+        );
+      }
+
+      const canonicalSourceRef = `settlement-batch:${String(batchRow.id).toLowerCase()}`;
+      const retainedProceedsCents =
+        Number(batchRow.total_debited_usd_cents ?? 0) -
+        Number(batchRow.total_credited_usd_cents ?? 0) -
+        Number(batchRow.rebate_cents ?? 0);
+
+      if (!Number.isSafeInteger(retainedProceedsCents) || retainedProceedsCents <= 0) {
+        throw new ConflictException('Settlement batch has no available realized platform proceeds');
+      }
+
+      const existingForSource = rows(
+        await tx.execute(
+          sql`SELECT id, amount_cents FROM platform_reserve_transfers
+              WHERE from_reserve = 'realized_platform_proceeds'
+                AND source_ref = ${canonicalSourceRef}
+              LIMIT 1`,
+        ),
+      )[0];
+      if (existingForSource) {
+        throw new ConflictException(
+          'Realized platform proceeds for this settlement batch have already been consumed',
+        );
+      }
+      if (input.amountCents > retainedProceedsCents) {
+        throw new ConflictException(
+          `Requested proceeds (${input.amountCents}c) exceed verified available platform share (${retainedProceedsCents}c)`,
+        );
       }
 
       const opRow = rows(
@@ -718,9 +827,9 @@ export class ProgramControlsService {
       }
       const [record] = rows(
         await tx.execute(
-          sql`INSERT INTO platform_reserve_transfers (request_id, from_reserve, to_reserve, amount_cents, reason, actor_id)
-              VALUES (${input.requestId}::uuid, 'realized_platform_proceeds', 'platform_operating_reserve', ${input.amountCents}, ${`${input.sourceRef.trim()}: ${input.reason.trim()}`}, ${actorId}::uuid)
-              RETURNING id, request_id, from_reserve, to_reserve, amount_cents, reason, actor_id, created_at`,
+          sql`INSERT INTO platform_reserve_transfers (request_id, from_reserve, to_reserve, amount_cents, source_ref, reason, actor_id)
+              VALUES (${input.requestId}::uuid, 'realized_platform_proceeds', 'platform_operating_reserve', ${input.amountCents}, ${canonicalSourceRef}, ${formattedReason}, ${actorId}::uuid)
+              RETURNING id, request_id, from_reserve, to_reserve, amount_cents, source_ref, reason, actor_id, created_at`,
         ),
       );
       return record;
@@ -764,87 +873,12 @@ export class ProgramControlsService {
     return updated;
   }
 
-  /** Clear matured (>=72h) bonus-promo viewable impressions from Promotional Ad Reserve into promoter cash wallets. */
+  /**
+   * Delegate matured (>=72h) bonus-promo clearance strictly to Billing's authoritative
+   * BonusPromoPayoutService (PLAN-0155 G03 & G04). Ads never directly mutates billing_wallets.
+   */
   async clearMaturedBonusPromoEarnings(assertLease?: () => Promise<void>) {
-    if (!(await this.isSwitchEnabled('bonus_ad_delivery'))) return { clearedPromoters: 0, paidCents: 0 };
-    return this.db.transaction(async (tx: any) => {
-      await tx.execute(sql`set local lock_timeout = '5s'`);
-      await tx.execute(sql`set local statement_timeout = '8s'`);
-      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('bonus-promo-reserve', 0))`);
-      if (assertLease) await assertLease();
-
-      const dueGroups = rows(
-        await tx.execute(
-          sql`SELECT p.user_id, b.promoter_id,
-                     array_agg(b.id) AS impression_ids,
-                     sum(b.promoter_earnings_microusd)::bigint AS total_microusd
-              FROM bonus_promo_impressions b
-              JOIN ads_promoters p ON p.id = b.promoter_id
-              JOIN ads_interactions e ON e.id = b.interaction_id
-              WHERE b.clearance_status = 'pending'
-                AND b.hold_expires_at <= now()
-                AND e.assessment_status <> 'invalidated'
-              GROUP BY p.user_id, b.promoter_id`,
-        ),
-      );
-      if (!dueGroups.length) return { clearedPromoters: 0, paidCents: 0 };
-
-      let totalPaid = 0;
-      let clearedPromoters = 0;
-      const budget = rows(
-        await tx.execute(
-          sql`SELECT id, remaining_promo_budget_cents FROM advertiser_promo_budget ORDER BY updated_at DESC LIMIT 1 FOR UPDATE`,
-        ),
-      )[0];
-      let budgetLeft = Number(budget?.remaining_promo_budget_cents ?? 0);
-
-      for (const g of dueGroups) {
-        const cents = Math.floor(Number(g.total_microusd) / 10000);
-        if (cents <= 0 || cents > budgetLeft) continue;
-        const wallet = rows(
-          await tx.execute(
-            sql`SELECT id, balance_usd_cents FROM billing_wallets WHERE user_id = ${g.user_id}::uuid FOR UPDATE`,
-          ),
-        )[0];
-        if (!wallet) continue;
-
-        const batchRef = `bonus-promo-clearance:${g.promoter_id}:${cents}:${Date.now()}`;
-        await tx.execute(
-          sql`UPDATE billing_wallets SET balance_usd_cents = balance_usd_cents + ${cents}, updated_at = now() WHERE id = ${wallet.id}::uuid`,
-        );
-        await tx.execute(
-          sql`INSERT INTO billing_transactions (user_id, type, provider, status, amount_usd_cents, reference, idempotency_key, balance_before_usd_cents, balance_after_usd_cents, metadata)
-              VALUES (${g.user_id}::uuid, 'ads_earning', 'internal', 'completed', ${cents}, ${batchRef}, ${batchRef}, ${Number(wallet.balance_usd_cents)}, ${Number(wallet.balance_usd_cents) + cents}, ${JSON.stringify({ kind: 'bonus_promo_55_share', promoterId: g.promoter_id })}::jsonb)`,
-        );
-        await tx.execute(
-          sql`UPDATE bonus_promo_impressions
-              SET clearance_status = 'cleared', cleared_at = now()
-              WHERE id = ANY(${g.impression_ids}::uuid[])`,
-        );
-        budgetLeft -= cents;
-        totalPaid += cents;
-        clearedPromoters++;
-      }
-
-      if (budget && totalPaid > 0) {
-        const pendingRes = rows(
-          await tx.execute(
-            sql`SELECT ceil(coalesce(sum(promoter_earnings_microusd), 0)::numeric / 10000)::bigint AS reserved_cents
-                FROM bonus_promo_impressions WHERE clearance_status = 'pending'`,
-          ),
-        );
-        await tx.execute(
-          sql`UPDATE advertiser_promo_budget
-              SET remaining_promo_budget_cents = remaining_promo_budget_cents - ${totalPaid},
-                  paid_promoter_earnings_cents = paid_promoter_earnings_cents + ${totalPaid},
-                  consumed_bonus_credits_cents = consumed_bonus_credits_cents + ${totalPaid},
-                  reserved_liability_cents = ${Number(pendingRes[0]?.reserved_cents ?? 0)},
-                  updated_at = now()
-              WHERE id = ${budget.id}::uuid`,
-        );
-      }
-
-      return { clearedPromoters, paidCents: totalPaid };
-    });
+    const payoutService = new BonusPromoPayoutService(this.db);
+    return payoutService.clearDueBatch(assertLease);
   }
 }

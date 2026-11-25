@@ -38,6 +38,7 @@ export class AdminReportsController {
     const result = await this.db.execute(sql`SELECT
       count(*) FILTER (WHERE inventory_class='paid' AND delivery_mode='normal')::text AS paid_serves,
       count(*) FILTER (WHERE inventory_class='house' AND delivery_mode='normal')::text AS promo_serves,
+      count(*) FILTER (WHERE inventory_class='bonus_promo' AND delivery_mode='normal')::text AS bonus_promo_serves,
       count(*) FILTER (WHERE inventory_class='paid' AND delivery_mode='normal' AND financial_eligibility='quarantined')::text AS quarantined_serves
       FROM ads_serves WHERE served_at >= (${range.from}::date::timestamp AT TIME ZONE ${REPORT_ZONE})
         AND served_at < (${range.until}::date::timestamp AT TIME ZONE ${REPORT_ZONE})`);
@@ -49,12 +50,18 @@ export class AdminReportsController {
   @AdsRoles('super_admin','ads_finance')
   async finance(@Query('from') from?: string, @Query('to') to?: string) {
     const range = dateRange(from, to);
+    const startTs = sql`(${range.from}::date::timestamp AT TIME ZONE ${REPORT_ZONE})`;
+    const endTs = sql`(${range.until}::date::timestamp AT TIME ZONE ${REPORT_ZONE})`;
     const result = await this.db.execute(sql`SELECT
       coalesce(sum(amount_usd_cents) FILTER (WHERE type='ads_spend' AND status='completed'),0)::text AS posted_ad_spend_cents,
       coalesce(sum(amount_usd_cents) FILTER (WHERE type='ads_earning' AND status='pending'),0)::text AS pending_earnings_cents,
-      coalesce(sum(amount_usd_cents) FILTER (WHERE type='ads_earning' AND status='completed'),0)::text AS cleared_earnings_cents
-      FROM billing_transactions WHERE created_at >= (${range.from}::date::timestamp AT TIME ZONE ${REPORT_ZONE})
-        AND created_at < (${range.until}::date::timestamp AT TIME ZONE ${REPORT_ZONE})`);
+      coalesce(sum(amount_usd_cents) FILTER (WHERE type='ads_earning' AND status='completed' AND coalesce((metadata::jsonb)->>'kind','') <> 'bonus_promo_earning'),0)::text AS cleared_earnings_cents,
+      coalesce(sum(amount_usd_cents) FILTER (WHERE type='ads_earning' AND status='completed' AND (metadata::jsonb)->>'kind' = 'bonus_promo_earning'),0)::text AS bonus_promo_cleared_cents,
+      coalesce((SELECT sum(promoter_earnings_microusd) FROM bonus_promo_impressions WHERE clearance_status='pending' AND created_at >= ${startTs} AND created_at < ${endTs}),0)::text AS bonus_promo_pending_microusd,
+      coalesce((SELECT sum(amount_cents) FROM platform_reserve_transfers WHERE from_reserve IN ('platform_operating_reserve','promotional_ad_reserve','rewards_fund_available','cfig_conversion_reserve') AND created_at >= ${startTs} AND created_at < ${endTs}),0)::text AS inter_reserve_transfers_cents,
+      coalesce((SELECT available_cents FROM cfig_conversion_reserve WHERE currency='USD' LIMIT 1),0)::text AS cfig_reserve_available_cents
+      FROM billing_transactions WHERE created_at >= ${startTs}
+        AND created_at < ${endTs}`);
     return { status: 'success', data: { ...range, timezone: REPORT_ZONE, updatedAt: new Date().toISOString(), metrics: result.rows[0],
       basis: 'Posted Billing transaction amounts by creation date and current status.' } };
   }
