@@ -212,7 +212,7 @@ test('PLAN0134 SDK DOM: hover reveals Ads by CrimFig, rating overlay offers Love
     expect(loveBtn.querySelector('svg').getAttribute('data-cf-icon-color')).toBe('#D4143A');
     expect(likeBtn.querySelector('svg').getAttribute('data-cf-icon-color')).toBe('#2563EB');
     expect(dislikeBtn.querySelector('svg').getAttribute('data-cf-icon-color')).toBe('#DC2626');
-    expect(closeBtn.textContent).toBe('Cancel');
+    expect(closeBtn.textContent).toBe('×');
 
     // Cancel closes without sending rating request
     closeBtn.click();
@@ -223,7 +223,7 @@ test('PLAN0134 SDK DOM: hover reveals Ads by CrimFig, rating overlay offers Love
     trigger.click();
     loveBtn.click();
     await tick();
-    expect(closeBtn.textContent).toBe('Close');
+    expect(closeBtn.textContent).toBe('×');
     expect(calls.filter((c) => c.url.includes('/delivery/rating')).map((c) => c.body.rating)).toEqual(['love']);
     closeBtn.click();
     expect(overlay.style.display).toBe('none');

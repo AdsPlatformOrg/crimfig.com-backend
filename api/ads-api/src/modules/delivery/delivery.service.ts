@@ -680,15 +680,26 @@ export class DeliveryService {
       overlay.setAttribute('role', 'dialog');
       overlay.setAttribute('aria-label', 'Rate this advert');
       overlay.tabIndex = -1;
-      overlay.style.cssText = "display:none;position:absolute;inset:0;z-index:10;background:rgba(255,255,255,0.97);border:1px solid #E2E8F0;color:#171B2A;font-family:'Poppins',Arial,Helvetica,sans-serif;padding:6px 8px;box-sizing:border-box;flex-direction:column;align-items:center;justify-content:center;gap:5px;text-align:center;overflow:hidden;";
+      overlay.style.cssText = "display:none;position:absolute;inset:0;z-index:10;background:rgba(255,255,255,0.85);backdrop-filter:blur(4px);color:#171B2A;font-family:'Poppins',Arial,Helvetica,sans-serif;padding:6px 8px;box-sizing:border-box;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;";
       overlay.addEventListener('click', function(ev) { ev.stopPropagation(); });
 
+      var card = document.createElement('div');
+      card.setAttribute('data-cf-rating-card', 'true');
+      card.style.cssText = 'position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;background:#FFFFFF;border:1px solid #E2E8F0;border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,0.16);padding:12px 14px;max-width:100%;max-height:100%;box-sizing:border-box;';
+
+      var closeBtn = document.createElement('button');
+      closeBtn.type = 'button';
+      closeBtn.setAttribute('data-cf-rating-close', 'true');
+      closeBtn.setAttribute('aria-label', 'Close');
+      closeBtn.textContent = '×';
+      closeBtn.style.cssText = 'position:absolute;top:4px;right:6px;width:20px;height:20px;padding:0;border:none;border-radius:999px;background:transparent;color:#64748B;font:600 15px/20px Poppins,Arial,sans-serif;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;';
+
       var brandHeader = document.createElement('div');
-      brandHeader.style.cssText = 'font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#475569;line-height:1.1;';
+      brandHeader.style.cssText = 'font-size:9px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#64748B;line-height:1.1;';
       brandHeader.textContent = 'Ads by CrimFig';
       var titleEl = document.createElement('div');
       titleEl.setAttribute('data-cf-rating-title', 'true');
-      titleEl.style.cssText = 'font-size:12px;font-weight:700;color:#171B2A;line-height:1.2;';
+      titleEl.style.cssText = 'font-size:12px;font-weight:700;color:#171B2A;line-height:1.2;white-space:nowrap;';
       titleEl.textContent = 'Rate this advert:';
 
       var choicesRow = document.createElement('div');
@@ -697,13 +708,7 @@ export class DeliveryService {
 
       var statusEl = document.createElement('div');
       statusEl.setAttribute('data-cf-rating-status', 'true');
-      statusEl.style.cssText = 'font-size:10px;color:#475569;min-height:12px;line-height:1.2;';
-
-      var closeBtn = document.createElement('button');
-      closeBtn.type = 'button';
-      closeBtn.setAttribute('data-cf-rating-close', 'true');
-      closeBtn.textContent = 'Cancel';
-      closeBtn.style.cssText = 'padding:3px 10px;border-radius:6px;border:1px solid #CBD5E1;background:#F8FAFC;color:#171B2A;font:600 11px/1.2 Poppins,Arial,sans-serif;cursor:pointer;';
+      statusEl.style.cssText = 'font-size:10px;font-weight:500;color:#475569;min-height:12px;line-height:1.2;';
 
       var selectedRating = null;
       var ratingOptions = [
@@ -733,7 +738,6 @@ export class DeliveryService {
             pair.el.style.background = active ? opt.activeBg : '#FFFFFF';
           });
           statusEl.textContent = 'Thanks for rating this advert.';
-          closeBtn.textContent = 'Close';
           sendBeaconPost(rateBase + '/api/v1/delivery/rating', {
             eventId: eventIdentity(),
             occurredAt: new Date().toISOString(),
@@ -759,7 +763,20 @@ export class DeliveryService {
           return;
         }
         overlay.style.display = 'none';
+        trigger.style.display = 'inline-flex';
         trigger.setAttribute('aria-expanded', 'false');
+      }
+
+      function applyCompactLayout() {
+        var h = container.offsetHeight || 0;
+        var compact = h > 0 && h < 110;
+        card.style.flexDirection = compact ? 'row' : 'column';
+        card.style.padding = compact ? '4px 26px 4px 10px' : '12px 14px';
+        brandHeader.style.display = compact ? 'none' : 'block';
+        statusEl.style.display = compact ? 'none' : 'block';
+        choicesRow.style.flexWrap = compact ? 'nowrap' : 'wrap';
+        closeBtn.style.top = compact ? '50%' : '4px';
+        closeBtn.style.transform = compact ? 'translateY(-50%)' : 'none';
       }
 
       closeBtn.addEventListener('click', function(ev) {
@@ -801,15 +818,19 @@ export class DeliveryService {
         ev.preventDefault();
         ev.stopPropagation();
         if (overlay.getAttribute('data-cf-disliked-hidden') === 'true') return;
+        applyCompactLayout();
+        trigger.style.display = 'none';
         overlay.style.display = 'flex';
         trigger.setAttribute('aria-expanded', 'true');
+        overlay.focus();
       });
 
-      overlay.appendChild(brandHeader);
-      overlay.appendChild(titleEl);
-      overlay.appendChild(choicesRow);
-      overlay.appendChild(statusEl);
-      overlay.appendChild(closeBtn);
+      card.appendChild(closeBtn);
+      card.appendChild(brandHeader);
+      card.appendChild(titleEl);
+      card.appendChild(choicesRow);
+      card.appendChild(statusEl);
+      overlay.appendChild(card);
       hostCard.appendChild(trigger);
       hostCard.appendChild(overlay);
     }
