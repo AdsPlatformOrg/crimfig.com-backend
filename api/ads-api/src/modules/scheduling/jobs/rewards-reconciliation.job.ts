@@ -32,6 +32,7 @@ export class RewardsReconciliationJob implements CronJobHandler {
   async execute(
     context: CronExecutionContext,
     windowOverride?: { lower: string; upper: string },
+    options?: { persistForwardSettlement?: boolean },
   ): Promise<CronJobResult> {
     await context.assertLeaseOwnership();
 
@@ -77,15 +78,17 @@ export class RewardsReconciliationJob implements CronJobHandler {
       (cohort) => cohort.unsupportedPoints !== '0',
     ).length;
 
+    const persistForward = options?.persistForwardSettlement ?? (context.mode === 'ACTIVE');
     const milestoneCursor = typeof context.lastCheckpoint?.milestoneCursor === 'string' ? context.lastCheckpoint.milestoneCursor : null;
-    const milestones = this.milestones ? await this.milestones.reconcile(milestoneCursor, context.mode === 'ACTIVE', () => context.assertLeaseOwnership()) : null;
-    const bonusPromoClearance = this.controls && context.mode === 'ACTIVE'
+    const milestones = this.milestones ? await this.milestones.reconcile(milestoneCursor, persistForward, () => context.assertLeaseOwnership()) : null;
+    const bonusPromoClearance = this.controls && persistForward
       ? await this.controls.clearMaturedBonusPromoEarnings(() => context.assertLeaseOwnership())
       : { skippedReportOnly: true };
     const checkpoint = {
       lastReconciledFrom: lower,
       lastReconciledUntil: upper,
       mode: context.mode,
+      persistForwardSettlement: persistForward,
       allowAutomaticFinancialCorrections: context.allowAutomaticFinancialCorrections,
       milestoneCursor: milestones?.cursor ?? null,
     };
@@ -96,6 +99,7 @@ export class RewardsReconciliationJob implements CronJobHandler {
       checkpoint,
       summary: {
         mode: context.mode,
+        persistForwardSettlement: persistForward,
         allowAutomaticFinancialCorrections: context.allowAutomaticFinancialCorrections,
         window,
         pointsCohortsObserved: pointsObservations.length,

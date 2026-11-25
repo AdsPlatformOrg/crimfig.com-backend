@@ -279,24 +279,59 @@ export class CpcProcessingJob implements CronJobHandler {
     }
 
     // 6. Execute shared 5-minute cycle tasks (Traffic Quality & Rewards Reconciliation) in sequence
+    // with isolated sub-checkpoints and explicit mode resolution (PLAN-0155 G11)
     let trafficQualitySummary: Record<string, unknown> | { skippedDisabled: true } = {
       skippedDisabled: true,
     };
+    let trafficQualityCheckpoint: Record<string, unknown> | null =
+      (context.lastCheckpoint?.trafficQualityCheckpoint as Record<string, unknown> | undefined) ?? null;
     if (this.registry.isJobEnabled('ads.traffic.quality', env)) {
       await context.assertLeaseOwnership();
-      const tqResult = await this.trafficQualityJob.execute(context);
+      const tqContext: CronExecutionContext = {
+        ...context,
+        jobKey: 'ads.traffic.quality',
+        mode: this.registry.resolveMode('ads.traffic.quality', env),
+        lastCheckpoint: trafficQualityCheckpoint,
+        saveCheckpoint: async (cp) => {
+          await context.assertLeaseOwnership();
+          trafficQualityCheckpoint = cp;
+        },
+      };
+      const tqResult = await this.trafficQualityJob.execute(tqContext);
       trafficQualitySummary = tqResult.summary ?? {};
     }
 
     let rewardsSummary: Record<string, unknown> | { skippedDisabled: true } = {
       skippedDisabled: true,
     };
+    let rewardsCheckpoint: Record<string, unknown> | null =
+      (context.lastCheckpoint?.rewardsCheckpoint as Record<string, unknown> | undefined) ?? null;
     if (this.registry.isJobEnabled('ads.rewards.reconcile', env)) {
       await context.assertLeaseOwnership();
-      const rwResult = await this.rewardsReconciliationJob.execute(context, {
-        lower: start,
-        upper: context.triggerTime.toISOString(),
-      });
+      const rwContext: CronExecutionContext = {
+        ...context,
+        jobKey: 'ads.rewards.reconcile',
+        mode: this.registry.resolveMode('ads.rewards.reconcile', env),
+        lastCheckpoint: rewardsCheckpoint,
+        saveCheckpoint: async (cp) => {
+          await context.assertLeaseOwnership();
+          rewardsCheckpoint = cp;
+        },
+      };
+      const rwResult = await this.rewardsReconciliationJob.execute(
+        rwContext,
+        {
+          lower:
+            typeof rewardsCheckpoint?.lastReconciledUntil === 'string'
+              ? rewardsCheckpoint.lastReconciledUntil
+              : start,
+          upper: context.triggerTime.toISOString(),
+        },
+        {
+          persistForwardSettlement:
+            context.mode === 'ACTIVE' && this.registry.isForwardRewardsSettlementEnabled(env),
+        },
+      );
       rewardsSummary = rwResult.summary ?? {};
     }
 
@@ -313,6 +348,8 @@ export class CpcProcessingJob implements CronJobHandler {
       candidatesEvaluated,
       eligibleAssessed,
       quarantinedAssessed,
+      trafficQualityCheckpoint,
+      rewardsCheckpoint,
     };
     await context.saveCheckpoint(checkpoint);
 

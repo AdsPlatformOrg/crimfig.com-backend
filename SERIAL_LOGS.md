@@ -2,6 +2,16 @@
 
 Prior historical entries up to 2026-11-03 are archived in `backend/SERIAL_LOGS_ARCHIVE_20261103.md`.
 
+## 2026-11-25 - PLAN-0155 Live Rewards — Accounting, Delivery and Verification Gaps
+
+Implemented full `PLAN-0155` remediation under JED's `2026-11-25` approvals (single `super_admin` reserve transfers, `$cfig_conversion_reserve` inclusion, full P0+P1 scope):
+- Migration `0057_plan0155_rewards_accounting_invariants.sql` (`57` migrations validated): `platform_reserve_transfers.source_ref` + partial unique index `platform_reserve_proceeds_source_uq`, `bonus_promo_impressions` (`creative_id`, `payout_batch_id`, `billing_transaction_id`), `bonus_promo_promoter_carries`, `advertiser_bonus_campaign_allocations`, `advertiser_bonus_credits_conservation_chk`, non-negative reserve checks, and `ERRCODE 55000` append-only triggers.
+- Authoritative `BonusPromoPayoutService` (Billing) + `ProgramControlsService`: settled batch proceeds verification, single `super_admin` reserve transfers including `cfig_conversion_reserve`, live pending+carry+in-flight liability locks, fail-closed `isSwitchEnabled`, synchronized delivery+payout pause, and exact microUSD carry (`37 * 275 = 10,175 microUSD -> 1c paid + 175 microUSD carry`).
+- `DeliveryService` + `CampaignsService`: atomic transactional backing & campaign credit checks, 15m pre-pause viewability window, FIFO `advertiser_bonus_campaign_allocations` consumption (`consumed_microusd` + `consumed_credit_cents`), and in-flight hold on pause.
+- `milestone-evidence.ts` / `milestone-policy.ts` / `AdvertiserMilestonesService`: `2026-11-22T23:00:00Z` clearance cutoff, active campaign spend, exact calendar-month tenure, `underInvestigation` holding only `A4_TRUSTED`/`PRESTIGE_*`, permanent Prestige preservation unless `confirmedFraud`, legacy monetary dedup, and claim-time evaluation audit.
+- `CronJobRegistry` / `RewardsReconciliationJob` / `CpcProcessingJob` / `ReportsService` / `AdminReportsController`: explicit forward settlement separation, separate cash vs bonus spend + promo earnings reporting.
+- Verification: `turbo run typecheck` (`10/10`), `turbo run lint` (`9/9`), `validate-migration-registry.cjs` (`57`), `plan0155-rewards-accounting.spec.ts` (`6/6`), 6 existing suites (`31/31`), `plan0149-postgres.spec.ts` (`12/12` PG 17), `plan0155-postgres.spec.ts` (`4/4` PG 17), `docs/reviews/plan-0155/post-fix-verification.cjs` (`allRemediated: true`).
+
 ## 2026-11-15 - ADS-API `adminReviewDirectSlot` Contract Registration Fix & Production Auth/Ads Deployment Unblock
 
 Added missing `adminReviewDirectSlot: json()` entry under `responses.AdsOperationsController` in `backend/api/ads-api/src/contracts/ads-contract.ts` (resolving `Missing API response contract for AdsOperationsController.adminReviewDirectSlot` boot crash on `ADS-API` staging/production). Added contract registration + negative-case test in `backend/auth/test/security/plan0115-adstation-gating.spec.ts`. Verified `tsc --noEmit` on `ads-api` and `auth` (0 errors) and `plan0115-adstation-gating.spec.ts` (10/10 passed). Note: Railway production `crimfig_core` currently has `tcpProxies: []` (`postgres.railway.internal:5432` has no public TCP proxy), so pending production DB migrations (`0018`–`0046`) await public TCP proxy enablement or `railway ssh` execution.

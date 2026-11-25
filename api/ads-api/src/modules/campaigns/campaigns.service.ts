@@ -1856,8 +1856,29 @@ export class CampaignsService {
     }
     if (campaign.isBonusDelivery) {
       return this.db.transaction(async (tx) => {
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('bonus-promo-reserve', 0))`);
         const locked = await this.campaignForUpdate(tx, campaignId, advertiserId);
-        const unspent = Math.max(0, Number(locked.bonusReservedCents ?? 0) - Number(locked.bonusSpentCents ?? 0));
+        let inFlightHoldCents = 0;
+        if (status === 'paused') {
+          const holdRes = await tx.execute(
+            sql`SELECT
+                  coalesce((SELECT sum(face_value_microusd) FROM bonus_promo_impressions WHERE campaign_id = ${campaignId}::uuid AND clearance_status <> 'invalidated'), 0)::bigint AS accrued_microusd,
+                  coalesce((SELECT count(*) * 500 FROM ads_serves s
+                            WHERE s.campaign_id = ${campaignId}::uuid
+                              AND s.inventory_class = 'bonus_promo'
+                              AND s.served_at >= now() - interval '15 minutes'
+                              AND NOT EXISTS (SELECT 1 FROM bonus_promo_impressions b WHERE b.serve_id = s.id)), 0)::bigint AS inflight_microusd`,
+          );
+          const holdRow = ((holdRes as any).rows ?? holdRes)[0] ?? {};
+          const requiredReservedCents = Math.ceil(
+            (Number(holdRow.accrued_microusd ?? 0) + Number(holdRow.inflight_microusd ?? 0)) / 10000,
+          );
+          inFlightHoldCents = Math.max(0, requiredReservedCents - Number(locked.bonusSpentCents ?? 0));
+        }
+        const unspent = Math.max(
+          0,
+          Number(locked.bonusReservedCents ?? 0) - Number(locked.bonusSpentCents ?? 0) - inFlightHoldCents,
+        );
         if (['paused', 'trash', 'draft'].includes(status) && unspent > 0 && this.milestones) {
           await this.milestones.releaseUnusedBonusForCampaignTx(
             tx,
@@ -1869,7 +1890,7 @@ export class CampaignsService {
           await tx
             .update(adsCampaigns)
             .set({
-              bonusReservedCents: Number(locked.bonusSpentCents ?? 0),
+              bonusReservedCents: Number(locked.bonusReservedCents ?? 0) - unspent,
               status: status as any,
               updatedAt: new Date(),
             })

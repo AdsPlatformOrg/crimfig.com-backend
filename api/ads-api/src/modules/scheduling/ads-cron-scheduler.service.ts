@@ -114,7 +114,12 @@ export class AdsCronSchedulerService {
   async reconcileRewards(options?: CoordinatorRunOptions) {
     return this.coordinator.run(
       'ads.rewards.reconcile',
-      (context) => this.rewardsReconcile.execute(context),
+      (context) =>
+        this.rewardsReconcile.execute(context, undefined, {
+          persistForwardSettlement: this.registry.isForwardRewardsSettlementEnabled(
+            options?.env ?? process.env,
+          ),
+        }),
       options,
     );
   }

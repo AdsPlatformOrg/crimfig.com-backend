@@ -50,13 +50,13 @@ import {
   adsHouseCreatives,
 } from '@crimfig/database/schema';
 import { eq, sql, and, or, inArray, desc } from 'drizzle-orm';
-import {
-  ImpressionTokenService,
+import { ImpressionTokenService,
   ImpressionTokenPayload,
 } from './impression-token.service';
 import { AuctionEngineService, DeliveryEvaluation, ExcludedCandidateAudit } from './auction-engine.service';
 import { FraudRulesService } from '../verification/fraud-rules.service';
 import { DEFAULT_AUCTION_POLICY_VERSION } from './pricing-contract';
+import { deterministicBonusLedgerUuid } from '../advertiser-milestones/advertiser-milestones.service';
 
 export const HOUSE_CAMPAIGN_UUID = '00000000-0000-4000-8000-00000000cf01';
 export const HOUSE_CREATIVE_UUID = '00000000-0000-4000-8000-00000000cf02';
@@ -1107,10 +1107,10 @@ export class DeliveryService {
 
     try {
       const sw = await this.db.execute(
-        sql`SELECT enabled FROM program_feature_switches WHERE key = 'bonus_ad_delivery' LIMIT 1`,
+        sql`SELECT enabled, is_locked_off FROM program_feature_switches WHERE key = 'bonus_ad_delivery' LIMIT 1`,
       );
-      const swRow = (sw.rows ?? sw)[0];
-      if (swRow && swRow.enabled === false) return null;
+      const swRow = (sw.rows ?? sw)[0] as any;
+      if (!swRow || swRow.is_locked_off || swRow.enabled !== true) return null;
 
       const budgetRes = await this.db.execute(
         sql`SELECT remaining_promo_budget_cents, reserved_liability_cents, is_issuance_halted
@@ -1207,71 +1207,146 @@ export class DeliveryService {
         return null;
       }
 
-      const winner = eligible[0];
       const ipHash = this.tokenService.hashIp(params.clientIp);
       const placementTokenId = HOUSE_PLACEMENT_UUID;
-      const [decision] = await this.db.insert(adsAuctionDecisions).values({
-        requestId: params.requestId,
-        promoterId: params.promoter.id,
-        websiteId: params.website.id,
-        slotId: params.slot.id,
-        slotTagId: params.slot.slotTagId,
-        inventoryClass: 'bonus_promo',
-        deliveryMode: 'normal',
-        trafficRiskStatus: 'normal',
-        financialEligibility: 'pending',
-        policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
-        bidderGroupingMode: 'advertiser',
-        tieSeed: crypto.randomUUID(),
-        candidateCount: eligible.length,
-        eligibleGroupCount: 1,
-        evaluatedCandidates: [{ campaignId: winner.campaignId, creativeId: winner.creativeId, isBonusDelivery: true }],
-        excludedCandidates: [],
-        winnerCampaignId: winner.campaignId,
-        winnerCreativeId: winner.creativeId,
-        pricingModel: 'cpm',
-        clearingPriceMicros: 500_000,
-        billingPriceNanos: 500_000_000n,
-        recordHash: adDigest({ requestId: params.requestId, campaignId: winner.campaignId, creativeId: winner.creativeId, kind: 'bonus_promo' }),
-      }).returning({ id: adsAuctionDecisions.id });
+      const issuedBonusServe = await this.db.transaction(async (tx) => {
+        await tx.execute(sql`set local lock_timeout='5s'`);
+        await tx.execute(sql`set local statement_timeout='8s'`);
+        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('bonus-promo-reserve', 0))`);
 
-      const [serve] = await this.db.insert(adsServes).values({
-        placementId: null,
-        campaignId: winner.campaignId,
-        creativeId: winner.creativeId,
-        promoterId: params.promoter.id,
-        slotHandle: params.slot.slotTagId,
-        requestId: params.requestId,
-        websiteId: params.website.id,
-        slotId: params.slot.id,
-        inventoryClass: 'bonus_promo',
-        deliveryMode: 'normal',
-        trafficRiskStatus: 'normal',
-        financialEligibility: 'pending',
-        auctionDecisionId: decision.id,
-        policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
-        clearingPriceMicros: 500_000,
-        pricingVersion: 2,
-        billingPriceNanos: 500_000_000n,
-        pricingModel: 'cpm',
-        ipHash,
-        userAgentHash: params.userAgent ? this.tokenService.hashIp(params.userAgent) : null,
-        geoCountry: params.clientGeo?.country || null,
-        geoRegion: params.clientGeo?.region || null,
-        deviceType: params.resolvedDevice,
-        contentSnapshot: {
-          isBonusDelivery: true,
-          destinationUrl: winner.destinationUrl,
-          adType: winner.adType,
-          adFormat: winner.adFormat,
-          headline: winner.headline,
-          imageUrl: winner.imageUrl,
-          campaignId: winner.campaignId,
-          creativeId: winner.creativeId,
-        },
-      }).returning({ id: adsServes.id });
+        const swTx = await tx.execute(
+          sql`SELECT enabled, is_locked_off FROM program_feature_switches WHERE key = 'bonus_ad_delivery' LIMIT 1`,
+        );
+        const swTxRow = ((swTx as any).rows ?? swTx)[0];
+        if (!swTxRow || swTxRow.is_locked_off || swTxRow.enabled !== true) return null;
 
-      await this.db.update(adsAuctionDecisions).set({ serveId: serve.id }).where(eq(adsAuctionDecisions.id, decision.id));
+        const budgetTxRes = await tx.execute(
+          sql`SELECT id, remaining_promo_budget_cents, is_issuance_halted
+              FROM advertiser_promo_budget ORDER BY updated_at DESC LIMIT 1 FOR UPDATE`,
+        );
+        const budgetTx = ((budgetTxRes as any).rows ?? budgetTxRes)[0];
+        if (!budgetTx || budgetTx.is_issuance_halted) return null;
+
+        const reserveUsageRes = await tx.execute(
+          sql`SELECT
+                coalesce((SELECT sum(promoter_earnings_microusd) FROM bonus_promo_impressions WHERE clearance_status = 'pending'), 0)::bigint AS pending_microusd,
+                coalesce((SELECT sum(carry_microusd) FROM bonus_promo_promoter_carries), 0)::bigint AS carry_microusd,
+                coalesce((SELECT count(*) FROM ads_serves s
+                          WHERE s.inventory_class = 'bonus_promo'
+                            AND s.served_at >= now() - interval '15 minutes'
+                            AND NOT EXISTS (SELECT 1 FROM bonus_promo_impressions b WHERE b.serve_id = s.id)), 0)::bigint AS inflight_count`,
+        );
+        const reserveUsage = ((reserveUsageRes as any).rows ?? reserveUsageRes)[0] ?? {};
+        const committedAfterServeMicroUsd =
+          Number(reserveUsage.pending_microusd ?? 0) +
+          Number(reserveUsage.carry_microusd ?? 0) +
+          (Number(reserveUsage.inflight_count ?? 0) + 1) * 275;
+        if (committedAfterServeMicroUsd > Number(budgetTx.remaining_promo_budget_cents ?? 0) * 10000) {
+          return null;
+        }
+
+        let selectedWinner: (typeof eligible)[number] | null = null;
+        for (const cand of eligible) {
+          const campLockRes = await tx.execute(
+            sql`SELECT id, status, moderation_status, bonus_reserved_cents, bonus_spent_cents, remaining_budget_usd_cents
+                FROM ads_campaigns
+                WHERE id = ${cand.campaignId}::uuid
+                FOR UPDATE`,
+          );
+          const campLock = ((campLockRes as any).rows ?? campLockRes)[0];
+          if (
+            !campLock ||
+            campLock.status !== 'active' ||
+            campLock.moderation_status !== 'approved' ||
+            Number(campLock.remaining_budget_usd_cents ?? 0) <= 0
+          ) {
+            continue;
+          }
+          const campUsageRes = await tx.execute(
+            sql`SELECT
+                  coalesce((SELECT sum(face_value_microusd) FROM bonus_promo_impressions WHERE campaign_id = ${cand.campaignId}::uuid AND clearance_status <> 'invalidated'), 0)::bigint AS accrued_microusd,
+                  coalesce((SELECT count(*) FROM ads_serves s
+                            WHERE s.campaign_id = ${cand.campaignId}::uuid
+                              AND s.inventory_class = 'bonus_promo'
+                              AND s.served_at >= now() - interval '15 minutes'
+                              AND NOT EXISTS (SELECT 1 FROM bonus_promo_impressions b WHERE b.serve_id = s.id)), 0)::bigint AS inflight_count`,
+          );
+          const campUsage = ((campUsageRes as any).rows ?? campUsageRes)[0] ?? {};
+          const nextCampMicroUsd =
+            Number(campUsage.accrued_microusd ?? 0) + (Number(campUsage.inflight_count ?? 0) + 1) * 500;
+          if (nextCampMicroUsd <= Number(campLock.bonus_reserved_cents ?? 0) * 10000) {
+            selectedWinner = cand;
+            break;
+          }
+        }
+        if (!selectedWinner) return null;
+
+        const [decision] = await tx.insert(adsAuctionDecisions).values({
+          requestId: params.requestId,
+          promoterId: params.promoter.id,
+          websiteId: params.website.id,
+          slotId: params.slot.id,
+          slotTagId: params.slot.slotTagId,
+          inventoryClass: 'bonus_promo',
+          deliveryMode: 'normal',
+          trafficRiskStatus: 'normal',
+          financialEligibility: 'pending',
+          policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
+          bidderGroupingMode: 'advertiser',
+          tieSeed: crypto.randomUUID(),
+          candidateCount: eligible.length,
+          eligibleGroupCount: 1,
+          evaluatedCandidates: [{ campaignId: selectedWinner.campaignId, creativeId: selectedWinner.creativeId, isBonusDelivery: true }],
+          excludedCandidates: [],
+          winnerCampaignId: selectedWinner.campaignId,
+          winnerCreativeId: selectedWinner.creativeId,
+          pricingModel: 'cpm',
+          clearingPriceMicros: 500_000,
+          billingPriceNanos: 500_000_000n,
+          recordHash: adDigest({ requestId: params.requestId, campaignId: selectedWinner.campaignId, creativeId: selectedWinner.creativeId, kind: 'bonus_promo' }),
+        }).returning({ id: adsAuctionDecisions.id });
+
+        const [serve] = await tx.insert(adsServes).values({
+          placementId: null,
+          campaignId: selectedWinner.campaignId,
+          creativeId: selectedWinner.creativeId,
+          promoterId: params.promoter.id,
+          slotHandle: params.slot.slotTagId,
+          requestId: params.requestId,
+          websiteId: params.website.id,
+          slotId: params.slot.id,
+          inventoryClass: 'bonus_promo',
+          deliveryMode: 'normal',
+          trafficRiskStatus: 'normal',
+          financialEligibility: 'pending',
+          auctionDecisionId: decision.id,
+          policyVersion: DEFAULT_AUCTION_POLICY_VERSION,
+          clearingPriceMicros: 500_000,
+          pricingVersion: 2,
+          billingPriceNanos: 500_000_000n,
+          pricingModel: 'cpm',
+          ipHash,
+          userAgentHash: params.userAgent ? this.tokenService.hashIp(params.userAgent) : null,
+          geoCountry: params.clientGeo?.country || null,
+          geoRegion: params.clientGeo?.region || null,
+          deviceType: params.resolvedDevice,
+          contentSnapshot: {
+            isBonusDelivery: true,
+            destinationUrl: selectedWinner.destinationUrl,
+            adType: selectedWinner.adType,
+            adFormat: selectedWinner.adFormat,
+            headline: selectedWinner.headline,
+            imageUrl: selectedWinner.imageUrl,
+            campaignId: selectedWinner.campaignId,
+            creativeId: selectedWinner.creativeId,
+          },
+        }).returning({ id: adsServes.id });
+
+        await tx.update(adsAuctionDecisions).set({ serveId: serve.id }).where(eq(adsAuctionDecisions.id, decision.id));
+        return { winner: selectedWinner, serve };
+      });
+      if (!issuedBonusServe) return null;
+      const { winner, serve } = issuedBonusServe;
 
       const impToken = this.tokenService.generateToken({
         servedId: serve.id,
@@ -1299,7 +1374,8 @@ export class DeliveryService {
         impToken,
         clickUrl: `${this.publicBaseUrl()}/api/v1/delivery/go/${impToken}?pid=${params.promoter.id}`,
       };
-    } catch {
+    } catch (err) {
+      this.logger.warn(`Bonus promo serve failed: ${(err as any)?.message ?? err}`);
       return null;
     }
   }
@@ -3013,42 +3089,180 @@ export class DeliveryService {
         instanceClaims: { pageViewId: event.pageViewId, slotInstanceId: event.slotInstanceId, opportunityId: event.opportunityId, sdkInitId: event.sdkInitId, instanceIndex: event.instanceIndex, instancesDetected: event.instancesDetected }
       }, tx);
 
-      // PLAN-0154: Record 55% promotional reserve earnings ($0.50 base CPM viewable impression) with 72h hold.
+      // PLAN-0154 / PLAN-0155 (G02 + G05): Atomically enforce cash backing, original serve validity,
+      // per-campaign allocation & grant consumption, and 55% promotional reserve earnings (72h hold).
       if (isBonusPromoServe && params.type === 'viewable_impression' && isValid && bonusServeRecord?.campaignId && bonusServeRecord?.websiteId) {
-        await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('bonus-promo-reserve', 0))`);
-        const [camp] = await tx.select({ advertiserId: adsCampaigns.advertiserId }).from(adsCampaigns).where(eq(adsCampaigns.id, bonusServeRecord.campaignId)).for('update').limit(1);
-        const [promoOwner] = await tx.select({ userId: adsPromoters.userId }).from(adsPromoters).where(eq(adsPromoters.id, bonusServeRecord.promoterId)).limit(1);
-        if (camp && promoOwner && camp.advertiserId !== promoOwner.userId) {
-          const inserted = await tx.execute(
-            sql`INSERT INTO bonus_promo_impressions (serve_id, interaction_id, campaign_id, advertiser_id, promoter_id, website_id, face_value_microusd, promoter_earnings_microusd, clearance_status, hold_expires_at)
-                VALUES (${bonusServeRecord.id}::uuid, ${event.id}::uuid, ${bonusServeRecord.campaignId}::uuid, ${camp.advertiserId}::uuid, ${bonusServeRecord.promoterId}::uuid, ${bonusServeRecord.websiteId}::uuid, 500, 275, 'pending', now() + interval '72 hours')
-                ON CONFLICT (serve_id) DO NOTHING RETURNING id`,
-          );
-          if ((inserted.rows ?? inserted).length > 0) {
-            const totalsRes = await tx.execute(
-              sql`SELECT floor(coalesce(sum(face_value_microusd), 0) / 10000)::int AS consumed_cents
-                  FROM bonus_promo_impressions WHERE campaign_id = ${bonusServeRecord.campaignId}::uuid AND clearance_status <> 'invalidated'`,
-            );
-            const consumedCents = Number((totalsRes.rows ?? totalsRes)[0]?.consumed_cents ?? 0);
+        const servedAtMs = bonusServeRecord.servedAt ? new Date(bonusServeRecord.servedAt).getTime() : NaN;
+        const eventAtMs = event.createdAt.getTime();
+        const withinOriginalValidity =
+          Number.isFinite(servedAtMs) &&
+          eventAtMs >= servedAtMs - 5_000 &&
+          eventAtMs - servedAtMs <= 15 * 60_000;
+
+        if (withinOriginalValidity) {
+          await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended('bonus-promo-reserve', 0))`);
+          const [camp] = await tx
+            .select({
+              advertiserId: adsCampaigns.advertiserId,
+              status: adsCampaigns.status,
+              budgetUsdCents: adsCampaigns.budgetUsdCents,
+              bonusReservedCents: adsCampaigns.bonusReservedCents,
+            })
+            .from(adsCampaigns)
+            .where(eq(adsCampaigns.id, bonusServeRecord.campaignId))
+            .for('update')
+            .limit(1);
+          const [promoOwner] = await tx
+            .select({ userId: adsPromoters.userId })
+            .from(adsPromoters)
+            .where(eq(adsPromoters.id, bonusServeRecord.promoterId))
+            .limit(1);
+
+          if (
+            camp &&
+            promoOwner &&
+            camp.advertiserId !== promoOwner.userId &&
+            !['trash', 'cancelled', 'suspended', 'draft'].includes(camp.status)
+          ) {
             await tx.execute(
-              sql`UPDATE ads_campaigns
-                  SET bonus_spent_cents = ${consumedCents},
-                      remaining_budget_usd_cents = GREATEST(0, budget_usd_cents - ${consumedCents}),
-                      updated_at = now()
-                  WHERE id = ${bonusServeRecord.campaignId}::uuid`,
+              sql`select pg_advisory_xact_lock(hashtextextended(${'advertiser-claim:' + camp.advertiserId}, 0))`,
             );
-            const liabilityRes = await tx.execute(
-              sql`SELECT ceil(coalesce(sum(promoter_earnings_microusd), 0)::numeric / 10000)::bigint AS reserved_cents
-                  FROM bonus_promo_impressions WHERE clearance_status = 'pending'`,
+            const budgetLockRes = await tx.execute(
+              sql`SELECT id, remaining_promo_budget_cents
+                  FROM advertiser_promo_budget ORDER BY updated_at DESC LIMIT 1 FOR UPDATE`,
             );
-            const reservedCents = Number((liabilityRes.rows ?? liabilityRes)[0]?.reserved_cents ?? 0);
-            await tx.execute(
-              sql`UPDATE advertiser_promo_budget
-                  SET reserved_liability_cents = ${reservedCents},
-                      updated_at = now()
-                  WHERE id = (SELECT id FROM advertiser_promo_budget ORDER BY updated_at DESC LIMIT 1)`,
+            const budgetLock = ((budgetLockRes as any).rows ?? budgetLockRes)[0];
+            const backingCheckRes = await tx.execute(
+              sql`SELECT
+                    coalesce((SELECT sum(promoter_earnings_microusd) FROM bonus_promo_impressions WHERE clearance_status = 'pending'), 0)::bigint AS pending_microusd,
+                    coalesce((SELECT sum(carry_microusd) FROM bonus_promo_promoter_carries), 0)::bigint AS carry_microusd,
+                    coalesce((SELECT sum(face_value_microusd) FROM bonus_promo_impressions WHERE campaign_id = ${bonusServeRecord.campaignId}::uuid AND clearance_status <> 'invalidated'), 0)::bigint AS campaign_accrued_microusd`,
             );
+            const backingCheck = ((backingCheckRes as any).rows ?? backingCheckRes)[0] ?? {};
+            const nextLiabilityMicroUsd =
+              Number(backingCheck.pending_microusd ?? 0) + Number(backingCheck.carry_microusd ?? 0) + 275;
+            const nextCampaignMicroUsd = Number(backingCheck.campaign_accrued_microusd ?? 0) + 500;
+
+            const allocRowsRes = await tx.execute(
+              sql`SELECT id, credit_id, reserved_cents, consumed_cents, consumed_microusd
+                  FROM advertiser_bonus_campaign_allocations
+                  WHERE campaign_id = ${bonusServeRecord.campaignId}::uuid
+                    AND advertiser_id = ${camp.advertiserId}::uuid
+                  ORDER BY created_at ASC, id ASC
+                  FOR UPDATE`,
+            );
+            const allocRows = (((allocRowsRes as any).rows ?? allocRowsRes) as any[]);
+            const totalAllocCapacityMicro = allocRows.reduce(
+              (sum, a) =>
+                sum +
+                Math.max(
+                  0,
+                  (Number(a.reserved_cents) + Number(a.consumed_cents)) * 10000 - Number(a.consumed_microusd ?? 0),
+                ),
+              0,
+            );
+            const hasExplicitAllocations = allocRows.length > 0;
+
+            if (
+              budgetLock &&
+              nextLiabilityMicroUsd <= Number(budgetLock.remaining_promo_budget_cents ?? 0) * 10000 &&
+              nextCampaignMicroUsd <= Number(camp.bonusReservedCents ?? 0) * 10000 &&
+              (!hasExplicitAllocations || totalAllocCapacityMicro >= 500)
+            ) {
+              const inserted = await tx.execute(
+                sql`INSERT INTO bonus_promo_impressions (serve_id, interaction_id, campaign_id, creative_id, advertiser_id, promoter_id, website_id, face_value_microusd, promoter_earnings_microusd, clearance_status, hold_expires_at)
+                    VALUES (${bonusServeRecord.id}::uuid, ${event.id}::uuid, ${bonusServeRecord.campaignId}::uuid, ${bonusServeRecord.creativeId ?? null}::uuid, ${camp.advertiserId}::uuid, ${bonusServeRecord.promoterId}::uuid, ${bonusServeRecord.websiteId}::uuid, 500, 275, 'pending', now() + interval '72 hours')
+                    ON CONFLICT (serve_id) DO NOTHING RETURNING id`,
+              );
+              if (((inserted as any).rows ?? inserted).length > 0) {
+                let microLeft = 500;
+                for (const alloc of allocRows) {
+                  if (microLeft <= 0) break;
+                  const capMicro =
+                    (Number(alloc.reserved_cents) + Number(alloc.consumed_cents)) * 10000 -
+                    Number(alloc.consumed_microusd ?? 0);
+                  if (capMicro <= 0) continue;
+                  const takeMicro = Math.min(microLeft, capMicro);
+                  const nextMicro = Number(alloc.consumed_microusd ?? 0) + takeMicro;
+                  const nextConsumedCents = Math.ceil(nextMicro / 10000);
+                  const deltaCents = nextConsumedCents - Number(alloc.consumed_cents);
+
+                  await tx.execute(
+                    sql`UPDATE advertiser_bonus_campaign_allocations
+                        SET consumed_microusd = ${nextMicro},
+                            consumed_cents = ${nextConsumedCents},
+                            reserved_cents = reserved_cents - ${deltaCents},
+                            updated_at = now()
+                        WHERE id = ${alloc.id}::uuid`,
+                  );
+                  if (deltaCents > 0) {
+                    await tx.execute(
+                      sql`UPDATE advertiser_bonus_credits
+                          SET reserved_credit_cents = reserved_credit_cents - ${deltaCents},
+                              consumed_credit_cents = consumed_credit_cents + ${deltaCents},
+                              state = CASE
+                                WHEN remaining_credit_cents = 0 AND reserved_credit_cents - ${deltaCents} = 0 THEN 'exhausted'
+                                ELSE state
+                              END
+                          WHERE id = ${alloc.credit_id}::uuid`,
+                    );
+                    const balRes = await tx.execute(
+                      sql`SELECT coalesce(sum(remaining_credit_cents), 0)::int AS total
+                          FROM advertiser_bonus_credits
+                          WHERE advertiser_id = ${camp.advertiserId}::uuid`,
+                    );
+                    const balanceAfter = Number(((balRes as any).rows ?? balRes)[0]?.total ?? 0);
+                    const consumeReqId = deterministicBonusLedgerUuid(
+                      'consume',
+                      String(bonusServeRecord.id),
+                      String(alloc.credit_id),
+                    );
+                    await tx.execute(
+                      sql`INSERT INTO advertiser_bonus_ledger (advertiser_id, credit_id, campaign_id, request_id, kind, amount_cents, balance_after_cents, metadata)
+                          VALUES (${camp.advertiserId}::uuid, ${alloc.credit_id}::uuid, ${bonusServeRecord.campaignId}::uuid, ${consumeReqId}::uuid, 'campaign_consume', ${-deltaCents}, ${balanceAfter}, ${JSON.stringify({ serveId: bonusServeRecord.id, interactionId: event.id, consumedMicrousd: nextMicro })}::jsonb)
+                          ON CONFLICT (request_id) DO NOTHING`,
+                    );
+                  }
+                  microLeft -= takeMicro;
+                }
+
+                const consumedCents = Math.ceil(nextCampaignMicroUsd / 10000);
+                const nextRemainingBudget = Math.max(0, Number(camp.budgetUsdCents ?? 0) - consumedCents);
+                const fullyExhausted = nextCampaignMicroUsd >= Number(camp.budgetUsdCents ?? 0) * 10000;
+                await tx.execute(
+                  sql`UPDATE ads_campaigns
+                      SET bonus_spent_cents = ${consumedCents},
+                          remaining_budget_usd_cents = ${nextRemainingBudget},
+                          status = CASE WHEN ${fullyExhausted} AND status = 'active' THEN 'completed' ELSE status END,
+                          updated_at = now()
+                      WHERE id = ${bonusServeRecord.campaignId}::uuid`,
+                );
+                const reservedCents = Math.ceil(nextLiabilityMicroUsd / 10000);
+                await tx.execute(
+                  sql`UPDATE advertiser_promo_budget
+                      SET reserved_liability_cents = ${reservedCents},
+                          updated_at = now()
+                      WHERE id = ${budgetLock.id}::uuid`,
+                );
+              }
+            } else {
+              await tx.execute(
+                sql`UPDATE ads_interactions
+                    SET financial_eligibility = 'invalid',
+                        invalid_reason = coalesce(invalid_reason, 'BONUS_BACKING_EXHAUSTED')
+                    WHERE id = ${event.id}::uuid`,
+              );
+              event.financialEligibility = 'invalid';
+            }
           }
+        } else {
+          await tx.execute(
+            sql`UPDATE ads_interactions
+                SET financial_eligibility = 'invalid',
+                    invalid_reason = coalesce(invalid_reason, 'BONUS_SERVE_EXPIRED')
+                WHERE id = ${event.id}::uuid`,
+          );
+          event.financialEligibility = 'invalid';
         }
       }
       return event;

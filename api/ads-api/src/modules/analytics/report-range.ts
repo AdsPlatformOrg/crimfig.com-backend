@@ -35,8 +35,10 @@ export function reportRange(from: string | undefined, to: string | undefined, no
 }
 
 export const reportMetrics = [
-  'spend', 'cpmSpend', 'cpcSpend', 'posted', 'credits', 'confirmed', 'pending', 'adjustments',
-  'billableImpressions', 'billableClicks', 'impressions', 'clicks', 'validClicks', 'billedClicks',
+  'spend', 'cpmSpend', 'cpcSpend', 'bonusSpend', 'posted', 'credits',
+  'confirmed', 'pending', 'promoConfirmed', 'promoPending', 'adjustments',
+  'billableImpressions', 'bonusImpressions', 'promoImpressions', 'billableClicks',
+  'impressions', 'clicks', 'validClicks', 'billedClicks',
 ] as const;
 export type ReportMetrics = Record<(typeof reportMetrics)[number], string>;
 
@@ -44,6 +46,10 @@ export function emptyReportMetrics(): ReportMetrics {
   return Object.fromEntries(reportMetrics.map(key => [key, '0'])) as ReportMetrics;
 }
 
-export function addReportMetrics(total: ReportMetrics, row: ReportMetrics) {
-  for (const key of reportMetrics) total[key] = (BigInt(total[key]) + BigInt(row[key])).toString();
+export function addReportMetrics(total: ReportMetrics, row: Partial<ReportMetrics>) {
+  for (const key of reportMetrics) {
+    if (row[key] !== undefined) {
+      total[key] = (BigInt(total[key]) + BigInt(row[key]!)).toString();
+    }
+  }
 }

@@ -1,9 +1,14 @@
 import { sql } from 'drizzle-orm';
 
+/** Effective launch cutoff: 23 November 2026, 00:00 Africa/Lagos = 22 November 2026, 23:00:00 UTC (inclusive). */
+export const REWARDS_LAUNCH_CUTOFF_UTC = '2026-11-22T23:00:00.000Z';
+
 export interface CampaignEvidence {
   id: string;
   completed: boolean;
+  qualifying?: boolean;
   eligible: boolean;
+  preCutoffOnly?: boolean;
   clearedSpendCents: number | null;
 }
 export interface MilestoneEvidence {
@@ -11,12 +16,19 @@ export interface MilestoneEvidence {
   fundingVerified: boolean;
   tenureMonths?: number;
   complianceClean?: boolean;
+  underInvestigation?: boolean;
+  confirmedFraud?: boolean;
   campaigns: CampaignEvidence[];
 }
 
-/** A supported cash-only wallet must reconcile to verified live deposits less posted
- * ad spend. Unknown/mixed economic credits require review rather than guessed allocation.
- * All campaign, receipt and wallet facts below share one PostgreSQL statement snapshot.
+/**
+ * Authoritative single-snapshot milestone evidence reader (PLAN-0149 / PLAN-0154 / PLAN-0155).
+ * - Counts eligible cash spend whose authoritative clearance timestamp (i.cleared_at) is on or after
+ *   REWARDS_LAUNCH_CUTOFF_UTC (2026-11-22T23:00:00Z), including older campaigns created prior to launch.
+ * - Includes verified cleared spend from continuously running ('active' / 'paused') as well as 'completed'
+ *   approved cash campaigns, while excluding confirmed invalid events and bonus-credit campaigns.
+ * - Computes exact calendar-month tenure and distinguishes unresolved confirmed violations from pending
+ *   investigations (which hold only new A4 and Prestige claims per JED's Section 2 decision).
  */
 export async function readMilestoneEvidence(db: any, advertiserId: string): Promise<MilestoneEvidence> {
   const result = await db.execute(sql`
@@ -61,7 +73,7 @@ export async function readMilestoneEvidence(db: any, advertiserId: string): Prom
       SELECT c.*,u.status AS account_status FROM ads_campaigns c JOIN users u ON u.id=c.advertiser_id
       WHERE c.advertiser_id=${advertiserId}::uuid
     ), items AS (
-      SELECT i.id,i.campaign_id,i.billed_usd_cents,
+      SELECT i.id,i.campaign_id,i.billed_usd_cents,i.cleared_at,
         i.status='credited' AND i.clearance_status='cleared' AND i.cleared_at IS NOT NULL
         AND i.hold_expires_at IS NOT NULL AND i.cleared_at>=i.hold_expires_at AND i.cleared_at<=now()
         AND i.billed_usd_cents>0 AND r.type='ads_earning' AND r.provider='internal' AND r.status='completed'
@@ -114,8 +126,10 @@ export async function readMilestoneEvidence(db: any, advertiserId: string): Prom
       LEFT JOIN checked_ledger reserve ON reserve.idempotency_key='ads-escrow:v2:'||claim.escrow_id::text||':reserve:'||claim.allocated_usd_cents::text
       LEFT JOIN billing_provider_events d ON d.id::text=m.value->'clearance'->>'draftId'
     ), campaign_evidence AS (
-      SELECT c.id,c.status='completed' AS completed,
-        c.account_status='ACTIVE' AND c.status='completed' AND c.moderation_status='approved'
+      SELECT c.id,
+        c.status='completed' AS completed,
+        c.status IN ('active','paused','completed') AS qualifying,
+        c.account_status='ACTIVE' AND c.status IN ('active','paused','completed') AND c.moderation_status='approved'
         AND c.is_bonus_delivery=false AND c.current_submission_id=c.approved_submission_id
         AND c.approved_revision=c.content_revision AND c.submission_intent_id IS NULL
         AND EXISTS (SELECT 1 FROM ads_moderation_decisions md WHERE md.target_type='campaign' AND md.target_id=c.id
@@ -123,32 +137,104 @@ export async function readMilestoneEvidence(db: any, advertiserId: string): Prom
           AND md.decision='approved' AND md.stage IN ('manager','override') AND md.reviewer_id<>c.advertiser_id)
         AND coalesce((SELECT bool_and(i.verified IS TRUE) FROM items i WHERE i.campaign_id=c.id),false)
         AND NOT EXISTS (SELECT 1 FROM ads_settlement_rebates rb WHERE rb.campaign_id=c.id AND rb.status IN ('completed','pending_admin_signoff'))
-        AND NOT EXISTS (SELECT 1 FROM ads_opportunity_reservations op WHERE op.campaign_id=c.id AND NOT op.is_simulated
-          AND op.settled_at IS NULL AND op.state IN ('HELD','ISSUED','CLAIMED'))
+        AND (c.status <> 'completed' OR NOT EXISTS (SELECT 1 FROM ads_opportunity_reservations op WHERE op.campaign_id=c.id AND NOT op.is_simulated
+          AND op.settled_at IS NULL AND op.state IN ('HELD','ISSUED','CLAIMED')))
         AS eligible,
-        coalesce((SELECT sum(i.billed_usd_cents) FROM items i WHERE i.campaign_id=c.id AND i.verified IS TRUE),0)::text AS cleared_spend
+        coalesce((
+          SELECT sum(i.billed_usd_cents)
+          FROM items i
+          WHERE i.campaign_id=c.id
+            AND i.verified IS TRUE
+            AND i.cleared_at >= ${REWARDS_LAUNCH_CUTOFF_UTC}::timestamptz
+        ),0)::text AS cleared_spend
       FROM campaigns c
     )
-    SELECT (SELECT count(*)::text FROM campaigns) AS total,coalesce((SELECT verified FROM cash_wallet),false) AS funding_verified,
-      coalesce((SELECT FLOOR(EXTRACT(EPOCH FROM (now() - coalesce((to_jsonb(u)->>'created_at')::timestamptz, now()))) / (30.4375 * 86400))::int FROM users u WHERE u.id=${advertiserId}::uuid LIMIT 1), 0) AS tenure_months,
+    SELECT (SELECT count(*)::text FROM campaigns) AS total,
+      coalesce((SELECT verified FROM cash_wallet),false) AS funding_verified,
+      coalesce((
+        SELECT (EXTRACT(YEAR FROM age(now(), coalesce((to_jsonb(u)->>'created_at')::timestamptz, now())))::int * 12
+              + EXTRACT(MONTH FROM age(now(), coalesce((to_jsonb(u)->>'created_at')::timestamptz, now())))::int)
+        FROM users u WHERE u.id=${advertiserId}::uuid LIMIT 1
+      ), 0) AS tenure_months,
       coalesce((SELECT u.status = 'ACTIVE' FROM users u WHERE u.id=${advertiserId}::uuid LIMIT 1), false)
-        AND NOT EXISTS (SELECT 1 FROM campaigns c JOIN ads_settlement_rebates rb ON rb.campaign_id=c.id WHERE rb.status IN ('completed','pending_admin_signoff'))
+        AND NOT EXISTS (SELECT 1 FROM campaigns c JOIN ads_settlement_rebates rb ON rb.campaign_id=c.id WHERE rb.status='completed')
         AND NOT EXISTS (SELECT 1 FROM campaigns c WHERE c.status='suspended')
         AS compliance_clean,
-      coalesce(jsonb_agg(jsonb_build_object('id',id,'completed',completed,'eligible',eligible,'clearedSpend',cleared_spend)),'[]'::jsonb) AS campaigns
+      EXISTS (SELECT 1 FROM campaigns c JOIN ads_settlement_rebates rb ON rb.campaign_id=c.id WHERE rb.status='pending_admin_signoff') AS rebate_under_investigation,
+      (
+        EXISTS (SELECT 1 FROM campaigns c JOIN ads_settlement_rebates rb ON rb.campaign_id=c.id WHERE rb.status='completed')
+        OR EXISTS (SELECT 1 FROM campaigns c WHERE c.status='suspended')
+      ) AS confirmed_fraud,
+      coalesce(jsonb_agg(jsonb_build_object('id',id,'completed',completed,'qualifying',qualifying,'eligible',eligible,'clearedSpend',cleared_spend)),'[]'::jsonb) AS campaigns
     FROM campaign_evidence
   `);
   const row = result.rows[0];
+
+  // Check optional compliance alert/dispute tables via to_regclass first so missing tables in minimal
+  // schema test fixtures NEVER raise a SQL error that aborts an enclosing PostgreSQL transaction!
+  let alertInvestigation = false;
+  let disputeViolation = false;
+  const regRes = await db.execute(sql`
+    SELECT
+      to_regclass('public.platform_admin_silent_alerts') IS NOT NULL AS has_alerts,
+      to_regclass('public.ads_disputes') IS NOT NULL AS has_disputes
+  `);
+  const reg = (regRes.rows ?? regRes)[0] ?? {};
+  if (reg.has_alerts === true) {
+    const alertRes = await db.execute(sql`
+      SELECT EXISTS (
+        SELECT 1 FROM platform_admin_silent_alerts a
+        WHERE a.advertiser_id = ${advertiserId}::uuid
+          AND a.category = 'compliance_flag'
+          AND a.status = 'open'
+      ) AS flag_open
+    `);
+    alertInvestigation = Boolean((alertRes.rows ?? alertRes)[0]?.flag_open);
+  }
+  if (reg.has_disputes === true) {
+    const dispRes = await db.execute(sql`
+      SELECT
+        EXISTS (
+          SELECT 1 FROM ads_disputes d
+          JOIN ads_campaigns c ON c.id = d.campaign_id
+          WHERE c.advertiser_id = ${advertiserId}::uuid
+            AND d.status IN ('open', 'under_review')
+        ) AS disp_open,
+        EXISTS (
+          SELECT 1 FROM ads_disputes d
+          JOIN ads_campaigns c ON c.id = d.campaign_id
+          WHERE c.advertiser_id = ${advertiserId}::uuid
+            AND d.role = 'promoter'
+            AND d.status = 'resolved_upheld'
+        ) AS disp_upheld
+    `);
+    const dr = (dispRes.rows ?? dispRes)[0] ?? {};
+    alertInvestigation = alertInvestigation || dr.disp_open === true;
+    disputeViolation = dr.disp_upheld === true;
+  }
+
+  const confirmedFraud = row.confirmed_fraud === true || disputeViolation;
+  const complianceClean = row.compliance_clean === true && !disputeViolation;
+  const underInvestigation = row.rebate_under_investigation === true || alertInvestigation;
+
   return {
-    totalCampaigns: Number(row.total), fundingVerified: row.funding_verified === true,
+    totalCampaigns: Number(row.total),
+    fundingVerified: row.funding_verified === true,
     tenureMonths: Number(row.tenure_months ?? 0),
-    complianceClean: row.compliance_clean === true,
+    complianceClean,
+    underInvestigation,
+    confirmedFraud,
     campaigns: row.campaigns.map((campaign: any) => {
       const cents = Number(campaign.clearedSpend);
       const safe = Number.isSafeInteger(cents) && cents >= 0;
-      return { id: campaign.id, completed: campaign.completed === true,
+      return {
+        id: campaign.id,
+        completed: campaign.completed === true,
+        qualifying: campaign.qualifying === true,
         eligible: row.funding_verified === true && campaign.eligible === true && safe && cents > 0,
-        clearedSpendCents: safe ? cents : null };
+        preCutoffOnly: row.funding_verified === true && campaign.eligible === true && safe && cents === 0,
+        clearedSpendCents: safe ? cents : null,
+      };
     }),
   };
 }
