@@ -662,11 +662,11 @@ export class DeliveryService {
       trigger.setAttribute('data-cf-rating-trigger', 'true');
       trigger.setAttribute('aria-label', 'Ads by CrimFig — Rate this advert');
       trigger.setAttribute('aria-expanded', 'false');
-      trigger.style.cssText = 'position:absolute;top:4px;right:4px;z-index:6;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;border:1px solid rgba(255,255,255,0.16);background:rgba(23,27,42,0.56);color:#FFFFFF;font:600 10px/1.2 Poppins,Arial,sans-serif;cursor:pointer;opacity:0.72;transition:opacity 0.15s ease,background-color 0.15s ease;';
+      trigger.style.cssText = 'position:absolute;top:4px;right:4px;z-index:6;display:inline-flex;align-items:center;gap:4px;padding:2px 7px;border-radius:999px;border:1px solid #CBD5E1;background:rgba(255,255,255,0.92);color:#171B2A;font:600 10px/1.2 Poppins,Arial,sans-serif;cursor:pointer;opacity:0.88;transition:opacity 0.15s ease,background-color 0.15s ease;';
       var dot = document.createElement('span');
       dot.setAttribute('data-cf-attribution-icon', 'true');
       dot.textContent = 'i';
-      dot.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:999px;background:rgba(255,255,255,0.72);color:#475569;font-size:9px;font-weight:700;transition:background-color 0.15s ease,color 0.15s ease;';
+      dot.style.cssText = 'display:inline-flex;align-items:center;justify-content:center;width:12px;height:12px;border-radius:999px;background:#E2E8F0;color:#171B2A;font-size:9px;font-weight:700;transition:background-color 0.15s ease,color 0.15s ease;';
       var attrLabel = document.createElement('span');
       attrLabel.setAttribute('data-cf-attribution-label', 'true');
       attrLabel.textContent = 'Ads by CrimFig';
@@ -676,18 +676,19 @@ export class DeliveryService {
 
       var overlay = document.createElement('div');
       overlay.setAttribute('data-cf-rating-overlay', 'true');
+      overlay.setAttribute('data-cf-rating-theme', 'light');
       overlay.setAttribute('role', 'dialog');
       overlay.setAttribute('aria-label', 'Rate this advert');
       overlay.tabIndex = -1;
-      overlay.style.cssText = "display:none;position:absolute;inset:0;z-index:10;background:rgba(23,27,42,0.96);color:#FFFFFF;font-family:'Poppins',Arial,Helvetica,sans-serif;padding:6px 8px;box-sizing:border-box;flex-direction:column;align-items:center;justify-content:center;gap:5px;text-align:center;overflow:hidden;";
+      overlay.style.cssText = "display:none;position:absolute;inset:0;z-index:10;background:rgba(255,255,255,0.97);border:1px solid #E2E8F0;color:#171B2A;font-family:'Poppins',Arial,Helvetica,sans-serif;padding:6px 8px;box-sizing:border-box;flex-direction:column;align-items:center;justify-content:center;gap:5px;text-align:center;overflow:hidden;";
       overlay.addEventListener('click', function(ev) { ev.stopPropagation(); });
 
       var brandHeader = document.createElement('div');
-      brandHeader.style.cssText = 'font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#94a3b8;line-height:1.1;';
+      brandHeader.style.cssText = 'font-size:9px;font-weight:700;letter-spacing:0.05em;text-transform:uppercase;color:#475569;line-height:1.1;';
       brandHeader.textContent = 'Ads by CrimFig';
       var titleEl = document.createElement('div');
       titleEl.setAttribute('data-cf-rating-title', 'true');
-      titleEl.style.cssText = 'font-size:12px;font-weight:700;color:#FFFFFF;line-height:1.2;';
+      titleEl.style.cssText = 'font-size:12px;font-weight:700;color:#171B2A;line-height:1.2;';
       titleEl.textContent = 'Rate this advert:';
 
       var choicesRow = document.createElement('div');
@@ -696,19 +697,19 @@ export class DeliveryService {
 
       var statusEl = document.createElement('div');
       statusEl.setAttribute('data-cf-rating-status', 'true');
-      statusEl.style.cssText = 'font-size:10px;color:#cbd5e1;min-height:12px;line-height:1.2;';
+      statusEl.style.cssText = 'font-size:10px;color:#475569;min-height:12px;line-height:1.2;';
 
       var closeBtn = document.createElement('button');
       closeBtn.type = 'button';
       closeBtn.setAttribute('data-cf-rating-close', 'true');
       closeBtn.textContent = 'Cancel';
-      closeBtn.style.cssText = 'padding:3px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.24);background:transparent;color:#e2e8f0;font:600 11px/1.2 Poppins,Arial,sans-serif;cursor:pointer;';
+      closeBtn.style.cssText = 'padding:3px 10px;border-radius:6px;border:1px solid #CBD5E1;background:#F8FAFC;color:#171B2A;font:600 11px/1.2 Poppins,Arial,sans-serif;cursor:pointer;';
 
       var selectedRating = null;
       var ratingOptions = [
-        { id: 'love', label: 'Love it', color: '#D4143A', pathD: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z' },
-        { id: 'like', label: 'Like it', color: '#2563EB', pathD: 'M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L13.17 1 6.59 7.59C6.22 7.95 6 8.45 6 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z' },
-        { id: 'dislike', label: 'Dislike it', color: '#DC2626', pathD: 'M22 3h-4v12h4V3zM15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L10.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2z' }
+        { id: 'love', label: 'Love it', color: '#D4143A', activeBg: 'rgba(212,20,58,0.08)', pathD: 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z' },
+        { id: 'like', label: 'Like it', color: '#2563EB', activeBg: 'rgba(37,99,235,0.08)', pathD: 'M2 21h4V9H2v12zm20-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L13.17 1 6.59 7.59C6.22 7.95 6 8.45 6 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z' },
+        { id: 'dislike', label: 'Dislike it', color: '#DC2626', activeBg: 'rgba(220,38,38,0.08)', pathD: 'M22 3h-4v12h4V3zM15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L10.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2z' }
       ];
       var optionButtons = [];
       ratingOptions.forEach(function(opt) {
@@ -716,7 +717,7 @@ export class DeliveryService {
         btn.type = 'button';
         btn.setAttribute('data-cf-rate', opt.id);
         btn.setAttribute('aria-pressed', 'false');
-        btn.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:6px;border:1px solid rgba(255,255,255,0.2);background:rgba(255,255,255,0.08);color:#FFFFFF;font:600 11px/1.2 Poppins,Arial,sans-serif;cursor:pointer;';
+        btn.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:6px;border:1px solid #CBD5E1;background:#FFFFFF;color:#171B2A;font:600 11px/1.2 Poppins,Arial,sans-serif;cursor:pointer;';
         btn.appendChild(makeIcon(opt.pathD, opt.color));
         var labelSpan = document.createElement('span');
         labelSpan.textContent = opt.label;
@@ -728,8 +729,8 @@ export class DeliveryService {
           optionButtons.forEach(function(pair) {
             var active = pair.id === opt.id;
             pair.el.setAttribute('aria-pressed', active ? 'true' : 'false');
-            pair.el.style.borderColor = active ? opt.color : 'rgba(255,255,255,0.2)';
-            pair.el.style.background = active ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.08)';
+            pair.el.style.borderColor = active ? opt.color : '#CBD5E1';
+            pair.el.style.background = active ? opt.activeBg : '#FFFFFF';
           });
           statusEl.textContent = 'Thanks for rating this advert.';
           closeBtn.textContent = 'Close';
@@ -749,7 +750,7 @@ export class DeliveryService {
           overlay.setAttribute('data-cf-disliked-hidden', 'true');
           overlay.innerHTML = '';
           var hiddenNotice = document.createElement('div');
-          hiddenNotice.style.cssText = 'font-size:11px;font-weight:600;color:#cbd5e1;padding:4px 8px;';
+          hiddenNotice.style.cssText = 'font-size:11px;font-weight:600;color:#475569;padding:4px 8px;';
           hiddenNotice.textContent = 'Thanks for your feedback — this ad has been hidden.';
           overlay.appendChild(hiddenNotice);
           overlay.style.display = 'flex';
@@ -777,17 +778,17 @@ export class DeliveryService {
       function showAttribution() {
         attrLabel.style.display = 'inline';
         trigger.style.opacity = '1';
-        trigger.style.background = 'rgba(23,27,42,0.88)';
-        dot.style.background = '#FFFFFF';
-        dot.style.color = '#171B2A';
+        trigger.style.background = '#FFFFFF';
+        dot.style.background = '#171B2A';
+        dot.style.color = '#FFFFFF';
       }
       function hideAttribution() {
         if (document.activeElement !== trigger && overlay.style.display !== 'flex') {
           attrLabel.style.display = 'none';
-          trigger.style.opacity = '0.72';
-          trigger.style.background = 'rgba(23,27,42,0.56)';
-          dot.style.background = 'rgba(255,255,255,0.72)';
-          dot.style.color = '#475569';
+          trigger.style.opacity = '0.88';
+          trigger.style.background = 'rgba(255,255,255,0.92)';
+          dot.style.background = '#E2E8F0';
+          dot.style.color = '#171B2A';
         }
       }
       hostCard.addEventListener('pointerenter', showAttribution);

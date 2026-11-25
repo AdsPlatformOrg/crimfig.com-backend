@@ -197,14 +197,18 @@ test('PLAN0134 SDK DOM: hover reveals Ads by CrimFig, rating overlay offers Love
     card.dispatchEvent(new win.Event('mouseenter'));
     expect(label.style.display).toBe('inline');
 
-    // Clicking trigger opens "Rate this advert:" overlay with required icons
+    // Clicking trigger opens light-themed "Rate this advert:" overlay with required icons
     trigger.click();
     expect(overlay.style.display).toBe('flex');
+    expect(overlay.getAttribute('data-cf-rating-theme')).toBe('light');
+    expect(overlay.style.cssText).toContain('rgba(255, 255, 255');
+    expect(overlay.style.cssText).not.toContain('rgba(23,27,42');
     expect(overlay.querySelector('[data-cf-rating-title="true"]').textContent).toBe('Rate this advert:');
     const loveBtn = overlay.querySelector('[data-cf-rate="love"]');
     const likeBtn = overlay.querySelector('[data-cf-rate="like"]');
     const dislikeBtn = overlay.querySelector('[data-cf-rate="dislike"]');
     const closeBtn = overlay.querySelector('[data-cf-rating-close="true"]');
+    expect(loveBtn.style.color).toBe('rgb(23, 27, 42)');
     expect(loveBtn.querySelector('svg').getAttribute('data-cf-icon-color')).toBe('#D4143A');
     expect(likeBtn.querySelector('svg').getAttribute('data-cf-icon-color')).toBe('#2563EB');
     expect(dislikeBtn.querySelector('svg').getAttribute('data-cf-icon-color')).toBe('#DC2626');
