@@ -6,7 +6,7 @@ const tick = async () => {
   await new Promise((done) => setImmediate(done));
 };
 
-test('PLAN0134 corner attribution icon uses muted white at rest (never warning red) and full white on interaction', async () => {
+test('PLAN0134 corner attribution icon uses clean light surface at rest (never warning red) and high contrast on interaction', async () => {
   const previous = process.env.ADS_PUBLIC_URL;
   process.env.ADS_PUBLIC_URL = 'https://ads.example.test';
   const dom = new JSDOM(
@@ -50,22 +50,23 @@ test('PLAN0134 corner attribution icon uses muted white at rest (never warning r
 
     // Negative: must NOT use crimson/warning red (#D4143A / rgb(212, 20, 58))
     expect(dot.style.background).not.toMatch(/212,\s*20,\s*58|#d4143a/i);
-    expect(dot.style.background).toContain('rgba(255, 255, 255, 0.72)');
-    expect(trigger.style.opacity).toBe('0.72');
+    expect(dot.style.background).toMatch(/#e2e8f0|rgb\(226,\s*232,\s*240\)/i);
+    expect(trigger.style.opacity).toBe('0.88');
     expect(label.style.display).toBe('none');
 
-    // Interaction (hover) elevates to crisp white icon and full opacity
+    // Interaction (hover) elevates to crisp light pill, dark icon circle, and full opacity
     const card = trigger.parentElement;
     card.dispatchEvent(new win.Event('mouseenter'));
     expect(label.style.display).toBe('inline');
     expect(trigger.style.opacity).toBe('1');
-    expect(dot.style.background).toMatch(/#ffffff|rgb\(255,\s*255,\s*255\)/i);
+    expect(trigger.style.background).toMatch(/#ffffff|rgb\(255,\s*255,\s*255\)/i);
+    expect(dot.style.background).toMatch(/#171b2a|rgb\(23,\s*27,\s*42\)/i);
 
     // Leaving card returns to muted resting state
     card.dispatchEvent(new win.Event('mouseleave'));
     expect(label.style.display).toBe('none');
-    expect(trigger.style.opacity).toBe('0.72');
-    expect(dot.style.background).toContain('rgba(255, 255, 255, 0.72)');
+    expect(trigger.style.opacity).toBe('0.88');
+    expect(dot.style.background).toMatch(/#e2e8f0|rgb\(226,\s*232,\s*240\)/i);
   } finally {
     win.close();
     if (previous === undefined) delete process.env.ADS_PUBLIC_URL;
