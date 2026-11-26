@@ -1,4 +1,4 @@
-import { IsString, IsUUID, IsIn, IsOptional, MinLength, MaxLength, IsBoolean } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsString, IsUUID, IsIn, IsOptional, MinLength, MaxLength, IsBoolean } from 'class-validator';
 import { SUPPORT_CATEGORIES, SUPPORT_STATUSES } from './support-policy';
 export class CreateSupportDto {
  @IsUUID() requestId!: string;
@@ -12,6 +12,10 @@ export class ReplySupportDto {
 }
 export class StaffReplySupportDto extends ReplySupportDto {
  @IsBoolean() internal!: boolean;
+}
+export class ReadSupportMessagesDto {
+ @IsArray() @ArrayMinSize(1) @ArrayMaxSize(500) @IsUUID('4', { each: true })
+ messageIds!: string[];
 }
 export class UpdateSupportDto {
  @IsOptional() @IsIn(SUPPORT_STATUSES) status?: string;

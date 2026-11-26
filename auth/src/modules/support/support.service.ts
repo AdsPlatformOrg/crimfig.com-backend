@@ -55,6 +55,29 @@ export class SupportService {
     OR (${query.queue??null}='waiting' AND status='waiting_on_user') OR (${query.queue??null}='resolved' AND status IN ('resolved','closed')))
    ORDER BY updated_at DESC,id LIMIT 50 OFFSET ${offset}`)).rows;
  }
+ async unreadCount(staffId: string) {
+  await this.requireStaff(staffId);
+  const { rows } = await this.db.execute<{ count: number }>(sql`
+    SELECT count(*)::int AS count FROM support_messages AS message
+    WHERE NOT message.is_staff_reply AND NOT message.is_internal_note
+      AND NOT EXISTS (
+        SELECT 1 FROM support_staff_message_reads AS receipt
+        WHERE receipt.staff_id = ${staffId}::uuid AND receipt.message_id = message.id
+      )
+  `);
+  return rows[0].count;
+ }
+ async markRead(staffId: string, ticketId: string, messageIds: string[]) {
+  await this.requireStaff(staffId);
+  await this.db.execute(sql`
+    INSERT INTO support_staff_message_reads (staff_id, message_id)
+    SELECT ${staffId}::uuid, message.id FROM support_messages AS message
+    WHERE message.ticket_id = ${ticketId}::uuid
+      AND message.id IN (${sql.join(messageIds.map(id => sql`${id}::uuid`), sql`, `)})
+      AND NOT message.is_staff_reply AND NOT message.is_internal_note
+    ON CONFLICT DO NOTHING
+  `);
+ }
  async detail(userId: string,id: string,staff=false): Promise<Record<string, any>> {
   if(staff) await this.requireStaff(userId);
   const ticket=(await this.db.execute<any>(sql`SELECT ${ticketColumns} FROM support_tickets WHERE id=${id}::uuid AND (${staff} OR user_id=${userId}::uuid)`)).rows[0];
