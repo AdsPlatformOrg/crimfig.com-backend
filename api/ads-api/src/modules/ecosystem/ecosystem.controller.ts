@@ -67,7 +67,7 @@ export class EcosystemController {
           },
           {
             name: 'Love for Customers & Partners',
-            summary: 'Radical empathy in user experience: transparent fee breakdowns, no punitive error messaging, zero metric fabrication, and verified 55/30/15 publisher splits.',
+            summary: 'Radical empathy in user experience: transparent fee breakdowns, no punitive error messaging, zero metric fabrication, and verified publisher earnings.',
           },
           {
             name: 'Love for the Team & Village',
@@ -80,7 +80,7 @@ export class EcosystemController {
         ],
         commitments: {
           metricIntegrity: 'Zero synthetic impressions, zero fabricated view counts. Advertisers pay solely for verified human delivery.',
-          creatorShare: '55% publisher revenue share on network campaigns with 72-hour fraud clearance protection.',
+          creatorShare: 'Verified publisher earnings on network campaigns with 72-hour fraud clearance protection.',
           supportPromise: 'No human treated as an anonymous ticket; honest, compassionate resolution on every inquiry.',
         },
       },
@@ -101,7 +101,7 @@ export class EcosystemController {
           invalidTrafficFilteredRate: '0.6%',
           averagePayoutSettlementHours: 72,
           disputeResolutionRate: '98.8%',
-          revenueShareModel: '55% Publisher / 30% CrimFig / 15% Dynamic Pool',
+          revenueShareModel: 'Performance-Based Verified Publisher Settlement',
         },
       },
     };
